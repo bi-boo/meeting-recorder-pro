@@ -1,0 +1,221 @@
+//
+//  SimpleRecorderApp.swift
+//  极简录音 - Mac 菜单栏录音应用
+//
+//  Created by AI Assistant
+//
+
+import SwiftUI
+
+@main
+struct SimpleRecorderApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
+    var body: some Scene {
+        // 纯菜单栏应用，使用 WindowGroup 但不显示主窗口
+        WindowGroup {
+            EmptyView()
+                .frame(width: 0, height: 0)
+                .hidden()
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 0, height: 0)
+    }
+}
+
+// MARK: - App Delegate
+class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem!
+    private var recordingManager = AudioRecorderManager.shared
+    private var hotKeyManager = HotKeyManager.shared
+    private var animationTimer: Timer?
+    private var recordingStartTime: Date?
+    
+    // 保持窗口引用，防止被释放
+    private var mainWindow: NSWindow?
+    
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        setupStatusItem()
+        setupHotKey()
+        
+        // 隐藏默认的空窗口
+        DispatchQueue.main.async {
+            for window in NSApp.windows {
+                if window.title.isEmpty || window.contentView is NSHostingView<EmptyView> {
+                    window.close()
+                }
+            }
+        }
+        
+        // 监听录音状态变化
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(recordingStateChanged),
+            name: .recordingStateChanged,
+            object: nil
+        )
+    }
+    
+    // MARK: - Status Item Setup
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "mic.circle", accessibilityDescription: "极简录音")
+            button.image?.isTemplate = true
+        }
+        
+        setupMenu()
+    }
+    
+    private func setupMenu() {
+        let menu = NSMenu()
+        
+        // 录音控制
+        let recordItem = NSMenuItem(title: "开始录音", action: #selector(toggleRecording), keyEquivalent: "r")
+        recordItem.keyEquivalentModifierMask = [.command, .shift]
+        recordItem.target = self
+        menu.addItem(recordItem)
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        // 打开主窗口（包含录音列表和设置）
+        let mainWindowItem = NSMenuItem(title: "打开极简录音", action: #selector(showMainWindow), keyEquivalent: "o")
+        mainWindowItem.keyEquivalentModifierMask = .command
+        mainWindowItem.target = self
+        menu.addItem(mainWindowItem)
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        // 退出
+        let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
+        quitItem.keyEquivalentModifierMask = .command
+        quitItem.target = self
+        menu.addItem(quitItem)
+        
+        statusItem.menu = menu
+    }
+    
+    // MARK: - Actions
+    @objc func toggleRecording() {
+        if recordingManager.isRecording {
+            recordingManager.stopRecording()
+        } else {
+            recordingManager.startRecording()
+        }
+        updateMenuRecordingState(isRecording: recordingManager.isRecording)
+    }
+    
+    @objc private func showMainWindow() {
+        // 如果主窗口已存在，直接显示
+        if let window = mainWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 550),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "极简录音"
+        window.contentView = NSHostingView(rootView: MainWindowView())
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        window.isReleasedWhenClosed = false
+        
+        mainWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    @objc private func quitApp() {
+        NSApplication.shared.terminate(nil)
+    }
+    
+    // MARK: - Recording State Animation
+    @objc private func recordingStateChanged() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            if self.recordingManager.isRecording {
+                self.startRecordingTimer()
+                self.updateMenuRecordingState(isRecording: true)
+            } else {
+                self.stopRecordingTimer()
+                self.updateMenuRecordingState(isRecording: false)
+            }
+        }
+    }
+    
+    private func startRecordingTimer() {
+        animationTimer?.invalidate()
+        recordingStartTime = Date()
+        
+        // 每秒更新一次计时器
+        updateStatusBarTimer()
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateStatusBarTimer()
+        }
+    }
+    
+    private func updateStatusBarTimer() {
+        guard let startTime = recordingStartTime else { return }
+        let elapsed = Int(Date().timeIntervalSince(startTime))
+        
+        let hours = elapsed / 3600
+        let minutes = (elapsed % 3600) / 60
+        let seconds = elapsed % 60
+        
+        let timeString: String
+        if hours > 0 {
+            timeString = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            timeString = String(format: "%02d:%02d", minutes, seconds)
+        }
+        
+        if let button = statusItem.button {
+            // 使用麦克风图标 + 时间文字
+            let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "录音中")
+            image?.isTemplate = true
+            button.image = image
+            button.title = " \(timeString)"
+            button.imagePosition = .imageLeading
+        }
+    }
+    
+    private func stopRecordingTimer() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+        recordingStartTime = nil
+        
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "mic.circle", accessibilityDescription: "极简录音")
+            button.image?.isTemplate = true
+            button.title = ""
+        }
+    }
+    
+    private func updateMenuRecordingState(isRecording: Bool) {
+        if let menu = statusItem.menu, let recordItem = menu.items.first {
+            recordItem.title = isRecording ? "停止录音" : "开始录音"
+        }
+    }
+    
+    // MARK: - Hot Key Setup
+    private func setupHotKey() {
+        hotKeyManager.onHotKeyPressed = { [weak self] in
+            DispatchQueue.main.async {
+                self?.toggleRecording()
+            }
+        }
+        hotKeyManager.registerHotKey()
+    }
+}
+
+// MARK: - Notification Names
+extension Notification.Name {
+    static let recordingStateChanged = Notification.Name("recordingStateChanged")
+}
+
