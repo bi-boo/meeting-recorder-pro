@@ -21,6 +21,7 @@
 		012 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114; };
 		013 /* SummaryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115; };
 		014 /* AISummaryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116; };
+		015 /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +42,7 @@
 		114 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
 		115 /* SummaryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryManager.swift; sourceTree = "<group>"; };
 		116 /* AISummaryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISummaryService.swift; sourceTree = "<group>"; };
+		117 /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -111,6 +113,7 @@
 				107 /* SettingsView.swift */,
 				108 /* RecordingsListView.swift */,
 				114 /* MainWindowView.swift */,
+				117 /* TimelineView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -216,6 +219,7 @@
 				012 /* MainWindowView.swift in Sources */,
 				013 /* SummaryManager.swift in Sources */,
 				014 /* AISummaryService.swift in Sources */,
+				015 /* TimelineView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

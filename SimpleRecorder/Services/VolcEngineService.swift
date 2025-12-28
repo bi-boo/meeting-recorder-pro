@@ -13,7 +13,7 @@ class VolcEngineService {
     // API 端点
     private let submitURL = URL(string: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit")!
     private let queryURL = URL(string: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query")!
-    private let resourceId = "volc.seedasr.auc"
+    private let resourceId = "volc.seedasr.auc"  // 模型 2.0 系列，配合 model_version=400
     
     // 轮询配置
     private let pollInterval: TimeInterval = 5
@@ -53,6 +53,19 @@ class VolcEngineService {
         if !settings.modelVersion.isEmpty {
             requestParams["model_version"] = settings.modelVersion
         }
+        
+        // 调试：将高级功能设置状态写入日志文件
+        let debugLogPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("极简录音/debug_volcengine.log")
+        let debugInfo = """
+        \n=== 火山引擎转写参数调试 [\(Date())] ===
+          - enableSpeakerInfo: \(settings.enableSpeakerInfo)
+          - enableEmotionDetection: \(settings.enableEmotionDetection)
+          - enableGenderDetection: \(settings.enableGenderDetection)
+          - 请求参数: \(requestParams)
+        """
+        try? debugInfo.write(to: debugLogPath, atomically: true, encoding: .utf8)
+        print(debugInfo)
         
         let payload: [String: Any] = [
             "user": ["uid": "simple-recorder-app"],
@@ -179,26 +192,79 @@ class VolcEngineService {
         
         var utterances: [TranscriptionResult.Utterance]?
         if let uttArray = textResult?["utterances"] as? [[String: Any]] {
+            // 调试：打印第一个 utterance 的详细解析过程
+            if let firstUtt = uttArray.first {
+                var returnDebug = "\n\n=== [DEBUG] Utterance 解析详情 [\(Date())] ===\n"
+                let additions = firstUtt["additions"] as? [String: Any]
+                
+                let rawSpeaker = additions?["speaker"]
+                let rawGender = additions?["gender"]
+                let rawEmotion = additions?["emotion"]
+                let rawSpeechRate = additions?["speech_rate"]
+                
+                returnDebug += "  - 原始 speaker: \(String(describing: rawSpeaker)) (类型: \(type(of: rawSpeaker)))\n"
+                returnDebug += "  - 原始 gender: \(String(describing: rawGender)) (类型: \(type(of: rawGender)))\n"
+                returnDebug += "  - 原始 emotion: \(String(describing: rawEmotion)) (类型: \(type(of: rawEmotion)))\n"
+                returnDebug += "  - 原始 speech_rate: \(String(describing: rawSpeechRate)) (类型: \(type(of: rawSpeechRate)))\n"
+                
+                let parsedSpeaker = toInt(rawSpeaker)
+                let parsedSpeechRate = toDouble(rawSpeechRate)
+                
+                returnDebug += "  - 解析后 speaker: \(String(describing: parsedSpeaker))\n"
+                returnDebug += "  - 解析后 speech_rate: \(String(describing: parsedSpeechRate))\n"
+                
+                // 追加写入日志文件
+                let debugLogPath = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("极简录音/debug_volcengine.log")
+                if let existing = try? String(contentsOf: debugLogPath, encoding: .utf8) {
+                    try? (existing + returnDebug).write(to: debugLogPath, atomically: true, encoding: .utf8)
+                }
+                print(returnDebug)
+            }
+            
             utterances = uttArray.compactMap { utt -> TranscriptionResult.Utterance? in
                 guard let text = utt["text"] as? String else { return nil }
                 let additions = utt["additions"] as? [String: Any]
                 
+                // 增强数字解析鲁棒性
+                let speaker = toInt(additions?["speaker"])
+                let speechRate = toDouble(additions?["speech_rate"])
+                
                 return TranscriptionResult.Utterance(
                     text: text,
-                    startTime: utt["start_time"] as? Int ?? 0,
-                    endTime: utt["end_time"] as? Int ?? 0,
-                    speakerId: additions?["speaker_id"] as? String,
-                    emotion: additions?["emotion"] as? String
+                    startTime: toInt(utt["start_time"]) ?? 0,
+                    endTime: toInt(utt["end_time"]) ?? 0,
+                    speaker: speaker,
+                    emotion: additions?["emotion"] as? String,
+                    gender: additions?["gender"] as? String,
+                    speechRate: speechRate
                 )
             }
         }
         
         var audioInfo: TranscriptionResult.AudioInfo?
-        if let info = json["audio_info"] as? [String: Any], let duration = info["duration"] as? Int {
+        if let info = json["audio_info"] as? [String: Any] {
+            let duration = toInt(info["duration"]) ?? 0
             audioInfo = TranscriptionResult.AudioInfo(duration: duration)
         }
         
         return TranscriptionResult(text: fullText, utterances: utterances, audioInfo: audioInfo)
+    }
+    
+    // MARK: - Numeric Helpers
+    private func toInt(_ value: Any?) -> Int? {
+        if let n = value as? NSNumber { return n.intValue }
+        if let i = value as? Int { return i }
+        if let s = value as? String { return Int(s) }
+        return nil
+    }
+
+    private func toDouble(_ value: Any?) -> Double? {
+        if let n = value as? NSNumber { return n.doubleValue }
+        if let d = value as? Double { return d }
+        if let i = value as? Int { return Double(i) }
+        if let s = value as? String { return Double(s) }
+        return nil
     }
     
     // MARK: - Helpers

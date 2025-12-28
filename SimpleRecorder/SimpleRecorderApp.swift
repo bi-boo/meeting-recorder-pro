@@ -54,6 +54,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .recordingStateChanged,
             object: nil
         )
+        
+        // 监听打开设置窗口的通知
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showMainWindow),
+            name: .openSettingsWindow,
+            object: nil
+        )
+        
+        // 延迟检查崩溃恢复（确保 UI 完全加载）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.recordingManager.checkForCrashedRecording()
+        }
+    }
+    
+    /// 退出前检查是否正在录音，确保保存
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // 如果正在录音，先保存
+        if recordingManager.isRecording {
+            // 弹出确认对话框
+            let alert = NSAlert()
+            alert.messageText = "正在录音中"
+            alert.informativeText = "退出应用将自动保存当前录音。确定要退出吗？"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "保存并退出")
+            alert.addButton(withTitle: "取消")
+            
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                // 用户确认退出，先保存录音
+                recordingManager.saveRecordingImmediately()
+                return .terminateNow
+            } else {
+                // 用户取消退出
+                return .terminateCancel
+            }
+        }
+        
+        return .terminateNow
     }
     
     // MARK: - Status Item Setup
@@ -217,5 +256,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - Notification Names
 extension Notification.Name {
     static let recordingStateChanged = Notification.Name("recordingStateChanged")
+    static let openSettingsWindow = Notification.Name("openSettingsWindow")
 }
 

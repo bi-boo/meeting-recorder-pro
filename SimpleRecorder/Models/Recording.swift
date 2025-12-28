@@ -13,6 +13,9 @@ struct Recording: Identifiable, Equatable {
     let duration: TimeInterval?
     let fileSize: Int64
     
+    // 从文件名解析的录音时间（用于时间轴定位）
+    let recordingDate: Date
+    
     init(url: URL) {
         self.id = url.path
         self.url = url
@@ -24,6 +27,61 @@ struct Recording: Identifiable, Equatable {
         
         // 获取音频时长
         self.duration = Recording.getAudioDuration(url: url)
+        
+        // 从文件名解析录音时间
+        self.recordingDate = Recording.parseRecordingDate(from: url.lastPathComponent) ?? self.createdAt
+    }
+    
+    // MARK: - 从文件名解析时间
+    /// 解析文件名中的日期，格式：录音_yyyy-MM-dd_HHmm.m4a
+    static func parseRecordingDate(from fileName: String) -> Date? {
+        // 正则匹配：录音_2024-12-28_1402.m4a
+        let pattern = #"(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: fileName, range: NSRange(fileName.startIndex..., in: fileName)) else {
+            return nil
+        }
+        
+        // 提取各时间组件
+        guard let yearRange = Range(match.range(at: 1), in: fileName),
+              let monthRange = Range(match.range(at: 2), in: fileName),
+              let dayRange = Range(match.range(at: 3), in: fileName),
+              let hourRange = Range(match.range(at: 4), in: fileName),
+              let minuteRange = Range(match.range(at: 5), in: fileName),
+              let year = Int(fileName[yearRange]),
+              let month = Int(fileName[monthRange]),
+              let day = Int(fileName[dayRange]),
+              let hour = Int(fileName[hourRange]),
+              let minute = Int(fileName[minuteRange]) else {
+            return nil
+        }
+        
+        // 构建日期
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = hour
+        components.minute = minute
+        
+        return Calendar.current.date(from: components)
+    }
+    
+    // MARK: - 时间轴组件
+    var year: Int {
+        Calendar.current.component(.year, from: recordingDate)
+    }
+    
+    var month: Int {
+        Calendar.current.component(.month, from: recordingDate)
+    }
+    
+    var day: Int {
+        Calendar.current.component(.day, from: recordingDate)
+    }
+    
+    var hour: Int {
+        Calendar.current.component(.hour, from: recordingDate)
     }
     
     // MARK: - Audio Duration

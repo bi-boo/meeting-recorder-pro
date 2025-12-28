@@ -124,16 +124,45 @@ class AppSettings: ObservableObject {
         self.volcengineAccessToken = loadedAccessToken
         self.cloudbaseEnvId = loadedEnvId
         
-        // 加载转写设置（默认全部启用基础功能）
-        self.enableITN = UserDefaults.standard.object(forKey: "transcription_enableITN") as? Bool ?? true
-        self.enablePunctuation = UserDefaults.standard.object(forKey: "transcription_enablePunctuation") as? Bool ?? true
-        self.enableDDC = UserDefaults.standard.object(forKey: "transcription_enableDDC") as? Bool ?? true
-        self.showUtterances = UserDefaults.standard.object(forKey: "transcription_showUtterances") as? Bool ?? true
-        self.enableSpeakerInfo = UserDefaults.standard.object(forKey: "transcription_enableSpeakerInfo") as? Bool ?? false
-        self.enableEmotionDetection = UserDefaults.standard.object(forKey: "transcription_enableEmotionDetection") as? Bool ?? false
-        self.enableGenderDetection = UserDefaults.standard.object(forKey: "transcription_enableGenderDetection") as? Bool ?? false
-        self.showSpeechRate = UserDefaults.standard.object(forKey: "transcription_showSpeechRate") as? Bool ?? false
-        self.modelVersion = UserDefaults.standard.string(forKey: "transcription_modelVersion") ?? ""
+        // 数据迁移：清理类型不正确的旧数据（之前存储的是 Int 而非 Bool）
+        let transcriptionKeys = [
+            "transcription_enableITN",
+            "transcription_enablePunctuation",
+            "transcription_enableDDC",
+            "transcription_showUtterances",
+            "transcription_enableSpeakerInfo",
+            "transcription_enableEmotionDetection",
+            "transcription_enableGenderDetection",
+            "transcription_showSpeechRate"
+        ]
+        for key in transcriptionKeys {
+            if let value = UserDefaults.standard.object(forKey: key) {
+                // 如果是 Int 类型（旧格式），删除它
+                if value is Int {
+                    print("🧹 清理 Int 类型的旧数据: \(key) = \(value)")
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+        }
+        
+        // 辅助函数：安全读取 Bool，如果 key 不存在则返回默认值
+        func loadBool(forKey key: String, defaultValue: Bool) -> Bool {
+            if UserDefaults.standard.object(forKey: key) == nil {
+                return defaultValue
+            }
+            return UserDefaults.standard.bool(forKey: key)
+        }
+        
+        // 加载转写设置（使用辅助函数确保默认值生效）
+        self.enableITN = loadBool(forKey: "transcription_enableITN", defaultValue: true)
+        self.enablePunctuation = loadBool(forKey: "transcription_enablePunctuation", defaultValue: true)
+        self.enableDDC = loadBool(forKey: "transcription_enableDDC", defaultValue: true)
+        self.showUtterances = loadBool(forKey: "transcription_showUtterances", defaultValue: true)
+        self.enableSpeakerInfo = loadBool(forKey: "transcription_enableSpeakerInfo", defaultValue: true)  // 会议场景默认开启
+        self.enableEmotionDetection = loadBool(forKey: "transcription_enableEmotionDetection", defaultValue: true)
+        self.enableGenderDetection = loadBool(forKey: "transcription_enableGenderDetection", defaultValue: true)
+        self.showSpeechRate = loadBool(forKey: "transcription_showSpeechRate", defaultValue: true)
+        self.modelVersion = UserDefaults.standard.string(forKey: "transcription_modelVersion") ?? ""  // 不传，使用默认版本
         
         // 加载豆包 API 配置
         self.doubaoApiKey = UserDefaults.standard.string(forKey: "doubao_apiKey") ?? ""
@@ -149,6 +178,14 @@ class AppSettings: ObservableObject {
         // 确保目录存在
         try? FileManager.default.createDirectory(at: recordingsPath, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: transcriptionsPath, withIntermediateDirectories: true)
+        
+        // 调试：打印初始化后的值
+        print("🔧 AppSettings 初始化完成:")
+        print("  - enableSpeakerInfo: \(self.enableSpeakerInfo)")
+        print("  - enableEmotionDetection: \(self.enableEmotionDetection)")
+        print("  - enableGenderDetection: \(self.enableGenderDetection)")
+        print("  - showSpeechRate: \(self.showSpeechRate)")
+        print("  - modelVersion: \(self.modelVersion)")
     }
     
     // MARK: - Path Persistence

@@ -84,25 +84,42 @@ class TranscriptionManager: ObservableObject {
         
         // 内容
         if let utterances = result.utterances, !utterances.isEmpty {
-            var currentSpeaker: String?
+            var currentSpeaker: Int?
+            print("📝 [DEBUG] 准备生成 Markdown，Utterances 数量: \(utterances.count)")
             
-            for utt in utterances {
-                // 说话人变化
-                if let speaker = utt.speakerId, speaker != currentSpeaker {
-                    currentSpeaker = speaker
-                    lines.append("\n**【说话人 \(speaker)】**\n")
+            for (index, utt) in utterances.enumerated() {
+                // 打印每一条的解析数据到控制台，以便排查
+                print("  - [\(index)] speaker=\(String(describing: utt.speaker)), gender=\(String(describing: utt.gender)), emotion=\(String(describing: utt.emotion)), speechRate=\(String(describing: utt.speechRate))")
+                
+                // 说话人显示逻辑：
+                // 1. 如果这是第一条内容，由于 currentSpeaker 是 nil，如果 utt.speaker 有值，则会显示标签。
+                // 2. 如果 utt.speaker 和 currentSpeaker 不同，则显示新标签。
+                if let speaker = utt.speaker {
+                    if speaker != currentSpeaker {
+                        currentSpeaker = speaker
+                        // 生成说话人标签（包含性别信息）
+                        let genderText = utt.gender.map { genderLabel($0) } ?? ""
+                        lines.append("\n**【说话人 \(speaker)\(genderText)】**\n")
+                    }
+                } else if currentSpeaker != nil {
+                    // 如果当前 speaker 丢失为 nil，标记为未知说话人或重置
+                    currentSpeaker = nil
+                    lines.append("\n**【未知说话人】**\n")
                 }
                 
                 // 时间戳
                 let startStr = formatTime(ms: utt.startTime)
                 
-                // 附加信息
+                // 附加信息标签
                 var tags: [String] = []
                 if let emotion = utt.emotion {
-                    tags.append(emotionEmoji(emotion))
+                    tags.append(emotionLabel(emotion))
+                }
+                if let speechRate = utt.speechRate {
+                    tags.append("语速 \(String(format: "%.1f", speechRate))")
                 }
                 
-                let tagText = tags.isEmpty ? "" : " [\(tags.joined(separator: ", "))]"
+                let tagText = tags.isEmpty ? "" : " [\(tags.joined(separator: " | "))]"
                 lines.append("[\(startStr)]\(tagText) \(utt.text)")
             }
         } else if let text = result.text {
@@ -119,13 +136,21 @@ class TranscriptionManager: ObservableObject {
         return String(format: "%02d:%02d", minutes, seconds)
     }
     
-    private func emotionEmoji(_ emotion: String) -> String {
+    private func emotionLabel(_ emotion: String) -> String {
         switch emotion.lowercased() {
-        case "angry": return "😠生气"
-        case "happy": return "😊开心"
-        case "sad": return "😢悲伤"
-        case "surprise": return "😲惊讶"
-        default: return "😐中性"
+        case "angry": return "生气"
+        case "happy": return "开心"
+        case "sad": return "悲伤"
+        case "surprise": return "惊讶"
+        default: return "中性"
+        }
+    }
+    
+    private func genderLabel(_ gender: String) -> String {
+        switch gender.lowercased() {
+        case "male": return "男"
+        case "female": return "女"
+        default: return ""
         }
     }
     
@@ -161,8 +186,10 @@ struct TranscriptionResult {
         let text: String
         let startTime: Int
         let endTime: Int
-        let speakerId: String?
-        let emotion: String?
+        let speaker: Int?       // 火山引擎返回的是整数类型的 speaker
+        let emotion: String?    // 情绪检测
+        let gender: String?     // 性别识别
+        let speechRate: Double? // 语速（字/秒）
     }
     
     struct AudioInfo {

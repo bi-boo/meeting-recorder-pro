@@ -16,36 +16,91 @@ struct RecordingsListView: View {
     @State private var isPlaying = false
     @State private var playingRecordingId: String?
     
+    // 时间轴筛选
+    @State private var selectedTimeKey: String?
+    
+    // 根据时间轴筛选后的录音
+    private var filteredRecordings: [Recording] {
+        guard let timeKey = selectedTimeKey else {
+            return recordings
+        }
+        // timeKey 格式: "年-月-日-小时"
+        return recordings.filter { recording in
+            let recordingKey = "\(recording.year)-\(recording.month)-\(recording.day)-\(recording.hour)"
+            return recordingKey == timeKey
+        }
+    }
+    
     var body: some View {
-        VStack(spacing: 0) {
-            // 工具栏
-            HStack {
-                Text("录音列表")
-                    .font(.headline)
-                Spacer()
-                Button(action: refreshRecordings) {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
+        HStack(spacing: 0) {
+            // 左侧：时间轴
+            if !recordings.isEmpty {
+                RecordingTimelineView(
+                    recordings: recordings,
+                    selectedTimeKey: $selectedTimeKey
+                )
                 
-                Button(action: openRecordingsFolder) {
-                    Image(systemName: "folder")
-                }
-                .buttonStyle(.borderless)
+                Divider()
             }
-            .padding()
-            .background(Color(NSColor.controlBackgroundColor))
             
-            Divider()
-            
-            // 列表
-            if recordings.isEmpty {
-                emptyState
-            } else {
-                recordingsList
+            // 右侧：录音列表
+            VStack(spacing: 0) {
+                // 工具栏
+                HStack {
+                    Text("录音列表")
+                        .font(.headline)
+                    
+                    // 显示筛选状态
+                    if selectedTimeKey != nil {
+                        Text("(\(filteredRecordings.count) 条)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    Button(action: refreshRecordings) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    
+                    Button(action: openRecordingsFolder) {
+                        Image(systemName: "folder")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
+                
+                Divider()
+                
+                // 列表
+                if recordings.isEmpty {
+                    emptyState
+                } else if filteredRecordings.isEmpty {
+                    // 筛选结果为空
+                    VStack(spacing: 16) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 48))
+                            .foregroundColor(.secondary)
+                        Text("该时段无录音")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        Button("清除筛选") {
+                            selectedTimeKey = nil
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    recordingsList
+                }
             }
         }
         .onAppear {
+            refreshRecordings()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            // 窗口获得焦点时自动刷新录音列表
             refreshRecordings()
         }
     }
@@ -68,7 +123,7 @@ struct RecordingsListView: View {
     
     // MARK: - Recordings List
     private var recordingsList: some View {
-        List(recordings) { recording in
+        List(filteredRecordings) { recording in
             RecordingRow(
                 recording: recording,
                 transcriptionStatus: getTranscriptionStatus(for: recording),
