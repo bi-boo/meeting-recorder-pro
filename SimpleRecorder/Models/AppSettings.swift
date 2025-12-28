@@ -8,7 +8,7 @@ import Foundation
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
     
-    // MARK: - Published Properties
+    // MARK: - 存储路径设置
     @Published var recordingsPath: URL {
         didSet { savePath(recordingsPath, forKey: "recordingsPath") }
     }
@@ -17,6 +17,7 @@ class AppSettings: ObservableObject {
         didSet { savePath(transcriptionsPath, forKey: "transcriptionsPath") }
     }
     
+    // MARK: - API 配置
     @Published var volcengineAppId: String {
         didSet { UserDefaults.standard.set(volcengineAppId, forKey: "volcengineAppId") }
     }
@@ -27,6 +28,43 @@ class AppSettings: ObservableObject {
     
     @Published var cloudbaseEnvId: String {
         didSet { UserDefaults.standard.set(cloudbaseEnvId, forKey: "cloudbaseEnvId") }
+    }
+    
+    // MARK: - 转写设置（火山引擎 API 参数）
+    @Published var enableITN: Bool {  // 文本规范化（数字、日期等转换）
+        didSet { UserDefaults.standard.set(enableITN, forKey: "transcription_enableITN") }
+    }
+    
+    @Published var enablePunctuation: Bool {  // 自动添加标点符号
+        didSet { UserDefaults.standard.set(enablePunctuation, forKey: "transcription_enablePunctuation") }
+    }
+    
+    @Published var enableDDC: Bool {  // 语义顺滑（去除口语化表达）
+        didSet { UserDefaults.standard.set(enableDDC, forKey: "transcription_enableDDC") }
+    }
+    
+    @Published var showUtterances: Bool {  // 分句显示
+        didSet { UserDefaults.standard.set(showUtterances, forKey: "transcription_showUtterances") }
+    }
+    
+    @Published var enableSpeakerInfo: Bool {  // 说话人分离
+        didSet { UserDefaults.standard.set(enableSpeakerInfo, forKey: "transcription_enableSpeakerInfo") }
+    }
+    
+    @Published var enableEmotionDetection: Bool {  // 情绪检测
+        didSet { UserDefaults.standard.set(enableEmotionDetection, forKey: "transcription_enableEmotionDetection") }
+    }
+    
+    @Published var enableGenderDetection: Bool {  // 性别识别
+        didSet { UserDefaults.standard.set(enableGenderDetection, forKey: "transcription_enableGenderDetection") }
+    }
+    
+    @Published var showSpeechRate: Bool {  // 语速信息
+        didSet { UserDefaults.standard.set(showSpeechRate, forKey: "transcription_showSpeechRate") }
+    }
+    
+    @Published var modelVersion: String {  // 模型版本
+        didSet { UserDefaults.standard.set(modelVersion, forKey: "transcription_modelVersion") }
     }
     
     // MARK: - Initialization
@@ -65,15 +103,30 @@ class AppSettings: ObservableObject {
         let defaultAccessToken = "sHrVzn0mOgUbUF2Dvu-h17H7czytWk6i"
         let defaultEnvId = "thenextq-6g7bemmi5ea4ce29"
         
-        self.volcengineAppId = UserDefaults.standard.string(forKey: "volcengineAppId") ?? defaultAppId
-        self.volcengineAccessToken = UserDefaults.standard.string(forKey: "volcengineAccessToken") ?? defaultAccessToken
-        self.cloudbaseEnvId = UserDefaults.standard.string(forKey: "cloudbaseEnvId") ?? defaultEnvId
+        let loadedAppId = UserDefaults.standard.string(forKey: "volcengineAppId") ?? defaultAppId
+        let loadedAccessToken = UserDefaults.standard.string(forKey: "volcengineAccessToken") ?? defaultAccessToken
+        let loadedEnvId = UserDefaults.standard.string(forKey: "cloudbaseEnvId") ?? defaultEnvId
         
-        // 如果使用了默认值，保存到 UserDefaults
+        self.volcengineAppId = loadedAppId
+        self.volcengineAccessToken = loadedAccessToken
+        self.cloudbaseEnvId = loadedEnvId
+        
+        // 加载转写设置（默认全部启用基础功能）
+        self.enableITN = UserDefaults.standard.object(forKey: "transcription_enableITN") as? Bool ?? true
+        self.enablePunctuation = UserDefaults.standard.object(forKey: "transcription_enablePunctuation") as? Bool ?? true
+        self.enableDDC = UserDefaults.standard.object(forKey: "transcription_enableDDC") as? Bool ?? true
+        self.showUtterances = UserDefaults.standard.object(forKey: "transcription_showUtterances") as? Bool ?? true
+        self.enableSpeakerInfo = UserDefaults.standard.object(forKey: "transcription_enableSpeakerInfo") as? Bool ?? false
+        self.enableEmotionDetection = UserDefaults.standard.object(forKey: "transcription_enableEmotionDetection") as? Bool ?? false
+        self.enableGenderDetection = UserDefaults.standard.object(forKey: "transcription_enableGenderDetection") as? Bool ?? false
+        self.showSpeechRate = UserDefaults.standard.object(forKey: "transcription_showSpeechRate") as? Bool ?? false
+        self.modelVersion = UserDefaults.standard.string(forKey: "transcription_modelVersion") ?? ""
+        
+        // 所有属性初始化完成后，保存默认值到 UserDefaults
         if UserDefaults.standard.string(forKey: "volcengineAppId") == nil {
-            UserDefaults.standard.set(volcengineAppId, forKey: "volcengineAppId")
-            UserDefaults.standard.set(volcengineAccessToken, forKey: "volcengineAccessToken")
-            UserDefaults.standard.set(cloudbaseEnvId, forKey: "cloudbaseEnvId")
+            UserDefaults.standard.set(loadedAppId, forKey: "volcengineAppId")
+            UserDefaults.standard.set(loadedAccessToken, forKey: "volcengineAccessToken")
+            UserDefaults.standard.set(loadedEnvId, forKey: "cloudbaseEnvId")
         }
         
         // 确保目录存在

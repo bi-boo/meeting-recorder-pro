@@ -32,6 +32,27 @@ class VolcEngineService {
         print("  - Request ID: \(requestId)")
         print("  - Audio URL: \(audioURL)")
         print("  - Format: \(audioFormat)")
+        // 根据用户设置构建请求参数
+        var requestParams: [String: Any] = [
+            "model_name": "bigmodel"
+        ]
+        
+        // 基础功能
+        if settings.enableITN { requestParams["enable_itn"] = true }
+        if settings.enablePunctuation { requestParams["enable_punc"] = true }
+        if settings.enableDDC { requestParams["enable_ddc"] = true }
+        if settings.showUtterances { requestParams["show_utterances"] = true }
+        
+        // 高级功能
+        if settings.enableSpeakerInfo { requestParams["enable_speaker_info"] = true }
+        if settings.enableEmotionDetection { requestParams["enable_emotion_detection"] = true }
+        if settings.enableGenderDetection { requestParams["enable_gender_detection"] = true }
+        if settings.showSpeechRate { requestParams["show_speech_rate"] = true }
+        
+        // 模型版本（如果设置了）
+        if !settings.modelVersion.isEmpty {
+            requestParams["model_version"] = settings.modelVersion
+        }
         
         let payload: [String: Any] = [
             "user": ["uid": "simple-recorder-app"],
@@ -39,15 +60,7 @@ class VolcEngineService {
                 "format": audioFormat,
                 "url": audioURL
             ],
-            "request": [
-                "model_name": "bigmodel",
-                "enable_itn": true,               // 启用文本规范化
-                "enable_punc": true,              // 启用标点
-                "enable_ddc": true,               // 启用语义顺滑
-                "show_utterances": true,          // 输出分句信息
-                "enable_speaker_info": true,      // 启用说话人分离
-                "enable_emotion_detection": true  // 启用情绪检测
-            ]
+            "request": requestParams
         ]
         
         var request = URLRequest(url: submitURL)

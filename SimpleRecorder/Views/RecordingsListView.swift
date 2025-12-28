@@ -151,6 +151,8 @@ struct RecordingRow: View {
     let onPlay: () -> Void
     let onTranscribe: () -> Void
     
+    @ObservedObject private var settings = AppSettings.shared
+    
     var body: some View {
         HStack(spacing: 12) {
             // 播放按钮
@@ -180,10 +182,35 @@ struct RecordingRow: View {
             
             Spacer()
             
-            // 转写按钮
-            transcriptionButton
+            // 操作按钮组
+            HStack(spacing: 8) {
+                // 打开文件夹按钮
+                Button(action: { openInFinder() }) {
+                    Image(systemName: "folder")
+                }
+                .buttonStyle(.bordered)
+                .help("在 Finder 中打开")
+                
+                // 转写按钮/状态
+                transcriptionButton
+            }
         }
         .padding(.vertical, 8)
+    }
+    
+    // 在 Finder 中打开并选中文件
+    private func openInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([recording.url])
+    }
+    
+    // 转写文件路径
+    private var transcriptionURL: URL {
+        settings.transcriptionsPath.appendingPathComponent(recording.transcriptionFileName)
+    }
+    
+    // 打开转写文件
+    private func openTranscription() {
+        NSWorkspace.shared.open(transcriptionURL)
     }
     
     @ViewBuilder
@@ -205,9 +232,15 @@ struct RecordingRow: View {
             .frame(width: 90)
             
         case .completed:
-            Text("已转写")
-                .foregroundColor(.secondary)
-                .frame(width: 90)
+            // 已转写：显示查看按钮
+            Button(action: openTranscription) {
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.text")
+                    Text("查看")
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(.green)
             
         case .failed(let error):
             VStack(alignment: .trailing, spacing: 2) {
