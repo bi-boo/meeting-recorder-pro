@@ -9,6 +9,7 @@ import AVFoundation
 struct RecordingsListView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var transcriptionManager = TranscriptionManager.shared
+    @ObservedObject private var summaryManager = SummaryManager.shared
     @State private var recordings: [Recording] = []
     @State private var selectedRecording: Recording?
     @State private var audioPlayer: AVAudioPlayer?
@@ -71,9 +72,12 @@ struct RecordingsListView: View {
             RecordingRow(
                 recording: recording,
                 transcriptionStatus: getTranscriptionStatus(for: recording),
+                summaryStatus: getSummaryStatus(for: recording),
+                summary: summaryManager.getSummary(for: recording.fileName),
                 isPlaying: playingRecordingId == recording.id,
                 onPlay: { togglePlayback(recording) },
-                onTranscribe: { startTranscription(recording) }
+                onTranscribe: { startTranscription(recording) },
+                onGenerateSummary: { startSummaryGeneration(recording) }
             )
         }
     }
@@ -110,7 +114,7 @@ struct RecordingsListView: View {
         }
         
         recordings = files
-            .filter { ["m4a", "mp3", "wav"].contains($0.pathExtension.lowercased()) }
+            .filter { ["m4a", "mp3", "wav", "aac", "ogg", "flac", "wma", "aiff", "caf"].contains($0.pathExtension.lowercased()) }
             .map { Recording(url: $0) }
             .sorted { $0.createdAt > $1.createdAt }
     }
@@ -141,15 +145,42 @@ struct RecordingsListView: View {
     private func startTranscription(_ recording: Recording) {
         transcriptionManager.transcribe(recording: recording)
     }
+    
+    // MARK: - Summary Status
+    private func getSummaryStatus(for recording: Recording) -> SummaryStatus {
+        // 检查是否正在生成
+        if summaryManager.activeSummaries.contains(recording.id) {
+            return .generating
+        }
+        
+        // 检查是否失败
+        if let error = summaryManager.failedSummaries[recording.id] {
+            return .failed(error)
+        }
+        
+        // 检查是否已有总结
+        if summaryManager.getSummary(for: recording.fileName) != nil {
+            return .completed
+        }
+        
+        return .pending
+    }
+    
+    private func startSummaryGeneration(_ recording: Recording) {
+        summaryManager.generateSummary(for: recording)
+    }
 }
 
 // MARK: - Recording Row
 struct RecordingRow: View {
     let recording: Recording
     let transcriptionStatus: TranscriptionStatus
+    let summaryStatus: SummaryStatus
+    let summary: String?
     let isPlaying: Bool
     let onPlay: () -> Void
     let onTranscribe: () -> Void
+    let onGenerateSummary: () -> Void
     
     @ObservedObject private var settings = AppSettings.shared
     
@@ -168,6 +199,19 @@ struct RecordingRow: View {
                 Text(recording.fileName)
                     .font(.system(.body, design: .default))
                     .lineLimit(1)
+                
+                // AI 总结显示
+                if let summary = summary {
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.quote")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                        Text(summary)
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                    }
+                }
                 
                 HStack(spacing: 8) {
                     Text(recording.formattedDate)
@@ -190,6 +234,11 @@ struct RecordingRow: View {
                 }
                 .buttonStyle(.bordered)
                 .help("在 Finder 中打开")
+                
+                // 总结按钮/状态（仅转写完成后显示）
+                if case .completed = transcriptionStatus {
+                    summaryButton
+                }
                 
                 // 转写按钮/状态
                 transcriptionButton
@@ -259,6 +308,73 @@ struct RecordingRow: View {
                     .foregroundColor(.red)
                     .lineLimit(2)
                     .frame(maxWidth: 150)
+            }
+        }
+    }
+}
+
+// MARK: - Summary Status Enum
+enum SummaryStatus {
+    case pending
+    case generating
+    case completed
+    case failed(Error)
+}
+
+// MARK: - Summary Button Extension
+extension RecordingRow {
+    @ViewBuilder
+    var summaryButton: some View {
+        switch summaryStatus {
+        case .pending:
+            // 未生成总结：显示生成按钮
+            if settings.isAIConfigured {
+                Button(action: onGenerateSummary) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                        Text("总结")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+            }
+            
+        case .generating:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.6)
+                Text("生成中...")
+                    .foregroundColor(.secondary)
+            }
+            .frame(width: 80)
+            
+        case .completed:
+            // 已有总结：显示重新生成按钮
+            if settings.isAIConfigured {
+                Button(action: onGenerateSummary) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .help("重新生成总结")
+            }
+            
+        case .failed(let error):
+            VStack(alignment: .trailing, spacing: 2) {
+                Button(action: onGenerateSummary) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text("重试")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+                
+                Text(error.localizedDescription)
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+                    .lineLimit(2)
+                    .frame(maxWidth: 120)
             }
         }
     }

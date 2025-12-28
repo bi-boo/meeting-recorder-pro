@@ -74,9 +74,9 @@ struct Recording: Identifiable, Equatable {
     
     // MARK: - Transcription Status
     var transcriptionFileName: String {
-        fileName.replacingOccurrences(of: ".m4a", with: ".md")
-            .replacingOccurrences(of: ".mp3", with: ".md")
-            .replacingOccurrences(of: ".wav", with: ".md")
+        // 支持多种音频格式：移除扩展名后加 .md
+        let name = (fileName as NSString).deletingPathExtension
+        return name + ".md"
     }
 }
 

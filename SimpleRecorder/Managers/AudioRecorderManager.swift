@@ -49,9 +49,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 确保录音目录存在
         try? FileManager.default.createDirectory(at: recordingsPath, withIntermediateDirectories: true)
         
-        // 生成文件名
+        // 生成文件名（精确到分钟）
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd_HHmmss"
+        dateFormatter.dateFormat = "yyyy-MM-dd_HHmm"
         let fileName = "录音_\(dateFormatter.string(from: Date())).m4a"
         let fileURL = recordingsPath.appendingPathComponent(fileName)
         
@@ -72,9 +72,17 @@ class AudioRecorderManager: NSObject, ObservableObject {
             isRecording = true
             recordingDuration = 0
             
-            // 开始计时
+            // 开始计时（最长 5 小时 = 18000 秒）
+            let maxDuration: TimeInterval = 5 * 60 * 60
             recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-                self?.recordingDuration += 1
+                guard let self = self else { return }
+                self.recordingDuration += 1
+                
+                // 超过 5 小时自动停止
+                if self.recordingDuration >= maxDuration {
+                    print("⏱️ 录音已达 5 小时上限，自动保存")
+                    self.stopRecording()
+                }
             }
             
             NotificationCenter.default.post(name: .recordingStateChanged, object: nil)

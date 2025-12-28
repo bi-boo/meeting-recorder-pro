@@ -309,19 +309,65 @@ struct APISettingsView: View {
                     .padding(.vertical, 4)
                 }
                 
+                // AI 总结配置（豆包）
+                GroupBox("AI 总结生成（豆包大模型）") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        // API 密钥
+                        HStack {
+                            Text("API 密钥")
+                                .frame(width: 100, alignment: .leading)
+                            SecureField("请输入豆包 API Key", text: $settings.doubaoApiKey)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        
+                        Text("使用豆包 doubao-seed 模型生成总结，需要先在火山方舟控制台获取 API Key")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Divider()
+                        
+                        // 自动生成选项
+                        Toggle(isOn: $settings.autoGenerateSummary) {
+                            VStack(alignment: .leading) {
+                                Text("转写完成后自动生成总结")
+                                    .font(.headline)
+                                Text("开启后，每次转写完成会自动调用 AI 生成总结")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                
                 // API 状态
                 GroupBox("状态") {
-                    HStack {
-                        if settings.isAPIConfigured {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                            Text("API 配置完成，可以使用转写功能")
-                        } else {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
-                            Text("请填写完整的 API 配置以使用转写功能")
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            if settings.isAPIConfigured {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("转写 API 配置完成")
+                            } else {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.orange)
+                                Text("请填写火山引擎配置以使用转写功能")
+                            }
+                            Spacer()
                         }
-                        Spacer()
+                        
+                        HStack {
+                            if settings.isAIConfigured {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("AI 总结配置完成")
+                            } else {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.orange)
+                                Text("请填写 AI 配置以使用总结功能")
+                            }
+                            Spacer()
+                        }
                     }
                     .padding(.vertical, 4)
                 }

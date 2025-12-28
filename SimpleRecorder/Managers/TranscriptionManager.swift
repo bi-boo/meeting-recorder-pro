@@ -42,10 +42,20 @@ class TranscriptionManager: ObservableObject {
                 let outputPath = settings.transcriptionsPath.appendingPathComponent(recording.transcriptionFileName)
                 try markdown.write(to: outputPath, atomically: true, encoding: .utf8)
                 
+                // 5. 删除腾讯云上的临时文件（异步，不阻塞）
+                Task {
+                    await CloudBaseUploader.shared.deleteByLocalURL(recording.url)
+                }
+                
                 // 完成
                 await MainActor.run {
                     activeTranscriptions.remove(recording.id)
                     showSuccessNotification(recording: recording, outputPath: outputPath)
+                    
+                    // 自动生成总结（如开启）
+                    if settings.autoGenerateSummary && settings.isAIConfigured {
+                        SummaryManager.shared.generateSummary(for: recording)
+                    }
                 }
                 
             } catch {

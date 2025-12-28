@@ -30,6 +30,19 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(cloudbaseEnvId, forKey: "cloudbaseEnvId") }
     }
     
+    // MARK: - AI 总结配置（豆包）
+    // 硬编码豆包 API 地址和模型
+    let doubaoApiBaseUrl = "https://ark.cn-beijing.volces.com/api/v3"
+    let doubaoModelName = "doubao-seed-1-6-251015"
+    
+    @Published var doubaoApiKey: String {
+        didSet { UserDefaults.standard.set(doubaoApiKey, forKey: "doubao_apiKey") }
+    }
+    
+    @Published var autoGenerateSummary: Bool {
+        didSet { UserDefaults.standard.set(autoGenerateSummary, forKey: "ai_autoGenerateSummary") }
+    }
+    
     // MARK: - 转写设置（火山引擎 API 参数）
     @Published var enableITN: Bool {  // 文本规范化（数字、日期等转换）
         didSet { UserDefaults.standard.set(enableITN, forKey: "transcription_enableITN") }
@@ -122,6 +135,10 @@ class AppSettings: ObservableObject {
         self.showSpeechRate = UserDefaults.standard.object(forKey: "transcription_showSpeechRate") as? Bool ?? false
         self.modelVersion = UserDefaults.standard.string(forKey: "transcription_modelVersion") ?? ""
         
+        // 加载豆包 API 配置
+        self.doubaoApiKey = UserDefaults.standard.string(forKey: "doubao_apiKey") ?? ""
+        self.autoGenerateSummary = UserDefaults.standard.object(forKey: "ai_autoGenerateSummary") as? Bool ?? false
+        
         // 所有属性初始化完成后，保存默认值到 UserDefaults
         if UserDefaults.standard.string(forKey: "volcengineAppId") == nil {
             UserDefaults.standard.set(loadedAppId, forKey: "volcengineAppId")
@@ -188,6 +205,11 @@ class AppSettings: ObservableObject {
     // MARK: - API Configuration Valid
     var isAPIConfigured: Bool {
         !volcengineAppId.isEmpty && !volcengineAccessToken.isEmpty && !cloudbaseEnvId.isEmpty
+    }
+    
+    // MARK: - AI Configuration Valid（豆包）
+    var isAIConfigured: Bool {
+        !doubaoApiKey.isEmpty
     }
 }
 

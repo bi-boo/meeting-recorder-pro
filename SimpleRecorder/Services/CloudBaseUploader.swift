@@ -10,14 +10,34 @@ class CloudBaseUploader {
     
     private let settings = AppSettings.shared
     
+    // 上传缓存：文件路径 -> (URL, 上传时间)
+    // 30分钟内相同文件不重复上传
+    private var uploadCache: [String: (url: String, timestamp: Date)] = [:]
+    private let cacheExpiration: TimeInterval = 30 * 60 // 30 分钟
+    
     private init() {}
     
     // MARK: - Upload File
     func upload(fileURL: URL) async throws -> String {
-        let envId = settings.cloudbaseEnvId
-        let remotePath = "transcribe/\(fileURL.lastPathComponent)"
+        let filePath = fileURL.path
         
-        print("正在上传到腾讯云 CloudBase: \(fileURL.lastPathComponent)")
+        // 检查缓存：如果 30 分钟内上传过相同文件，直接返回缓存的 URL
+        if let cached = uploadCache[filePath],
+           Date().timeIntervalSince(cached.timestamp) < cacheExpiration {
+            print("✅ 使用缓存的上传链接: \(fileURL.lastPathComponent)")
+            return cached.url
+        }
+        
+        let envId = settings.cloudbaseEnvId
+        
+        // 生成安全的远程文件名：替换空格和特殊字符为下划线
+        let safeFileName = fileURL.lastPathComponent
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "(", with: "_")
+            .replacingOccurrences(of: ")", with: "_")
+        let remotePath = "transcribe/\(safeFileName)"
+        
+        print("📤 正在上传到腾讯云 CloudBase: \(fileURL.lastPathComponent) -> \(safeFileName)")
         
         // 使用 tcb CLI 上传
         let uploadResult = try await runCommand(
@@ -46,8 +66,49 @@ class CloudBaseUploader {
             throw CloudBaseError.parseURLFailed
         }
         
-        print("文件上传成功: \(url)")
+        // 缓存上传结果
+        uploadCache[filePath] = (url: url, timestamp: Date())
+        
+        print("✅ 文件上传成功: \(url)")
         return url
+    }
+    
+    // MARK: - Delete File
+    /// 删除腾讯云上的文件
+    func delete(remotePath: String) async {
+        let envId = settings.cloudbaseEnvId
+        
+        print("🗑️ 正在删除云端文件: \(remotePath)")
+        
+        do {
+            let result = try await runCommand(
+                "tcb", "storage", "delete",
+                remotePath,
+                "-e", envId
+            )
+            
+            if result.success {
+                print("✅ 云端文件已删除: \(remotePath)")
+            } else {
+                print("⚠️ 删除云端文件失败: \(result.error)")
+            }
+        } catch {
+            print("⚠️ 删除云端文件出错: \(error)")
+        }
+    }
+    
+    /// 根据本地文件 URL 删除对应的云端文件
+    func deleteByLocalURL(_ fileURL: URL) async {
+        // 使用与上传时相同的安全文件名
+        let safeFileName = fileURL.lastPathComponent
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "(", with: "_")
+            .replacingOccurrences(of: ")", with: "_")
+        let remotePath = "transcribe/\(safeFileName)"
+        await delete(remotePath: remotePath)
+        
+        // 同时清除缓存
+        uploadCache.removeValue(forKey: fileURL.path)
     }
     
     // MARK: - Run Command
