@@ -38,6 +38,21 @@ struct DayNode: Identifiable {
     var recordingCount: Int {
         hours.reduce(0) { $0 + $1.recordings.count }
     }
+    
+    // 星期几
+    var weekdayName: String {
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        if let date = Calendar.current.date(from: components) {
+            let weekday = Calendar.current.component(.weekday, from: date)
+            // 1=周日, 2=周一, ..., 7=周六
+            let names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+            return names[weekday - 1]
+        }
+        return ""
+    }
 }
 
 /// 小时节点
@@ -250,31 +265,46 @@ struct MonthRow: View {
     @Binding var selectedTimeKey: String?
     let onToggle: () -> Void
     
+    // 是否被选中（月份 ID 匹配）
+    private var isSelected: Bool {
+        selectedTimeKey == node.id
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 月份标题
-            Button(action: onToggle) {
-                HStack(spacing: 4) {
+            HStack(spacing: 0) {
+                // 展开/折叠按钮
+                Button(action: onToggle) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                        .frame(width: 12)
-                    
-                    Text("\(node.month) 月")
-                        .font(.subheadline)
-                    
-                    Spacer()
-                    
-                    Text("\(node.recordingCount)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .frame(width: 16, height: 20)
                 }
-                .padding(.leading, 20)
-                .padding(.trailing, 8)
-                .padding(.vertical, 5)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                
+                // 月份标签（可点击选择）
+                Button(action: { selectedTimeKey = node.id }) {
+                    HStack(spacing: 4) {
+                        Text("\(node.month) 月")
+                            .font(.subheadline)
+                            .foregroundColor(isSelected ? .white : .primary)
+                        
+                        Spacer()
+                        
+                        Text("\(node.recordingCount)")
+                            .font(.caption)
+                            .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
+                    }
+                    .padding(.vertical, 5)
+                    .padding(.trailing, 8)
+                    .background(isSelected ? Color.accentColor : Color.clear)
+                    .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .padding(.leading, 20)
+            .contentShape(Rectangle())
             
             // 展开的日期
             if isExpanded {
@@ -307,31 +337,46 @@ struct DayRow: View {
     @Binding var selectedTimeKey: String?
     let onToggle: () -> Void
     
+    // 是否被选中（日期 ID 匹配）
+    private var isSelected: Bool {
+        selectedTimeKey == node.id
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 日期标题
-            Button(action: onToggle) {
-                HStack(spacing: 4) {
+            HStack(spacing: 0) {
+                // 展开/折叠按钮
+                Button(action: onToggle) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                        .frame(width: 12)
-                    
-                    Text("\(node.day) 日")
-                        .font(.subheadline)
-                    
-                    Spacer()
-                    
-                    Text("\(node.recordingCount)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .frame(width: 16, height: 20)
                 }
-                .padding(.leading, 36)
-                .padding(.trailing, 8)
-                .padding(.vertical, 5)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                
+                // 日期标签（可点击选择）
+                Button(action: { selectedTimeKey = node.id }) {
+                    HStack(spacing: 4) {
+                        Text("\(node.day) 日 \(node.weekdayName)")
+                            .font(.subheadline)
+                            .foregroundColor(isSelected ? .white : .primary)
+                        
+                        Spacer()
+                        
+                        Text("\(node.recordingCount)")
+                            .font(.caption)
+                            .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
+                    }
+                    .padding(.vertical, 5)
+                    .padding(.trailing, 8)
+                    .background(isSelected ? Color.accentColor : Color.clear)
+                    .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .padding(.leading, 36)
+            .contentShape(Rectangle())
             
             // 展开的小时
             if isExpanded {
@@ -366,10 +411,6 @@ struct HourRow: View {
                     .font(.system(.caption, design: .monospaced))
                 
                 Spacer()
-                
-                Text("\(node.recordings.count)")
-                    .font(.caption2)
-                    .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
             }
             .padding(.leading, 52)
             .padding(.trailing, 8)

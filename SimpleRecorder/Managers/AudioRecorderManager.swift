@@ -121,7 +121,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 print("⚠️ 发现孤立的临时目录，包含 \(segments.count) 个片段，尝试恢复...")
                 // 使用时间戳生成恢复文件名
                 let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd_HHmm"
+                dateFormatter.dateFormat = "yyyy-MM-dd_HH:mm"
                 let fileName = "录音_恢复_\(dateFormatter.string(from: Date())).m4a"
                 let recoveredURL = recordingsPath.appendingPathComponent(fileName)
                 
@@ -362,7 +362,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         
         // 生成最终文件名（精确到分钟）
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd_HHmm"
+        dateFormatter.dateFormat = "yyyy-MM-dd_HH:mm"
         let fileName = "录音_\(dateFormatter.string(from: Date())).m4a"
         let finalFileURL = recordingsPath.appendingPathComponent(fileName)
         finalRecordingURL = finalFileURL

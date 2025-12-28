@@ -16,6 +16,13 @@ struct RecordingsListView: View {
     @State private var isPlaying = false
     @State private var playingRecordingId: String?
     
+    // 播放进度追踪
+    @State private var playbackProgress: TimeInterval = 0
+    @State private var playbackDuration: TimeInterval = 0
+    @State private var playbackTimer: Timer?
+    @State private var isDraggingProgress = false  // 是否正在拖动进度条
+    @State private var isSeeking = false  // 是否正在调整播放位置
+    
     // 时间轴筛选
     @State private var selectedTimeKey: String?
     
@@ -24,10 +31,27 @@ struct RecordingsListView: View {
         guard let timeKey = selectedTimeKey else {
             return recordings
         }
-        // timeKey 格式: "年-月-日-小时"
+        
+        // timeKey 格式可能是:
+        // - "年-月" (月份筛选)
+        // - "年-月-日" (日期筛选)
+        // - "年-月-日-小时" (小时筛选)
+        let components = timeKey.split(separator: "-")
+        
         return recordings.filter { recording in
-            let recordingKey = "\(recording.year)-\(recording.month)-\(recording.day)-\(recording.hour)"
-            return recordingKey == timeKey
+            switch components.count {
+            case 2:
+                // 月份筛选: 年-月
+                return recording.year == Int(components[0]) && recording.month == Int(components[1])
+            case 3:
+                // 日期筛选: 年-月-日
+                return recording.year == Int(components[0]) && recording.month == Int(components[1]) && recording.day == Int(components[2])
+            case 4:
+                // 小时筛选: 年-月-日-小时
+                return recording.year == Int(components[0]) && recording.month == Int(components[1]) && recording.day == Int(components[2]) && recording.hour == Int(components[3])
+            default:
+                return true
+            }
         }
     }
     
@@ -130,9 +154,25 @@ struct RecordingsListView: View {
                 summaryStatus: getSummaryStatus(for: recording),
                 summary: summaryManager.getSummary(for: recording.fileName),
                 isPlaying: playingRecordingId == recording.id,
+                playbackProgress: Binding(
+                    get: { playingRecordingId == recording.id ? playbackProgress : 0 },
+                    set: { newValue in
+                        if playingRecordingId == recording.id {
+                            playbackProgress = newValue
+                        }
+                    }
+                ),
+                playbackDuration: playingRecordingId == recording.id ? playbackDuration : 0,
+                isSeeking: $isSeeking,
                 onPlay: { togglePlayback(recording) },
+                onSeekFinished: { progress in
+                    // 用户拖动结束后，跳转到指定位置
+                    audioPlayer?.currentTime = progress
+                    playbackProgress = progress
+                },
                 onTranscribe: { startTranscription(recording) },
-                onGenerateSummary: { startSummaryGeneration(recording) }
+                onGenerateSummary: { startSummaryGeneration(recording) },
+                onDelete: { deleteTranscriptionOnly in deleteRecording(recording, transcriptionOnly: deleteTranscriptionOnly) }
             )
         }
     }
@@ -175,26 +215,80 @@ struct RecordingsListView: View {
     }
     
     private func openRecordingsFolder() {
-        NSWorkspace.shared.open(settings.recordingsPath)
+        // 跳转到「极简录音」根目录（录音目录的上一级）
+        let parentFolder = settings.recordingsPath.deletingLastPathComponent()
+        NSWorkspace.shared.open(parentFolder)
     }
     
     private func togglePlayback(_ recording: Recording) {
         if playingRecordingId == recording.id {
             // 停止播放
-            audioPlayer?.stop()
-            audioPlayer = nil
-            playingRecordingId = nil
+            stopPlayback()
         } else {
             // 开始播放
             do {
-                audioPlayer?.stop()
+                stopPlayback()
                 audioPlayer = try AVAudioPlayer(contentsOf: recording.url)
                 audioPlayer?.play()
                 playingRecordingId = recording.id
+                playbackDuration = audioPlayer?.duration ?? 0
+                playbackProgress = 0
+                
+                // 启动定时器更新进度
+                playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                    // 用户正在拖动时，不更新进度（避免覆盖用户输入）
+                    guard !isSeeking else { return }
+                    
+                    if let player = audioPlayer {
+                        playbackProgress = player.currentTime
+                        // 播放结束时停止
+                        if !player.isPlaying && playbackProgress >= playbackDuration - 0.1 {
+                            stopPlayback()
+                        }
+                    }
+                }
             } catch {
                 print("播放失败: \(error)")
             }
         }
+    }
+    
+    private func stopPlayback() {
+        playbackTimer?.invalidate()
+        playbackTimer = nil
+        audioPlayer?.stop()
+        audioPlayer = nil
+        playingRecordingId = nil
+        playbackProgress = 0
+        playbackDuration = 0
+    }
+    
+    private func seekPlayback(to progress: TimeInterval) {
+        audioPlayer?.currentTime = progress
+        playbackProgress = progress
+    }
+    
+    private func deleteRecording(_ recording: Recording, transcriptionOnly: Bool) {
+        let fileManager = FileManager.default
+        let transcriptionPath = settings.transcriptionsPath.appendingPathComponent(recording.transcriptionFileName)
+        
+        // 停止播放（如果正在播放该录音）
+        if playingRecordingId == recording.id {
+            stopPlayback()
+        }
+        
+        // 删除转录文件
+        if fileManager.fileExists(atPath: transcriptionPath.path) {
+            try? fileManager.removeItem(at: transcriptionPath)
+        }
+        
+        // 如果不是仅删除转录，也删除录音文件
+        if !transcriptionOnly {
+            try? fileManager.removeItem(at: recording.url)
+        }
+        
+        // 刷新列表
+        refreshRecordings()
     }
     
     private func startTranscription(_ recording: Recording) {
@@ -233,78 +327,169 @@ struct RecordingRow: View {
     let summaryStatus: SummaryStatus
     let summary: String?
     let isPlaying: Bool
+    @Binding var playbackProgress: TimeInterval
+    let playbackDuration: TimeInterval
+    @Binding var isSeeking: Bool  // 是否正在拖动进度条
     let onPlay: () -> Void
+    let onSeekFinished: (TimeInterval) -> Void  // 拖动结束后的回调
     let onTranscribe: () -> Void
     let onGenerateSummary: () -> Void
+    let onDelete: (Bool) -> Void
     
     @ObservedObject private var settings = AppSettings.shared
     
     var body: some View {
-        HStack(spacing: 12) {
-            // 播放按钮
-            Button(action: onPlay) {
-                Image(systemName: isPlaying ? "stop.circle.fill" : "play.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(isPlaying ? .red : .accentColor)
-            }
-            .buttonStyle(.plain)
-            
-            // 录音信息
-            VStack(alignment: .leading, spacing: 4) {
-                Text(recording.fileName)
-                    .font(.system(.body, design: .default))
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: 6) {
+            // 主行内容
+            HStack(spacing: 10) {
+                // 播放按钮
+                Button(action: onPlay) {
+                    Image(systemName: isPlaying ? "stop.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(isPlaying ? .red : .accentColor)
+                }
+                .buttonStyle(.plain)
                 
-                // AI 总结显示
-                if let summary = summary {
-                    HStack(spacing: 4) {
-                        Image(systemName: "text.quote")
+                // 录音信息
+                VStack(alignment: .leading, spacing: 2) {
+                    // 文件名（显示原始文件名，去掉扩展名）
+                    Text((recording.fileName as NSString).deletingPathExtension)
+                        .font(.system(.body, design: .default))
+                        .lineLimit(1)
+                    
+                    // AI 总结（如果有）
+                    if let summary = summary {
+                        Text(summary)
                             .font(.caption)
                             .foregroundColor(.blue)
-                        Text(summary)
-                            .font(.subheadline)
-                            .foregroundColor(.primary)
                             .lineLimit(1)
                     }
+                    
+                    // 元信息
+                    Text("\(recording.formattedDuration) · \(recording.formattedFileSize)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
                 
-                HStack(spacing: 8) {
-                    Text(recording.formattedDate)
-                    Text("·")
-                    Text(recording.formattedDuration)
-                    Text("·")
-                    Text(recording.formattedFileSize)
-                }
-                .font(.caption)
-                .foregroundColor(.secondary)
+                Spacer()
+                
+                // 操作按钮组
+                actionButtons
             }
             
-            Spacer()
-            
-            // 操作按钮组
-            HStack(spacing: 8) {
-                // 打开文件夹按钮
-                Button(action: { openInFinder() }) {
-                    Image(systemName: "folder")
+            // 播放进度条
+            if isPlaying && playbackDuration > 0 {
+                HStack(spacing: 6) {
+                    Text(formatTime(playbackProgress))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
+                        .frame(width: 36, alignment: .trailing)
+                    
+                    Slider(
+                        value: $playbackProgress,
+                        in: 0...playbackDuration,
+                        onEditingChanged: { editing in
+                            isSeeking = editing
+                            // 拖动结束时，跳转到目标位置
+                            if !editing {
+                                onSeekFinished(playbackProgress)
+                            }
+                        }
+                    )
+                    .controlSize(.small)
+                    
+                    Text(formatTime(playbackDuration))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
+                        .frame(width: 36, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
-                .help("在 Finder 中打开")
-                
-                // 总结按钮/状态（仅转写完成后显示）
-                if case .completed = transcriptionStatus {
-                    summaryButton
-                }
-                
-                // 转写按钮/状态
-                transcriptionButton
+                .padding(.leading, 34)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
     }
     
-    // 在 Finder 中打开并选中文件
-    private func openInFinder() {
-        NSWorkspace.shared.activateFileViewerSelecting([recording.url])
+    // MARK: - 操作按钮组
+    @ViewBuilder
+    private var actionButtons: some View {
+        HStack(spacing: 4) {
+            // 转写/查看按钮
+            transcriptionButton
+            
+            // 更多操作（下拉菜单）
+            moreActionsMenu
+        }
+    }
+    
+    // MARK: - 更多操作菜单
+    @ViewBuilder
+    private var moreActionsMenu: some View {
+        Menu {
+            // 在 Finder 中打开录音
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([recording.url])
+            } label: {
+                Label("显示录音文件", systemImage: "folder")
+            }
+            
+            // 转录文件相关操作（仅转录完成后显示）
+            if case .completed = transcriptionStatus {
+                Button {
+                    let url = settings.transcriptionsPath.appendingPathComponent(recording.transcriptionFileName)
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Label("显示转录文件", systemImage: "doc.text")
+                }
+                
+                Divider()
+                
+                // AI 总结
+                if settings.isAIConfigured {
+                    Button(action: onGenerateSummary) {
+                        Label(summary == nil ? "生成 AI 总结" : "重新生成总结", systemImage: "sparkles")
+                    }
+                }
+            }
+            
+            Divider()
+            
+            // 删除选项
+            if case .completed = transcriptionStatus {
+                Button(role: .destructive) {
+                    onDelete(true)
+                } label: {
+                    Label("仅删除转录", systemImage: "doc.text.fill")
+                }
+            }
+            
+            Button(role: .destructive) {
+                onDelete(false)
+            } label: {
+                Label("删除录音", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.secondary)
+                .frame(width: 20, height: 20)
+                .rotationEffect(.degrees(90))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)  // 隐藏下拉指示器
+        .frame(width: 20)
+    }
+    // 格式化时间
+    private func formatTime(_ time: TimeInterval) -> String {
+        let minutes = Int(time) / 60
+        let seconds = Int(time) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    // 在 Finder 中定位转录文件
+    private func openTranscriptionInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([transcriptionURL])
     }
     
     // 转写文件路径
@@ -321,49 +506,33 @@ struct RecordingRow: View {
     private var transcriptionButton: some View {
         switch transcriptionStatus {
         case .pending:
-            Button("转写") {
-                onTranscribe()
-            }
-            .buttonStyle(.bordered)
+            Button("转写", action: onTranscribe)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             
         case .transcribing:
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 ProgressView()
-                    .scaleEffect(0.6)
-                Text("转写中...")
+                    .scaleEffect(0.5)
+                Text("转写中")
+                    .font(.caption)
                     .foregroundColor(.secondary)
             }
-            .frame(width: 90)
+            .frame(width: 70)
             
         case .completed:
-            // 已转写：显示查看按钮
             Button(action: openTranscription) {
-                HStack(spacing: 4) {
-                    Image(systemName: "doc.text")
-                    Text("查看")
-                }
+                Text("查看")
             }
             .buttonStyle(.bordered)
+            .controlSize(.small)
             .tint(.green)
             
-        case .failed(let error):
-            VStack(alignment: .trailing, spacing: 2) {
-                Button(action: onTranscribe) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.red)
-                        Text("重试")
-                    }
-                }
+        case .failed:
+            Button("重试", action: onTranscribe)
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 .tint(.red)
-                
-                Text(error.localizedDescription)
-                    .font(.caption2)
-                    .foregroundColor(.red)
-                    .lineLimit(2)
-                    .frame(maxWidth: 150)
-            }
         }
     }
 }
@@ -374,65 +543,6 @@ enum SummaryStatus {
     case generating
     case completed
     case failed(Error)
-}
-
-// MARK: - Summary Button Extension
-extension RecordingRow {
-    @ViewBuilder
-    var summaryButton: some View {
-        switch summaryStatus {
-        case .pending:
-            // 未生成总结：显示生成按钮
-            if settings.isAIConfigured {
-                Button(action: onGenerateSummary) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                        Text("总结")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .tint(.blue)
-            }
-            
-        case .generating:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .scaleEffect(0.6)
-                Text("生成中...")
-                    .foregroundColor(.secondary)
-            }
-            .frame(width: 80)
-            
-        case .completed:
-            // 已有总结：显示重新生成按钮
-            if settings.isAIConfigured {
-                Button(action: onGenerateSummary) {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .help("重新生成总结")
-            }
-            
-        case .failed(let error):
-            VStack(alignment: .trailing, spacing: 2) {
-                Button(action: onGenerateSummary) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                        Text("重试")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-                
-                Text(error.localizedDescription)
-                    .font(.caption2)
-                    .foregroundColor(.orange)
-                    .lineLimit(2)
-                    .frame(maxWidth: 120)
-            }
-        }
-    }
 }
 
 // MARK: - Transcription Status Enum

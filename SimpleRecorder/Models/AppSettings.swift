@@ -159,9 +159,9 @@ class AppSettings: ObservableObject {
         self.enableDDC = loadBool(forKey: "transcription_enableDDC", defaultValue: true)
         self.showUtterances = loadBool(forKey: "transcription_showUtterances", defaultValue: true)
         self.enableSpeakerInfo = loadBool(forKey: "transcription_enableSpeakerInfo", defaultValue: true)  // 会议场景默认开启
-        self.enableEmotionDetection = loadBool(forKey: "transcription_enableEmotionDetection", defaultValue: true)
+        self.enableEmotionDetection = loadBool(forKey: "transcription_enableEmotionDetection", defaultValue: false)
         self.enableGenderDetection = loadBool(forKey: "transcription_enableGenderDetection", defaultValue: true)
-        self.showSpeechRate = loadBool(forKey: "transcription_showSpeechRate", defaultValue: true)
+        self.showSpeechRate = loadBool(forKey: "transcription_showSpeechRate", defaultValue: false)
         self.modelVersion = UserDefaults.standard.string(forKey: "transcription_modelVersion") ?? ""  // 不传，使用默认版本
         
         // 加载豆包 API 配置

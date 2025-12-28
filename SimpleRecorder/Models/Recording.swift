@@ -33,10 +33,20 @@ struct Recording: Identifiable, Equatable {
     }
     
     // MARK: - 从文件名解析时间
-    /// 解析文件名中的日期，格式：录音_yyyy-MM-dd_HHmm.m4a
+    /// 解析文件名中的日期，格式：录音_yyyy-MM-dd_HH:mm.m4a 或 录音_yyyy-MM-dd_HHmm.m4a
     static func parseRecordingDate(from fileName: String) -> Date? {
-        // 正则匹配：录音_2024-12-28_1402.m4a
-        let pattern = #"(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})"#
+        // 尝试匹配新格式：录音_2024-12-28_14:02.m4a
+        let newPattern = #"(\d{4})-(\d{2})-(\d{2})_(\d{2}):(\d{2})"#
+        if let date = parseWithPattern(newPattern, from: fileName) {
+            return date
+        }
+        
+        // 尝试匹配旧格式：录音_2024-12-28_1402.m4a
+        let oldPattern = #"(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})"#
+        return parseWithPattern(oldPattern, from: fileName)
+    }
+    
+    private static func parseWithPattern(_ pattern: String, from fileName: String) -> Date? {
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: fileName, range: NSRange(fileName.startIndex..., in: fileName)) else {
             return nil
