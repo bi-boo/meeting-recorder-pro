@@ -17,6 +17,7 @@
 		008 /* RecordingsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 108; };
 		009 /* VolcEngineService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 109; };
 		010 /* CloudBaseUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110; };
+		016 /* TencentCloudSignature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118; };
 		011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 111; };
 		012 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114; };
 		013 /* SummaryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115; };
@@ -36,6 +37,7 @@
 		108 /* RecordingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsListView.swift; sourceTree = "<group>"; };
 		109 /* VolcEngineService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolcEngineService.swift; sourceTree = "<group>"; };
 		110 /* CloudBaseUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudBaseUploader.swift; sourceTree = "<group>"; };
+		118 /* TencentCloudSignature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TencentCloudSignature.swift; sourceTree = "<group>"; };
 		111 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		112 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		113 /* SimpleRecorder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SimpleRecorder.entitlements; sourceTree = "<group>"; };
@@ -123,6 +125,7 @@
 			children = (
 				109 /* VolcEngineService.swift */,
 				110 /* CloudBaseUploader.swift */,
+				118 /* TencentCloudSignature.swift */,
 				116 /* AISummaryService.swift */,
 			);
 			path = Services;
@@ -216,6 +219,7 @@
 				008 /* RecordingsListView.swift in Sources */,
 				009 /* VolcEngineService.swift in Sources */,
 				010 /* CloudBaseUploader.swift in Sources */,
+				016 /* TencentCloudSignature.swift in Sources */,
 				012 /* MainWindowView.swift in Sources */,
 				013 /* SummaryManager.swift in Sources */,
 				014 /* AISummaryService.swift in Sources */,

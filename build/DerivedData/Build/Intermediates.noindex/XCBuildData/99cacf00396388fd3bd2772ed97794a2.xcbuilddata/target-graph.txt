@@ -1,0 +1,2 @@
+Target dependency graph (1 target)
+Target 'SimpleRecorder' in project 'SimpleRecorder' (no dependencies)

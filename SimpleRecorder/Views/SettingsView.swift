@@ -75,13 +75,24 @@ struct SettingsView: View {
     // MARK: - API Tab
     private var apiTab: some View {
         Form {
-            Section("火山引擎配置") {
+            Section("火山引擎配置 (文稿转写)") {
                 TextField("APP ID", text: $settings.volcengineAppId)
                 SecureField("Access Token", text: $settings.volcengineAccessToken)
             }
             
-            Section("腾讯云配置") {
+            Section("腾讯云配置 (云端转存)") {
                 TextField("CloudBase Env ID", text: $settings.cloudbaseEnvId)
+                TextField("Secret ID", text: $settings.cloudbaseSecretId)
+                SecureField("Secret Key", text: $settings.cloudbaseSecretKey)
+                
+                Text("注：原生直传不再依赖本地 tcb 命令行工具，更稳定。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Section("豆包 AI 配置 (内容总结)") {
+                SecureField("API Key", text: $settings.doubaoApiKey)
+                Toggle("自动生成总结", isOn: $settings.autoGenerateSummary)
             }
             
             Section {
@@ -89,12 +100,12 @@ struct SettingsView: View {
                     if settings.isAPIConfigured {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Text("API 配置完成")
+                        Text("核心配置已就绪")
                             .foregroundColor(.secondary)
                     } else {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
-                        Text("请填写完整的 API 配置")
+                        Text("请补充 Secret ID/Key 以支持转写功能")
                             .foregroundColor(.secondary)
                     }
                 }

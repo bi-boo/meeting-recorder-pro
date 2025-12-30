@@ -1,0 +1,432 @@
+{
+  "source": "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Views/MainWindowView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "录音列表",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 16
+        }
+      },
+      {
+        "comment": "",
+        "key": "存储路径",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 23
+        }
+      },
+      {
+        "comment": "",
+        "key": "转写设置",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 30
+        }
+      },
+      {
+        "comment": "",
+        "key": "API 配置",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 37
+        }
+      },
+      {
+        "comment": "",
+        "key": "快捷键",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 55
+        }
+      },
+      {
+        "comment": "",
+        "key": "存储路径",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 70
+        }
+      },
+      {
+        "comment": "",
+        "key": "录音快捷键",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 57
+        }
+      },
+      {
+        "comment": "",
+        "key": "打开",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 83
+        }
+      },
+      {
+        "comment": "",
+        "key": "选择...",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 87
+        }
+      },
+      {
+        "comment": "",
+        "key": "录音保存位置",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 74
+        }
+      },
+      {
+        "comment": "",
+        "key": "打开",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 105
+        }
+      },
+      {
+        "comment": "",
+        "key": "选择...",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 109
+        }
+      },
+      {
+        "comment": "",
+        "key": "转写文件保存位置",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 96
+        }
+      },
+      {
+        "comment": "",
+        "key": "基础功能",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 145
+        }
+      },
+      {
+        "comment": "",
+        "key": "高级功能",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 197
+        }
+      },
+      {
+        "comment": "",
+        "key": "文本规范化 (ITN)",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 149
+        }
+      },
+      {
+        "comment": "",
+        "key": "将数字、日期等转换为规范格式，如「二零二五年」→「2025年」",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 151
+        }
+      },
+      {
+        "comment": "",
+        "key": "自动标点",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 161
+        }
+      },
+      {
+        "comment": "",
+        "key": "自动添加逗号、句号等标点符号",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 163
+        }
+      },
+      {
+        "comment": "",
+        "key": "语义顺滑",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 173
+        }
+      },
+      {
+        "comment": "",
+        "key": "去除「嗯」「啊」等口语化表达，使文本更通顺",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 175
+        }
+      },
+      {
+        "comment": "",
+        "key": "分句显示",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 185
+        }
+      },
+      {
+        "comment": "",
+        "key": "按语句分段显示，便于阅读",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 187
+        }
+      },
+      {
+        "comment": "",
+        "key": "说话人分离",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 201
+        }
+      },
+      {
+        "comment": "",
+        "key": "区分不同说话人，适合会议记录等场景",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 203
+        }
+      },
+      {
+        "comment": "",
+        "key": "情绪检测",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 213
+        }
+      },
+      {
+        "comment": "",
+        "key": "识别说话人的情绪状态",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 215
+        }
+      },
+      {
+        "comment": "",
+        "key": "性别识别",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 225
+        }
+      },
+      {
+        "comment": "",
+        "key": "识别说话人性别",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 227
+        }
+      },
+      {
+        "comment": "",
+        "key": "语速信息",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 237
+        }
+      },
+      {
+        "comment": "",
+        "key": "显示说话语速",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 239
+        }
+      },
+      {
+        "comment": "",
+        "key": "高级功能可能增加处理时间，建议根据需要选择",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 252
+        }
+      },
+      {
+        "comment": "",
+        "key": "火山引擎（语音转写）",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 272
+        }
+      },
+      {
+        "comment": "",
+        "key": "腾讯云 CloudBase（文件上传）",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 296
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI 总结生成（豆包大模型）",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 313
+        }
+      },
+      {
+        "comment": "",
+        "key": "状态",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 344
+        }
+      },
+      {
+        "comment": "",
+        "key": "用于将录音转换为文字，需要先在火山引擎控制台创建应用并获取密钥",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 288
+        }
+      },
+      {
+        "comment": "",
+        "key": "APP ID",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 275
+        }
+      },
+      {
+        "comment": "",
+        "key": "请输入 APP ID",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 277
+        }
+      },
+      {
+        "comment": "",
+        "key": "Access Token",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 282
+        }
+      },
+      {
+        "comment": "",
+        "key": "请输入 Access Token",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 284
+        }
+      },
+      {
+        "comment": "",
+        "key": "用于临时存储音频文件供火山引擎访问",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 305
+        }
+      },
+      {
+        "comment": "",
+        "key": "Env ID",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 299
+        }
+      },
+      {
+        "comment": "",
+        "key": "请输入 Env ID",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 301
+        }
+      },
+      {
+        "comment": "",
+        "key": "使用豆包 doubao-seed 模型生成总结，需要先在火山方舟控制台获取 API Key",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 323
+        }
+      },
+      {
+        "comment": "",
+        "key": "API 密钥",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 317
+        }
+      },
+      {
+        "comment": "",
+        "key": "请输入豆包 API Key",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 319
+        }
+      },
+      {
+        "comment": "",
+        "key": "转写完成后自动生成总结",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 332
+        }
+      },
+      {
+        "comment": "",
+        "key": "开启后，每次转写完成会自动调用 AI 生成总结",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 334
+        }
+      },
+      {
+        "comment": "",
+        "key": "转写 API 配置完成",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 350
+        }
+      },
+      {
+        "comment": "",
+        "key": "请填写火山引擎配置以使用转写功能",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 354
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI 总结配置完成",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 363
+        }
+      },
+      {
+        "comment": "",
+        "key": "请填写 AI 配置以使用总结功能",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 367
+        }
+      }
+    ]
+  },
+  "version": 1
+}

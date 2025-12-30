@@ -30,6 +30,14 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(cloudbaseEnvId, forKey: "cloudbaseEnvId") }
     }
     
+    @Published var cloudbaseSecretId: String {
+        didSet { UserDefaults.standard.set(cloudbaseSecretId, forKey: "cloudbaseSecretId") }
+    }
+    
+    @Published var cloudbaseSecretKey: String {
+        didSet { UserDefaults.standard.set(cloudbaseSecretKey, forKey: "cloudbaseSecretKey") }
+    }
+    
     // MARK: - AI 总结配置（豆包）
     // 硬编码豆包 API 地址和模型
     let doubaoApiBaseUrl = "https://ark.cn-beijing.volces.com/api/v3"
@@ -119,10 +127,14 @@ class AppSettings: ObservableObject {
         let loadedAppId = UserDefaults.standard.string(forKey: "volcengineAppId") ?? defaultAppId
         let loadedAccessToken = UserDefaults.standard.string(forKey: "volcengineAccessToken") ?? defaultAccessToken
         let loadedEnvId = UserDefaults.standard.string(forKey: "cloudbaseEnvId") ?? defaultEnvId
+        let loadedSecretId = UserDefaults.standard.string(forKey: "cloudbaseSecretId") ?? ""
+        let loadedSecretKey = UserDefaults.standard.string(forKey: "cloudbaseSecretKey") ?? ""
         
         self.volcengineAppId = loadedAppId
         self.volcengineAccessToken = loadedAccessToken
         self.cloudbaseEnvId = loadedEnvId
+        self.cloudbaseSecretId = loadedSecretId
+        self.cloudbaseSecretKey = loadedSecretKey
         
         // 数据迁移：清理类型不正确的旧数据（之前存储的是 Int 而非 Bool）
         let transcriptionKeys = [
@@ -173,6 +185,8 @@ class AppSettings: ObservableObject {
             UserDefaults.standard.set(loadedAppId, forKey: "volcengineAppId")
             UserDefaults.standard.set(loadedAccessToken, forKey: "volcengineAccessToken")
             UserDefaults.standard.set(loadedEnvId, forKey: "cloudbaseEnvId")
+            UserDefaults.standard.set(loadedSecretId, forKey: "cloudbaseSecretId")
+            UserDefaults.standard.set(loadedSecretKey, forKey: "cloudbaseSecretKey")
         }
         
         // 确保目录存在
@@ -228,6 +242,15 @@ class AppSettings: ObservableObject {
                    let envId = cloudbase["env_id"] as? String, cloudbaseEnvId.isEmpty {
                     cloudbaseEnvId = envId
                     UserDefaults.standard.set(envId, forKey: "cloudbaseEnvId")
+                    
+                    if let secretId = cloudbase["secret_id"] as? String {
+                        cloudbaseSecretId = secretId
+                        UserDefaults.standard.set(secretId, forKey: "cloudbaseSecretId")
+                    }
+                    if let secretKey = cloudbase["secret_key"] as? String {
+                        cloudbaseSecretKey = secretKey
+                        UserDefaults.standard.set(secretKey, forKey: "cloudbaseSecretKey")
+                    }
                 }
                 
                 // 找到并加载成功，退出循环
@@ -241,7 +264,7 @@ class AppSettings: ObservableObject {
     
     // MARK: - API Configuration Valid
     var isAPIConfigured: Bool {
-        !volcengineAppId.isEmpty && !volcengineAccessToken.isEmpty && !cloudbaseEnvId.isEmpty
+        !volcengineAppId.isEmpty && !volcengineAccessToken.isEmpty && !cloudbaseEnvId.isEmpty && !cloudbaseSecretId.isEmpty && !cloudbaseSecretKey.isEmpty
     }
     
     // MARK: - AI Configuration Valid（豆包）

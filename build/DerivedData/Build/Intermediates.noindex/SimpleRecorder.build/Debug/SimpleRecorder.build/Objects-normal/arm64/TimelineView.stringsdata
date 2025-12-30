@@ -1,0 +1,72 @@
+{
+  "source": "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Views/TimelineView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "时间轴",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 86
+        }
+      },
+      {
+        "comment": "",
+        "key": "清除筛选",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 97
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld 年",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 216
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 221
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld 月",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 289
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 295
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld 日 %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 361
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 367
+        }
+      }
+    ]
+  },
+  "version": 1
+}
