@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>8F428DB8-8FFE-41A3-BC93-D7B24AFFA5F2</key>
+		<key>CC2D0FFB-358E-4BF4-93E8-6D59194F0610</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,49 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>8F428DB8-8FFE-41A3-BC93-D7B24AFFA5F2.xcactivitylog</string>
-			<key>hasPrimaryLog</key>
-			<true/>
-			<key>primaryObservable</key>
-			<dict>
-				<key>highLevelStatus</key>
-				<string>S</string>
-				<key>totalNumberOfAnalyzerIssues</key>
-				<integer>0</integer>
-				<key>totalNumberOfErrors</key>
-				<integer>0</integer>
-				<key>totalNumberOfTestFailures</key>
-				<integer>0</integer>
-				<key>totalNumberOfWarnings</key>
-				<integer>0</integer>
-			</dict>
-			<key>schemeIdentifier-containerName</key>
-			<string>SimpleRecorder project</string>
-			<key>schemeIdentifier-schemeName</key>
-			<string>SimpleRecorder</string>
-			<key>schemeIdentifier-sharedScheme</key>
-			<integer>1</integer>
-			<key>signature</key>
-			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Debug</string>
-			<key>timeStartedRecording</key>
-			<real>788799860.68619502</real>
-			<key>timeStoppedRecording</key>
-			<real>788799883.45281696</real>
-			<key>title</key>
-			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Debug</string>
-			<key>uniqueIdentifier</key>
-			<string>8F428DB8-8FFE-41A3-BC93-D7B24AFFA5F2</string>
-		</dict>
-		<key>BC3A8708-21ED-4874-B689-16137639CFAD</key>
-		<dict>
-			<key>className</key>
-			<string>IDECommandLineBuildLog</string>
-			<key>documentTypeString</key>
-			<string>&lt;nil&gt;</string>
-			<key>domainType</key>
-			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
-			<key>fileName</key>
-			<string>BC3A8708-21ED-4874-B689-16137639CFAD.xcactivitylog</string>
+			<string>CC2D0FFB-358E-4BF4-93E8-6D59194F0610.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -82,55 +40,13 @@
 			<key>signature</key>
 			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>788800428.68826795</real>
+			<real>788800652.50242698</real>
 			<key>timeStoppedRecording</key>
-			<real>788800434.468099</real>
+			<real>788800690.36349404</real>
 			<key>title</key>
 			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>BC3A8708-21ED-4874-B689-16137639CFAD</string>
-		</dict>
-		<key>D8F8E4F1-A19E-4DC0-9989-CD0B669A14C9</key>
-		<dict>
-			<key>className</key>
-			<string>IDECommandLineBuildLog</string>
-			<key>documentTypeString</key>
-			<string>&lt;nil&gt;</string>
-			<key>domainType</key>
-			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
-			<key>fileName</key>
-			<string>D8F8E4F1-A19E-4DC0-9989-CD0B669A14C9.xcactivitylog</string>
-			<key>hasPrimaryLog</key>
-			<true/>
-			<key>primaryObservable</key>
-			<dict>
-				<key>highLevelStatus</key>
-				<string>E</string>
-				<key>totalNumberOfAnalyzerIssues</key>
-				<integer>0</integer>
-				<key>totalNumberOfErrors</key>
-				<integer>3</integer>
-				<key>totalNumberOfTestFailures</key>
-				<integer>0</integer>
-				<key>totalNumberOfWarnings</key>
-				<integer>0</integer>
-			</dict>
-			<key>schemeIdentifier-containerName</key>
-			<string>SimpleRecorder project</string>
-			<key>schemeIdentifier-schemeName</key>
-			<string>SimpleRecorder</string>
-			<key>schemeIdentifier-sharedScheme</key>
-			<integer>1</integer>
-			<key>signature</key>
-			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Debug</string>
-			<key>timeStartedRecording</key>
-			<real>788800372.57946301</real>
-			<key>timeStoppedRecording</key>
-			<real>788800374.35002804</real>
-			<key>title</key>
-			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Debug</string>
-			<key>uniqueIdentifier</key>
-			<string>D8F8E4F1-A19E-4DC0-9989-CD0B669A14C9</string>
+			<string>CC2D0FFB-358E-4BF4-93E8-6D59194F0610</string>
 		</dict>
 	</dict>
 </dict>
