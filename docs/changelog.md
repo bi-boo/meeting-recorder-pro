@@ -1,18 +1,147 @@
-# 修改记录
+# [2026-01-14 02:10]
+- **用户需求/反馈**: 优化文件命名格式,在日期后增加星期简写,使用双空格间距,去除 AM/PM 标记,时长由 `X min` 改为 `Xmin`。期望格式:录音中 `2026.01.14  Mon  18.59 - ing`,录音后 `2026.01.14  Mon  18.59 - 13min`。
+- **技术逻辑变更**: 
+    - 修改 `generateInitialFileName()`:使用 `DateFormatter` 的 `"E"` 格式生成三字母星期缩写(Mon/Tue/Wed等),调整为双空格分隔,移除上下午字段。
+    - 修改 `renameToFinalFormat()`:同步时间格式调整,时长从 `"\(minutes) min"` 改为 `"\(minutes)min"`,简化基础文件名拼接逻辑。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/changelog.md`
+- **变更原因**: 提升文件名可读性与审美一致性,增加星期信息便于用户按日期检索录音文件。
 
-## [2026-01-14] - 修复连续录制导致的随机崩溃问题
-### 变更原因
-用户反馈应用在第一次录音结束后，后续录音可能导致应用意外退出。经调研，主因是 `AVAudioEngine` 资源释放不彻底以及 `SCStream` 异步清理导致的资源抢占。
+# [2026-01-14 01:58]
+- **用户需求/反馈**: 修复修复后依然时长不足（10秒）以及再次启动录音时应用崩溃的问题。
+- **技术逻辑变更**: 
+    - **修复拷贝崩溃**: 发现在 Swift 中对 `AVAudioPCMBuffer` 调用 `.copy()` 会触发内存异常或 Nil，现已补齐自定义的 `deepCopy()` 内存深拷贝方法。
+    - **彻底消除丢帧**: 重写 `processAudioBuffer` 逻辑，移除超时丢帧机制。利用 `writingQueue` 的串行特性，确保即使硬盘响应慢，所有音频帧也会被排队等待写入，绝不主动抛弃。
+    - **安全实例捕获**: 在异步闭包中捕获当前 `AssetWriter` 实例，防止录音启停瞬间操作到被置空的旧对象。
+    - **修正语法**: 修复了上一版修改遗留的函数嵌套错误。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder.dmg`
+- **变更原因**: 从内存管理和时序同步层面彻底根治录音异常。
 
-### 修改内容
-1.  **引入转换锁 (`isTransitioning`)**：在 `AudioRecorderManager` 中实施状态保护，确保在旧的资源清理过程未完全结束前，拦截并忽略新的启停指令。
-2.  **强制重置音频引擎**：在停止录音时执行 `audioEngine.reset()`，彻底清除节点连接图，确保每次新录音都能在“白纸”状态上构建音频拓扑。
-3.  **修复异步清理逻辑**：修正了系统音频流在后台静默关闭时，可能误伤新录制任务流的逻辑风险。
-4.  **消除 AssetWriter 竞态**：通过局部变量捕获 `AVAssetWriter` 引用，确保在快速高频操作下，清理逻辑不会误操作到新的写入实例。
+# [2026-01-14 01:49]
+- **用户需求/反馈**: 录音 1 分钟但文件仅有 17 秒，存在严重丢帧与时长缩减问题。
+- **技术逻辑变更**: 
+    - 引入专用 `writingQueue` (串行队列) 负责异步音频写入，彻底分离录制与存储线程。
+    - 在写入前对 `AVAudioPCMBuffer` 执行深拷贝，解决异步操作中的内存复用冲突。
+    - 将系统音频缓冲队列上限从 30 提升至 200，增强抗负载波动能力。
+    - 优化 `AssetWriter` 忙碌检查逻辑，增加微秒级重试机制。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder.dmg`
+- **变更原因**: 解决高负载场景下因硬盘 IO 压力导致的音频帧强行丢弃，确保录制时长与物理时间严格一致。
 
-### 影响范围
-- `AudioRecorderManager.swift`
-- 全面提升了录音功能的并发稳定性和连续启停的可靠性。
+# [2026-01-14 01:40]
+- **用户需求/反馈**: 1. 明确标注麦克风输入并支持切换不同设备；2. 优化权限引导，确保应用自动出现在屏幕录制列表中；3. 优化权限提示文案。
+- **技术逻辑变更**: 
+    - 修改 `AppSettings` 接入 `AVCaptureDevice` 列举系统内所有音频输入。
+    - 在 `AudioRecorderManager` 中通过 `AudioUnitSetProperty` 动态切换 `AVAudioEngine` 的硬件输入设备。
+    - 引入 `CGRequestScreenCaptureAccess` 触发原生权限提示。
+    - 优化 `MainWindowView` 中的文字表述并增加设备选择器。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Models/AppSettings.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `SimpleRecorder.dmg`
+- **变更原因**: 提升音频输入的灵活性，并降低用户开启权限的认知门槛。
+
+# [2026-01-14 01:32]
+- **用户需求/反馈**: 解决每次打包后系统权限（如屏幕录制）需要重新授权的问题。
+- **技术逻辑变更**: 
+    - 修改项目配置 `DEVELOPMENT_TEAM` 为 `UZ285BC956`。
+    - 切换为“离线手签”模式：构建时禁用 Xcode 自动签名，构建后使用 `codesign` 显式应用开发证书。
+    - 对最终生成的 `SimpleRecorder.dmg` 执行同步签名。
+- **涉及文件清单**: 
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `SimpleRecorder.dmg`
+- **变更原因**: 固定应用的代码签名标识符（CDHash），使 macOS TCC 安全策略将其视为同一受信任应用，从而持久化存储权限授权。
+
+# [2026-01-14 01:28]
+- **用户需求/反馈**: 1. 移除音频源前面的 Emoji；2. 选择系统音频相关选项时，若无权限则自动跳转系统权限设置。
+- **技术逻辑变更**: 
+    - 修改 `AudioSource.displayName` 移除图标。
+    - 在 `AppSettings` 中通过 `CGPreflightScreenCaptureAccess` 实现权限预检逻辑。
+    - 在 `MainWindowView` 中通过 `onChange` 监听选择器，未授权时执行回滚并跳转 `x-apple.systempreferences`。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Models/AppSettings.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `docs/changelog.md`
+    - `SimpleRecorder.dmg`
+- **变更原因**: 优化系统的权限引导体验，符合极简设计规范。
+
+# [2026-01-14 01:26]
+- **用户需求/反馈**: 请求打一个新包。
+- **技术逻辑变更**: 无（纯打包发布）。
+- **涉及文件清单**: 
+    - `SimpleRecorder.dmg`
+- **变更原因**: 发布包含“高频启停稳定性增强”及“提醒逻辑优化”的最新完整版本。
+
+# [2026-01-14 01:10]
+- **用户需求/反馈**: 用户反馈频繁启停录音会导致应用无响应。
+- **技术逻辑变更**: 
+    - 引入基于 `Date` 的硬计时逻辑，解决主线程阻塞导致的计时漂移。
+    - 实施 `isTransitioning` 状态锁，拦截正在进行的资源重置期间的新指令。
+    - 在 `AppDelegate` 中增加 800ms 输入频率限制（Throttling）。
+- **涉及文件清单**: 
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/prd.md`
+    - `docs/changelog.md`
+- **变更原因**: 修复高频启停导致的竞态条件和死锁问题。
+
+# [2026-01-14 00:55]
+- **用户需求/反馈**: 希望移除录音接近上限时的预警弹窗，但在录音结束后有时长反馈。
+- **技术逻辑变更**: 
+    - 彻底移除 `AudioRecorderManager` 中的 80% 阈值预警逻辑。
+    - 新增录音成功结束后的 UI 回调，告知用户最终录制时长。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+- **变更原因**: 减少录音过程中的干扰，优化用户反馈闭环。
+
+# [2026-01-14 00:45]
+- **变更内容**: 发布新的 DMG 安装包
+- **原因**: 用户需要分发最新的修复版本。
+- **影响**: 
+    - 构建并打包生成 `SimpleRecorder.dmg`。
+
+# [2026-01-14 00:30]
+- **用户需求/反馈**: 1. 文件名简洁（不需要秒）；2. 冲突解决使用 (1)(2) 序号；3. 录音时长限额支持 1 分钟精度。
+- **技术逻辑变更**: 
+    - 将文件名格式回退至 `HH.mm`。
+    - 实现基于文件系统的循环检测算法，自动增加递增序列后缀。
+    - 修改 UI 分钟步进值。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+- **变更原因**: 提升录音管理体验的直观性和灵活性。
+
+# [2026-01-14 00:15]
+- **用户需求/反馈**: 用户反馈开启混合录制时声音失真，且文件名偶尔出现四位随机数字。
+- **技术逻辑变更**: 
+    - 引入 `cachedAudioConverter` 实现转换器持久化，确保音频流连续性。
+    - 将文件名内部生成精度提升至秒级，从根源消除重名冲突。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+- **变更原因**: 解决音频转换时的相位丢失问题及命名冲突。
+
+# [2026-01-14 00:05]
+- **用户需求/反馈**: 用户反馈连续多次录音时应用可能随机崩溃。
+- **技术逻辑变更**: 
+    - 强制在停止录音时执行 `audioEngine.reset()`，清除节点拓扑。
+    - 修正 `SCStream` 异步清理时的竞争风险，确保资源彻底释放。
+    - 使用局部变量捕获 `AVAssetWriter` 引用，隔离高频操作下的写入实例。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 解决 `AVAudioEngine` 资源释放不彻底导致的系统级崩溃。
 
 
 ## [2026-01-13] - 优化录音命名格式 (用户定制版)

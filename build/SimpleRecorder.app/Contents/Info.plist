@@ -54,5 +54,7 @@
 	<string>极简录音需要访问麦克风来录制音频</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSSystemAudioCaptureUsageDescription</key>
+	<string>极简录音需要访问系统音频来录制电脑内部声音（如会议音频、播放的音乐）</string>
 </dict>
 </plist>

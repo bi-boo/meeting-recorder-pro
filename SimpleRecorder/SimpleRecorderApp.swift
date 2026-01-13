@@ -30,6 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyManager = HotKeyManager.shared
     private var animationTimer: Timer?
     private var recordingStartTime: Date?
+    private var lastToggleTime: Date = .distantPast  // 用于防抖
 
     // 保持窗口引用，防止被释放
     private var mainWindow: NSWindow?
@@ -60,6 +61,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(showMainWindow),
             name: .openSettingsWindow,
+            object: nil
+        )
+
+        // 监听快捷键变更通知
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleHotKeyChanged),
+            name: .hotKeyChanged,
             object: nil
         )
 
@@ -112,25 +121,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 录音控制
         let recordItem = NSMenuItem(
-            title: "开始录音", action: #selector(toggleRecording), keyEquivalent: "r")
-        recordItem.keyEquivalentModifierMask = [.command, .shift]
+            title: "开始录音", action: #selector(toggleRecording), keyEquivalent: "")
+        if let hotKey = HotKeyManager.shared.currentHotKey {
+            recordItem.keyEquivalent = hotKey.keyEquivalent
+            recordItem.keyEquivalentModifierMask = hotKey.modifierMask
+        } else {
+            // 后备方案
+            recordItem.keyEquivalent = "r"
+            recordItem.keyEquivalentModifierMask = [.command, .shift]
+        }
         recordItem.target = self
         menu.addItem(recordItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // 打开主窗口（包含录音列表和设置）
-        let mainWindowItem = NSMenuItem(
-            title: "打开极简录音", action: #selector(showMainWindow), keyEquivalent: "o")
-        mainWindowItem.keyEquivalentModifierMask = .command
-        mainWindowItem.target = self
-        menu.addItem(mainWindowItem)
+        // 打开主窗口（仅包含设置）
+        let settingsItem = NSMenuItem(
+            title: "设置...", action: #selector(showMainWindow), keyEquivalent: "")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
 
         menu.addItem(NSMenuItem.separator())
 
         // 退出
-        let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
-        quitItem.keyEquivalentModifierMask = .command
+        let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -139,6 +153,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Actions
     @objc func toggleRecording() {
+        let now = Date()
+        let interval = now.timeIntervalSince(lastToggleTime)
+
+        // 防抖：限制操作间隔不少于 800ms
+        if interval < 0.8 {
+            print("⏳ 操作太快，已忽略 (间隔: \(String(format: "%.2f", interval))s)")
+            return
+        }
+        lastToggleTime = now
+
         if recordingManager.isRecording {
             recordingManager.stopRecording()
         } else {
@@ -156,12 +180,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 550),
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 550, height: 450),
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "极简录音"
+        window.title = "设置"
         window.contentView = NSHostingView(rootView: MainWindowView())
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -173,6 +197,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
+    }
+
+    @objc private func handleHotKeyChanged() {
+        DispatchQueue.main.async { [weak self] in
+            // 重新设置菜单以更新显示的快捷键
+            self?.setupMenu()
+            // 重新应用当前的录音状态（防止 title 被重置为“开始录音”）
+            if let recording = self?.recordingManager.isRecording {
+                self?.updateMenuRecordingState(isRecording: recording)
+            }
+        }
     }
 
     // MARK: - Recording State Animation
@@ -260,4 +295,5 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 extension Notification.Name {
     static let recordingStateChanged = Notification.Name("recordingStateChanged")
     static let openSettingsWindow = Notification.Name("openSettingsWindow")
+    static let hotKeyChanged = Notification.Name("hotKeyChanged")
 }

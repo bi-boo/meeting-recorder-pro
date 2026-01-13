@@ -1,9 +1,14 @@
-//
-//  AppSettings.swift
-//  极简录音 - 应用设置模型
-//
-
+import AVFoundation
+import AppKit
 import Foundation
+
+// MARK: - 音频输入设备模型
+struct AudioInputDevice: Identifiable, Equatable, Codable {
+    var id: String  // UniqueID
+    var name: String  // Display Name
+
+    static let defaultDevice = AudioInputDevice(id: "default", name: "系统默认麦克风")
+}
 
 // MARK: - 音频源枚举
 enum AudioSource: String, CaseIterable, Codable {
@@ -13,17 +18,17 @@ enum AudioSource: String, CaseIterable, Codable {
 
     var displayName: String {
         switch self {
-        case .microphone: return "🎤 仅麦克风"
-        case .systemAudio: return "🔊 仅系统音频"
-        case .both: return "🎧 同时录制"
+        case .microphone: return "录制电脑麦克风"
+        case .systemAudio: return "仅录制系统音频"
+        case .both: return "麦克风与系统音频"
         }
     }
 
     var description: String {
         switch self {
-        case .microphone: return "录制外部声音（人说话、环境音）"
-        case .systemAudio: return "录制电脑内部声音（会议、音乐）"
-        case .both: return "同时录制麦克风和系统音频"
+        case .microphone: return "录制电脑麦克风输入（如人声、环境音）"
+        case .systemAudio: return "录制电脑内部发出的声音（如会议、音乐）"
+        case .both: return "同时录制麦克风输入和系统内部声音"
         }
     }
 }
@@ -34,91 +39,6 @@ class AppSettings: ObservableObject {
     // MARK: - 存储路径设置
     @Published var recordingsPath: URL {
         didSet { savePath(recordingsPath, forKey: "recordingsPath") }
-    }
-
-    @Published var transcriptionsPath: URL {
-        didSet { savePath(transcriptionsPath, forKey: "transcriptionsPath") }
-    }
-
-    // MARK: - API 配置
-    @Published var volcengineAppId: String {
-        didSet { UserDefaults.standard.set(volcengineAppId, forKey: "volcengineAppId") }
-    }
-
-    @Published var volcengineAccessToken: String {
-        didSet { UserDefaults.standard.set(volcengineAccessToken, forKey: "volcengineAccessToken") }
-    }
-
-    @Published var cloudbaseEnvId: String {
-        didSet { UserDefaults.standard.set(cloudbaseEnvId, forKey: "cloudbaseEnvId") }
-    }
-
-    @Published var cloudbaseSecretId: String {
-        didSet { UserDefaults.standard.set(cloudbaseSecretId, forKey: "cloudbaseSecretId") }
-    }
-
-    @Published var cloudbaseSecretKey: String {
-        didSet { UserDefaults.standard.set(cloudbaseSecretKey, forKey: "cloudbaseSecretKey") }
-    }
-
-    // MARK: - AI 总结配置（豆包）
-    // 硬编码豆包 API 地址和模型
-    let doubaoApiBaseUrl = "https://ark.cn-beijing.volces.com/api/v3"
-    let doubaoModelName = "doubao-seed-1-6-251015"
-
-    @Published var doubaoApiKey: String {
-        didSet { UserDefaults.standard.set(doubaoApiKey, forKey: "doubao_apiKey") }
-    }
-
-    @Published var autoGenerateSummary: Bool {
-        didSet { UserDefaults.standard.set(autoGenerateSummary, forKey: "ai_autoGenerateSummary") }
-    }
-
-    // MARK: - 转写设置（火山引擎 API 参数）
-    @Published var enableITN: Bool {  // 文本规范化（数字、日期等转换）
-        didSet { UserDefaults.standard.set(enableITN, forKey: "transcription_enableITN") }
-    }
-
-    @Published var enablePunctuation: Bool {  // 自动添加标点符号
-        didSet {
-            UserDefaults.standard.set(enablePunctuation, forKey: "transcription_enablePunctuation")
-        }
-    }
-
-    @Published var enableDDC: Bool {  // 语义顺滑（去除口语化表达）
-        didSet { UserDefaults.standard.set(enableDDC, forKey: "transcription_enableDDC") }
-    }
-
-    @Published var showUtterances: Bool {  // 分句显示
-        didSet { UserDefaults.standard.set(showUtterances, forKey: "transcription_showUtterances") }
-    }
-
-    @Published var enableSpeakerInfo: Bool {  // 说话人分离
-        didSet {
-            UserDefaults.standard.set(enableSpeakerInfo, forKey: "transcription_enableSpeakerInfo")
-        }
-    }
-
-    @Published var enableEmotionDetection: Bool {  // 情绪检测
-        didSet {
-            UserDefaults.standard.set(
-                enableEmotionDetection, forKey: "transcription_enableEmotionDetection")
-        }
-    }
-
-    @Published var enableGenderDetection: Bool {  // 性别识别
-        didSet {
-            UserDefaults.standard.set(
-                enableGenderDetection, forKey: "transcription_enableGenderDetection")
-        }
-    }
-
-    @Published var showSpeechRate: Bool {  // 语速信息
-        didSet { UserDefaults.standard.set(showSpeechRate, forKey: "transcription_showSpeechRate") }
-    }
-
-    @Published var modelVersion: String {  // 模型版本
-        didSet { UserDefaults.standard.set(modelVersion, forKey: "transcription_modelVersion") }
     }
 
     // MARK: - 录音设置
@@ -139,6 +59,11 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(audioSource.rawValue, forKey: "audioSource") }
     }
 
+    @Published var availableInputDevices: [AudioInputDevice] = [.defaultDevice]
+    @Published var selectedDeviceID: String {
+        didSet { UserDefaults.standard.set(selectedDeviceID, forKey: "selectedDeviceID") }
+    }
+
     /// 检测当前系统是否支持系统音频采集（需要 macOS 13.0+）
     static var isSystemAudioSupported: Bool {
         if #available(macOS 13.0, *) {
@@ -147,21 +72,39 @@ class AppSettings: ObservableObject {
         return false
     }
 
+    /// 检测当前是否拥有“屏幕录制”权限
+    static var hasScreenCapturePermission: Bool {
+        if #available(macOS 14.2, *) {
+            return CGPreflightScreenCaptureAccess()
+        } else if #available(macOS 13.0, *) {
+            return CGPreflightScreenCaptureAccess()
+        }
+        return true
+    }
+
+    /// 触发系统原生权限申请弹窗 (用于确保应用出现在系统权限列表中)
+    static func requestScreenCapturePermission() {
+        if #available(macOS 10.15, *) {
+            // 调用此 API 如果未授权会触发系统弹窗，并将应用加入列表
+            CGRequestScreenCaptureAccess()
+        }
+    }
+
+    /// 打开系统设置中的屏显录制权限页面
+    static func openScreenCaptureSettings() {
+        let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        NSWorkspace.shared.open(url)
+    }
+
     // MARK: - Initialization
     private init() {
-        // 默认路径: /Users/用户名/极简录音/录音 和 /Users/用户名/极简录音/转写
-        // 与系统的「桌面」「文稿」「图片」等目录同级
-        // 注意：不使用 homeDirectoryForCurrentUser，因为沙盒应用会返回容器路径
+        // 默认路径: /Users/用户名/极简录音/录音
         let realHomeDirectory = URL(fileURLWithPath: "/Users/\(NSUserName())")
         let defaultRecordingsPath =
             realHomeDirectory
             .appendingPathComponent("极简录音")
             .appendingPathComponent("录音")
-
-        let defaultTranscriptionsPath =
-            realHomeDirectory
-            .appendingPathComponent("极简录音")
-            .appendingPathComponent("转写")
 
         // 加载路径设置
         if let data = UserDefaults.standard.data(forKey: "recordingsPath"),
@@ -174,84 +117,6 @@ class AppSettings: ObservableObject {
         } else {
             self.recordingsPath = defaultRecordingsPath
         }
-
-        if let data = UserDefaults.standard.data(forKey: "transcriptionsPath"),
-            var isStale = Optional(false),
-            let url = try? URL(
-                resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil,
-                bookmarkDataIsStale: &isStale)
-        {
-            self.transcriptionsPath = url
-        } else {
-            self.transcriptionsPath = defaultTranscriptionsPath
-        }
-
-        // 加载 API 配置（使用内置默认值确保配置不丢失）
-        let defaultAppId = "2505335848"
-        let defaultAccessToken = "sHrVzn0mOgUbUF2Dvu-h17H7czytWk6i"
-        let defaultEnvId = "thenextq-6g7bemmi5ea4ce29"
-
-        let loadedAppId = UserDefaults.standard.string(forKey: "volcengineAppId") ?? defaultAppId
-        let loadedAccessToken =
-            UserDefaults.standard.string(forKey: "volcengineAccessToken") ?? defaultAccessToken
-        let loadedEnvId = UserDefaults.standard.string(forKey: "cloudbaseEnvId") ?? defaultEnvId
-        let loadedSecretId = UserDefaults.standard.string(forKey: "cloudbaseSecretId") ?? ""
-        let loadedSecretKey = UserDefaults.standard.string(forKey: "cloudbaseSecretKey") ?? ""
-
-        self.volcengineAppId = loadedAppId
-        self.volcengineAccessToken = loadedAccessToken
-        self.cloudbaseEnvId = loadedEnvId
-        self.cloudbaseSecretId = loadedSecretId
-        self.cloudbaseSecretKey = loadedSecretKey
-
-        // 数据迁移：清理类型不正确的旧数据（之前存储的是 Int 而非 Bool）
-        let transcriptionKeys = [
-            "transcription_enableITN",
-            "transcription_enablePunctuation",
-            "transcription_enableDDC",
-            "transcription_showUtterances",
-            "transcription_enableSpeakerInfo",
-            "transcription_enableEmotionDetection",
-            "transcription_enableGenderDetection",
-            "transcription_showSpeechRate",
-        ]
-        for key in transcriptionKeys {
-            if let value = UserDefaults.standard.object(forKey: key) {
-                // 如果是 Int 类型（旧格式），删除它
-                if value is Int {
-                    print("🧹 清理 Int 类型的旧数据: \(key) = \(value)")
-                    UserDefaults.standard.removeObject(forKey: key)
-                }
-            }
-        }
-
-        // 辅助函数：安全读取 Bool，如果 key 不存在则返回默认值
-        func loadBool(forKey key: String, defaultValue: Bool) -> Bool {
-            if UserDefaults.standard.object(forKey: key) == nil {
-                return defaultValue
-            }
-            return UserDefaults.standard.bool(forKey: key)
-        }
-
-        // 加载转写设置（使用辅助函数确保默认值生效）
-        self.enableITN = loadBool(forKey: "transcription_enableITN", defaultValue: true)
-        self.enablePunctuation = loadBool(
-            forKey: "transcription_enablePunctuation", defaultValue: true)
-        self.enableDDC = loadBool(forKey: "transcription_enableDDC", defaultValue: true)
-        self.showUtterances = loadBool(forKey: "transcription_showUtterances", defaultValue: true)
-        self.enableSpeakerInfo = loadBool(
-            forKey: "transcription_enableSpeakerInfo", defaultValue: true)  // 会议场景默认开启
-        self.enableEmotionDetection = loadBool(
-            forKey: "transcription_enableEmotionDetection", defaultValue: false)
-        self.enableGenderDetection = loadBool(
-            forKey: "transcription_enableGenderDetection", defaultValue: true)
-        self.showSpeechRate = loadBool(forKey: "transcription_showSpeechRate", defaultValue: false)
-        self.modelVersion = UserDefaults.standard.string(forKey: "transcription_modelVersion") ?? ""  // 不传，使用默认版本
-
-        // 加载豆包 API 配置
-        self.doubaoApiKey = UserDefaults.standard.string(forKey: "doubao_apiKey") ?? ""
-        self.autoGenerateSummary =
-            UserDefaults.standard.object(forKey: "ai_autoGenerateSummary") as? Bool ?? false
 
         // 加载录音上限设置
         self.maxDurationHours =
@@ -268,34 +133,22 @@ class AppSettings: ObservableObject {
                 self.audioSource = source
             } else {
                 self.audioSource = .microphone
-                print("⚠️ 系统版本低于 macOS 13.0，音频源已降级为麦克风模式")
             }
         } else {
             self.audioSource = .microphone  // 默认麦克风
         }
 
-        // 所有属性初始化完成后，保存默认值到 UserDefaults
-        if UserDefaults.standard.string(forKey: "volcengineAppId") == nil {
-            UserDefaults.standard.set(loadedAppId, forKey: "volcengineAppId")
-            UserDefaults.standard.set(loadedAccessToken, forKey: "volcengineAccessToken")
-            UserDefaults.standard.set(loadedEnvId, forKey: "cloudbaseEnvId")
-            UserDefaults.standard.set(loadedSecretId, forKey: "cloudbaseSecretId")
-            UserDefaults.standard.set(loadedSecretKey, forKey: "cloudbaseSecretKey")
-        }
+        self.selectedDeviceID =
+            UserDefaults.standard.string(forKey: "selectedDeviceID") ?? "default"
+
+        // 初始刷新一次设备列表
+        refreshInputDevices()
 
         // 确保目录存在
         try? FileManager.default.createDirectory(
             at: recordingsPath, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(
-            at: transcriptionsPath, withIntermediateDirectories: true)
 
-        // 调试：打印初始化后的值
-        print("🔧 AppSettings 初始化完成:")
-        print("  - enableSpeakerInfo: \(self.enableSpeakerInfo)")
-        print("  - enableEmotionDetection: \(self.enableEmotionDetection)")
-        print("  - enableGenderDetection: \(self.enableGenderDetection)")
-        print("  - showSpeechRate: \(self.showSpeechRate)")
-        print("  - modelVersion: \(self.modelVersion)")
+        print("🔧 AppSettings 初始化完成 (精简版)")
     }
 
     // MARK: - Path Persistence
@@ -307,74 +160,28 @@ class AppSettings: ObservableObject {
         }
     }
 
-    // MARK: - Load Secrets from Config File
-    private func loadSecretsFromConfigFile() {
-        // 尝试多个可能的路径
-        let possiblePaths = [
-            // 项目 config 目录（开发时）
-            Bundle.main.bundlePath.replacingOccurrences(of: "/SimpleRecorder.app", with: "")
-                + "/config/secrets.json",
-            // 用户目录下的配置
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
-                "极简录音/config/secrets.json"
-            ).path,
-            // 当前工作目录
-            FileManager.default.currentDirectoryPath + "/config/secrets.json",
-        ]
+    // MARK: - Device Management
+    func refreshInputDevices() {
+        let session = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInMicrophone, .externalUnknown],
+            mediaType: .audio,
+            position: .unspecified)
 
-        for path in possiblePaths {
-            let url = URL(fileURLWithPath: path)
-            if let data = try? Data(contentsOf: url),
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let devices = session.devices
+        var newDevices = [AudioInputDevice.defaultDevice]
+
+        for device in devices {
+            newDevices.append(AudioInputDevice(id: device.uniqueID, name: device.localizedName))
+        }
+
+        DispatchQueue.main.async {
+            self.availableInputDevices = newDevices
+            // 如果当前选中的设备已经不在列表中（比如拔掉了），切回默认
+            if self.selectedDeviceID != "default"
+                && !newDevices.contains(where: { $0.id == self.selectedDeviceID })
             {
-
-                if let volcengine = json["volcengine"] as? [String: Any] {
-                    if let appId = volcengine["app_id"] as? String, volcengineAppId.isEmpty {
-                        volcengineAppId = appId
-                        // 保存到 UserDefaults
-                        UserDefaults.standard.set(appId, forKey: "volcengineAppId")
-                    }
-                    if let token = volcengine["access_token"] as? String,
-                        volcengineAccessToken.isEmpty
-                    {
-                        volcengineAccessToken = token
-                        UserDefaults.standard.set(token, forKey: "volcengineAccessToken")
-                    }
-                }
-
-                if let cloudbase = json["tencent_cloudbase"] as? [String: Any],
-                    let envId = cloudbase["env_id"] as? String, cloudbaseEnvId.isEmpty
-                {
-                    cloudbaseEnvId = envId
-                    UserDefaults.standard.set(envId, forKey: "cloudbaseEnvId")
-
-                    if let secretId = cloudbase["secret_id"] as? String {
-                        cloudbaseSecretId = secretId
-                        UserDefaults.standard.set(secretId, forKey: "cloudbaseSecretId")
-                    }
-                    if let secretKey = cloudbase["secret_key"] as? String {
-                        cloudbaseSecretKey = secretKey
-                        UserDefaults.standard.set(secretKey, forKey: "cloudbaseSecretKey")
-                    }
-                }
-
-                // 找到并加载成功，退出循环
-                if isAPIConfigured {
-                    print("成功从 \(path) 加载 API 配置")
-                    break
-                }
+                self.selectedDeviceID = "default"
             }
         }
-    }
-
-    // MARK: - API Configuration Valid
-    var isAPIConfigured: Bool {
-        !volcengineAppId.isEmpty && !volcengineAccessToken.isEmpty && !cloudbaseEnvId.isEmpty
-            && !cloudbaseSecretId.isEmpty && !cloudbaseSecretKey.isEmpty
-    }
-
-    // MARK: - AI Configuration Valid（豆包）
-    var isAIConfigured: Bool {
-        !doubaoApiKey.isEmpty
     }
 }

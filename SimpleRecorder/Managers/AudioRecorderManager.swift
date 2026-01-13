@@ -12,6 +12,27 @@ import Foundation
 import IOKit.pwr_mgt
 import ScreenCaptureKit
 
+// MARK: - AVAudioPCMBuffer 扩展 (深拷贝支持)
+extension AVAudioPCMBuffer {
+    func deepCopy() -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else {
+            return nil
+        }
+        copy.frameLength = frameLength
+        if let src = floatChannelData, let dst = copy.mutableAudioBufferList.pointee.mBuffers.mData
+        {
+            // 注意：这里假设是单声道或交织/非交织的通用处理
+            // 对于单声道 48k Float，直接拷贝整个内存块是安全的
+            for i in 0..<Int(format.channelCount) {
+                if let s = floatChannelData?[i], let d = copy.floatChannelData?[i] {
+                    memcpy(d, s, Int(frameLength) * MemoryLayout<Float>.size)
+                }
+            }
+        }
+        return copy
+    }
+}
+
 class AudioRecorderManager: NSObject, ObservableObject {
     static let shared = AudioRecorderManager()
 
@@ -23,6 +44,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private let audioEngine = AVAudioEngine()
     private var assetWriter: AVAssetWriter?
     private var assetWriterInput: AVAssetWriterInput?
+    private var writingQueue = DispatchQueue(
+        label: "com.simplerecorder.writingQueue", qos: .userInitiated)
     private var recordingTimer: Timer?
     private var sleepAssertionID: IOPMAssertionID = 0
     private var recordingStartDate: Date?
@@ -31,6 +54,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var isWriterStarted = false
     private var isTransitioning = false  // 用于防止启停过程中的并发冲突
     private var totalFramesWritten: Int64 = 0
+    private var isAutoStoppedByLimit = false  // 标记是否因为达到时长上限而停止
 
     // 当前录音使用的音频源（录音开始时锁定）
     private var currentAudioSource: AudioSource = .microphone
@@ -46,7 +70,13 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // 系统音频缓冲队列（用于从 ScreenCaptureKit 回调传递到 AVAudioEngine）
     private var systemAudioBufferQueue = [AVAudioPCMBuffer]()
+    private let systemAudioQueueLimit = 200
     private let systemAudioQueueLock = NSLock()
+
+    // 音频转换器缓存，用于修复系统音转换时的相位不连续/失真问题
+    private var cachedAudioConverter: AVAudioConverter?
+    private var lastSrcFormat: AVAudioFormat?
+    private var lastDstFormat: AVAudioFormat?
 
     // 调试辅助标记
     private var hasPrintedFirstSample = false
@@ -56,11 +86,6 @@ class AudioRecorderManager: NSObject, ObservableObject {
     // 动态时长限制设置
     private var maxDuration: TimeInterval {
         AppSettings.shared.maxRecordingDuration
-    }
-    private var warningStartTime: TimeInterval {
-        let duration = maxDuration
-        // 如果时长超过1小时，提前1小时提醒；否则在 80% 时提醒
-        return duration > 3600 ? duration - 3600 : duration * 0.8
     }
     private let warningInterval: TimeInterval = 10 * 60  // 每 10 分钟提醒
     private var lastWarningTime: TimeInterval = 0
@@ -138,9 +163,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
             beginRecording()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
-                if granted { DispatchQueue.main.async { self?.beginRecording() } }
+                if granted {
+                    DispatchQueue.main.async { self?.beginRecording() }
+                } else {
+                    DispatchQueue.main.async { self?.isTransitioning = false }
+                }
             }
         case .denied, .restricted:
+            isTransitioning = false
             showMicrophonePermissionAlert()
         @unknown default:
             break
@@ -304,9 +334,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
             // 使用当前时间减去开始时间，确保计时的绝对准确，解决主线程阻塞导致的累计误差
             self.recordingDuration = Date().timeIntervalSince(startDate)
 
-            self.checkTimeWarning()
             if self.recordingDuration >= self.maxDuration {
                 print("⏰ 达到录音时长上限 (\(Int(self.maxDuration))s)，正在自动停止...")
+                self.isAutoStoppedByLimit = true
                 self.stopRecording()
             }
         }
@@ -315,11 +345,21 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         setupSleepPrevention()
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
-        print("🎙️ 录音已启动 [\(currentAudioSource.displayName)] (fMP4): \(fileURL.lastPathComponent)")
+
+        let deviceName =
+            AppSettings.shared.availableInputDevices.first(where: {
+                $0.id == AppSettings.shared.selectedDeviceID
+            })?.name ?? "默认设备"
+        print(
+            "🎙️ 录音已启动 [\(currentAudioSource.displayName)] (输入: \(deviceName)) (fMP4): \(fileURL.lastPathComponent)"
+        )
     }
 
     // MARK: - 仅麦克风录音配置
     private func setupMicrophoneOnlyRecording() throws {
+        // 1. 设置硬件输入设备
+        try updateInputDevice()
+
         setupRecordingMixer()
 
         let inputNode = audioEngine.inputNode
@@ -464,6 +504,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
     // MARK: - 混合录音配置（麦克风 + 系统音频）
     @available(macOS 13.0, *)
     private func setupMixedRecording() async throws {
+        // 1. 设置硬件输入设备
+        try updateInputDevice()
+
         setupRecordingMixer()
 
         // 1. 连接麦克风到 Bus 0
@@ -492,7 +535,76 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
 
         installRecordingTap()
-    }  // MARK: - 系统音频采集启动
+    }
+
+    /// 根据 AppSettings 切换硬件输入设备
+    private func updateInputDevice() throws {
+        let selectedID = AppSettings.shared.selectedDeviceID
+        guard selectedID != "default" else { return }
+
+        let inputNode = audioEngine.inputNode
+        guard let audioUnit = inputNode.audioUnit else {
+            print("⚠️ 无法获取 inputNode 的 AUAudioUnit")
+            return
+        }
+
+        // 获取 CoreAudio 的 AudioDeviceID
+        // 注意：在 macOS 上，AVCaptureDevice.uniqueID 与 CoreAudio Device UID 是一致的
+        // 需要使用 AudioHardware API 来查找对应的渲染设备 ID
+
+        var deviceID: AudioDeviceID = 0
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var propsize: UInt32 = 0
+        AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &propsize)
+
+        let nDevices = Int(propsize) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = [AudioDeviceID](repeating: 0, count: nDevices)
+        AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &propsize, &deviceIDs)
+
+        for id in deviceIDs {
+            var uidAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var uid: CFString? = nil
+            var uidSize = UInt32(MemoryLayout<CFString?>.size)
+            AudioObjectGetPropertyData(id, &uidAddress, 0, nil, &uidSize, &uid)
+
+            if let uidString = uid as String?, uidString == selectedID {
+                deviceID = id
+                break
+            }
+        }
+
+        if deviceID != 0 {
+            let status = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &deviceID,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+
+            if status != noErr {
+                print("❌ 切换输入设备失败 (Status: \(status))")
+            } else {
+                print("✅ 已切换输入设备至 ID: \(deviceID)")
+            }
+        } else {
+            print("⚠️ 未找到匹配的 AudioDeviceID: \(selectedID)")
+        }
+    }
+
+    // MARK: - 系统音频采集启动
     @available(macOS 13.0, *)
     private func startSystemAudioCapture() async throws {
         let configuration = SCStreamConfiguration()
@@ -599,16 +711,34 @@ class AudioRecorderManager: NSObject, ObservableObject {
             return
         }
 
-        // 步骤 3：转换到混音引擎的标准格式 (44.1k/1ch)
+        // 步骤 3：转换到混音引擎的标准格式 (48k/1ch)
         guard let finalBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: frameCount)
         else { return }
         finalBuffer.frameLength = frameCount
 
         if srcFormat.isEqual(dstFormat) {
             self.enqueueSystemAudioBuffer(tempBuffer)
-        } else if let converter = AVAudioConverter(from: srcFormat, to: dstFormat) {
+        } else {
+            // 获取（或初始化）缓存的转换器
+            let converter: AVAudioConverter?
+            if let cached = cachedAudioConverter,
+                let lastSrc = lastSrcFormat,
+                let lastDst = lastDstFormat,
+                lastSrc.isEqual(srcFormat) && lastDst.isEqual(dstFormat)
+            {
+                converter = cached
+            } else {
+                print("🔄 为新的系统音格式初始化转换器: \(srcFormat.sampleRate) -> \(dstFormat.sampleRate)")
+                converter = AVAudioConverter(from: srcFormat, to: dstFormat)
+                cachedAudioConverter = converter
+                lastSrcFormat = srcFormat
+                lastDstFormat = dstFormat
+            }
+
+            guard let activeConverter = converter else { return }
+
             var error: NSError?
-            converter.convert(to: finalBuffer, error: &error) { inNumPackets, outStatus in
+            activeConverter.convert(to: finalBuffer, error: &error) { inNumPackets, outStatus in
                 outStatus.pointee = .haveData
                 return tempBuffer
             }
@@ -641,9 +771,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         systemAudioQueueLock.lock()
         systemAudioBufferQueue.append(buffer)
-        if systemAudioBufferQueue.count > 30 {
+        if systemAudioBufferQueue.count > systemAudioQueueLimit {
             systemAudioBufferQueue.removeFirst()
-            print("⚠️ 系统音频缓冲队列溢出，已丢弃最早的 Buffer")
+            // 减少日志频率，避免 IO 繁忙
+            if Int.random(in: 1...20) == 1 {
+                print("⚠️ 系统音频缓冲队列溢出 (\(systemAudioBufferQueue.count))，由于系统负载过高，部分音频采样已丢弃")
+            }
         }
         systemAudioQueueLock.unlock()
     }
@@ -661,32 +794,56 @@ class AudioRecorderManager: NSObject, ObservableObject {
             print("📝 系统音频 AssetWriter 会话已启动")
         }
 
-        // 直接写入
         if input.isReadyForMoreMediaData {
             input.append(sampleBuffer)
         }
     }
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        guard let writer = assetWriter, let input = assetWriterInput, input.isReadyForMoreMediaData
-        else { return }
+        // 【核心修复】必须执行深拷贝。原先的 buffer.copy() 会导致崩溃，且 tap 会复用内存导致数据损坏。
+        guard let bufferCopy = buffer.deepCopy() else { return }
 
-        // 初始化时间戳逻辑
-        if !isWriterStarted {
-            writer.startSession(atSourceTime: .zero)
-            isWriterStarted = true
-        }
+        // 捕获当前的 writer 和 input，防止在录音切换时操作到错误的对象
+        let writer = self.assetWriter
+        let input = self.assetWriterInput
 
-        // 计算当前 Sample Buffer 的 CMSampleBuffer 并写入
-        if let sampleBuffer = createSampleBuffer(from: buffer, time: time) {
-            if input.append(sampleBuffer) {
-                // 仅在开始时打印一次以确认写入成功
-                if !hasPrintedFirstSample {
-                    print("✅ 成功写入首个采样数据到文件 [Format: \(buffer.format.sampleRate)Hz]")
-                    hasPrintedFirstSample = true
+        writingQueue.async { [weak self] in
+            guard let self = self, let currentWriter = writer, let currentInput = input else {
+                return
+            }
+
+            // 检查 writer 状态，如果已失败则不再尝试
+            guard currentWriter.status == .writing else { return }
+
+            if !self.isWriterStarted {
+                currentWriter.startSession(atSourceTime: .zero)
+                self.isWriterStarted = true
+                print("📝 AssetWriter 写入会话已建立 (Queue-based)")
+            }
+
+            // 计算并写入
+            if let sampleBuffer = self.createSampleBuffer(from: bufferCopy, time: time) {
+                // 不再手动 Thread.sleep 丢帧。让 Serial Queue 自动排队。
+                // 只有在 Input 真的无法接受数据（通常是磁盘故障或 Writer 错误）时才报错。
+                if currentInput.isReadyForMoreMediaData {
+                    if !currentInput.append(sampleBuffer) {
+                        print("❌ 写入采样数据失败: \(currentWriter.error?.localizedDescription ?? "未知错误")")
+                    } else if !self.hasPrintedFirstSample {
+                        print("✅ 成功写入首个采样数据 [Channels: \(bufferCopy.format.channelCount)]")
+                        self.hasPrintedFirstSample = true
+                    }
+                } else {
+                    // 如果长时间不 Ready，说明底层缓冲区满了，但为了保证时长完整，我们绝不在这里丢帧
+                    // 而是等待一小会重试，直到成功或 Writer 报错
+                    var retry = 0
+                    while !currentInput.isReadyForMoreMediaData && retry < 200 {
+                        Thread.sleep(forTimeInterval: 0.01)  // 10ms
+                        retry += 1
+                    }
+                    if !currentInput.append(sampleBuffer) {
+                        print("❌ 强制写入失败: \(currentWriter.error?.localizedDescription ?? "数据溢出")")
+                    }
                 }
-            } else {
-                print("❌ 写入采样数据失败: \(writer.error?.localizedDescription ?? "未知错误")")
             }
         }
     }
@@ -750,45 +907,60 @@ class AudioRecorderManager: NSObject, ObservableObject {
         guard isRecording, !isTransitioning else { return }
         isTransitioning = true
 
+        print("⏹️ 正在停止录音...")
         recordingTimer?.invalidate()
         recordingTimer = nil
 
-        // 根据音频源类型清理不同的 tap
+        // 1. 停止采集（确保不再有新数据进入队列）
         cleanupAudioCapture()
 
-        assetWriterInput?.markAsFinished()
-
         let outputURL = currentRecordingURL
-        let currentWriter = assetWriter  // 捕获局部变量，防止竞态
+        let currentWriter = assetWriter
         let currentInput = assetWriterInput
 
-        currentWriter?.finishWriting { [weak self] in
+        // 2. 在写入队列中执行收尾操作，确保所有 pending 的 append 都已完成
+        writingQueue.async { [weak self] in
             guard let self = self else { return }
 
-            DispatchQueue.main.async {
-                self.isRecording = false
-                self.clearRecordingState()
+            currentInput?.markAsFinished()
+            print("🏁 写入队列已接收停止指令，正在固化文件...")
 
-                if let url = outputURL {
-                    let finalURL = self.renameToFinalFormat(url: url)
-                    print("✅ 录音已保存: \(finalURL.path)")
-                    NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+            currentWriter?.finishWriting { [weak self] in
+                guard let self = self else { return }
+
+                DispatchQueue.main.async {
+                    self.isRecording = false
+                    self.clearRecordingState()
+                    self.isTransitioning = false
+
+                    if let writer = currentWriter, writer.status == .completed, let url = outputURL
+                    {
+                        print("📊 写入完成，最终状态: .completed")
+                        let finalURL = self.renameToFinalFormat(url: url)
+                        print("✅ 录音已保存: \(finalURL.path)")
+
+                        // 如果是因为达到上限停止的，给予弹窗提示
+                        if self.isAutoStoppedByLimit {
+                            self.showRecordingLimitReachedAlert(duration: self.recordingDuration)
+                            self.isAutoStoppedByLimit = false
+                        }
+
+                        NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+                    } else if let err = currentWriter?.error {
+                        print("❌ 写入结束时出错: \(err.localizedDescription)")
+                    } else {
+                        print("⚠️ 写入可能未正常完成，状态: \(currentWriter?.status.rawValue ?? -1)")
+                    }
+
+                    // 3. 后续清理
+                    if self.assetWriter === currentWriter { self.assetWriter = nil }
+                    if self.assetWriterInput === currentInput { self.assetWriterInput = nil }
+                    self.currentRecordingURL = nil
+
+                    self.releaseSleepPrevention()
+                    self.isTransitioning = false  // 确保在所有资源完全释放后重置
+                    NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
                 }
-
-                // 只有当当前的 writer 确实是我们要清理的那个时才置空
-                if self.assetWriter === currentWriter {
-                    self.assetWriter = nil
-                }
-                if self.assetWriterInput === currentInput {
-                    self.assetWriterInput = nil
-                }
-                self.currentRecordingURL = nil
-
-                // 释放防止休眠断言
-                self.releaseSleepPrevention()
-
-                self.isTransitioning = false
-                NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
             }
         }
     }
@@ -803,12 +975,17 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 根据音频源类型清理不同的采集
         cleanupAudioCapture()
 
-        assetWriterInput?.markAsFinished()
-
-        // 阻塞式等待（在应用退出时是安全的，因为 finiteWriting 是异步的，我们需要同步确保完成）
+        // 3. 在写入队列中同步执行收尾
         let semaphore = DispatchSemaphore(value: 0)
-        assetWriter?.finishWriting {
-            semaphore.signal()
+        writingQueue.sync { [weak self] in
+            guard let self = self else {
+                semaphore.signal()
+                return
+            }
+            self.assetWriterInput?.markAsFinished()
+            self.assetWriter?.finishWriting {
+                semaphore.signal()
+            }
         }
         _ = semaphore.wait(timeout: .now() + 2.0)
 
@@ -827,19 +1004,20 @@ class AudioRecorderManager: NSObject, ObservableObject {
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
 
-        // 日期: YYYY.MM.DD
+        // 1. 日期: YYYY.MM.DD
         dateFormatter.dateFormat = "yyyy.MM.dd"
         let datePart = dateFormatter.string(from: now)
 
-        // 上下午: am/pm (小写)
-        dateFormatter.dateFormat = "a"
-        let periodPart = dateFormatter.string(from: now).lowercased()
+        // 2. 星期: 三字母缩写 (Mon/Tue...)
+        dateFormatter.dateFormat = "E"
+        let weekPart = dateFormatter.string(from: now)
 
-        // 开始时间: HH.mm
+        // 3. 时间: 24小时制 HH.mm
         dateFormatter.dateFormat = "HH.mm"
         let timePart = dateFormatter.string(from: now)
 
-        return "\(datePart) - \(periodPart) \(timePart) - ing.m4a"
+        // 双空格分隔，格式：2026.01.14  Mon  18.59 - ing.m4a
+        return "\(datePart)  \(weekPart)  \(timePart) - ing.m4a"
     }
 
     private func renameToFinalFormat(url: URL) -> URL {
@@ -850,40 +1028,40 @@ class AudioRecorderManager: NSObject, ObservableObject {
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
 
-        // 日期: YYYY.MM.DD
+        // 1. 日期: YYYY.MM.DD
         dateFormatter.dateFormat = "yyyy.MM.dd"
         let datePart = dateFormatter.string(from: startDate)
 
-        // 上下午: am/pm (小写)
-        dateFormatter.dateFormat = "a"
-        let periodPart = dateFormatter.string(from: startDate).lowercased()
+        // 2. 星期: 三字母缩写
+        dateFormatter.dateFormat = "E"
+        let weekPart = dateFormatter.string(from: startDate)
 
-        // 起止时间: HH.mm (仅保留开始时间)
+        // 3. 时间: 24小时制 HH.mm
         dateFormatter.dateFormat = "HH.mm"
         let startPart = dateFormatter.string(from: startDate)
 
-        // 时长: X min (精确到分，向上取整或四舍五入，这里由于是录音，通常取分钟数)
+        // 4. 时长: Xmin (移除空格)
         let totalSeconds = Int(endDate.timeIntervalSince(startDate))
-        let minutes = max(1, totalSeconds / 60)  // 至少显示 1 min
-        let durationPart = "\(minutes) min"
+        let minutes = max(1, totalSeconds / 60)
+        let durationPart = "\(minutes)min"
 
-        let newFileName = "\(datePart) - \(periodPart) \(startPart) - \(durationPart).m4a"
-        let newURL = url.deletingLastPathComponent().appendingPathComponent(newFileName)
+        // 基础文件名：2026.01.14  Mon  18.59 - 13min.m4a
+        let baseFileName = "\(datePart)  \(weekPart)  \(startPart) - \(durationPart)"
+        let newURL = url.deletingLastPathComponent().appendingPathComponent("\(baseFileName).m4a")
 
         do {
-            if FileManager.default.fileExists(atPath: newURL.path) {
-                // 如果文件已存在，加个随机后缀
-                let randomSuffix = String(format: "%04d", Int.random(in: 0...9999))
-                let uniqueFileName =
-                    "\(datePart) - \(periodPart) \(startPart) - \(durationPart) - \(randomSuffix).m4a"
-                let uniqueURL = url.deletingLastPathComponent().appendingPathComponent(
-                    uniqueFileName)
-                try FileManager.default.moveItem(at: url, to: uniqueURL)
-                return uniqueURL
-            } else {
-                try FileManager.default.moveItem(at: url, to: newURL)
-                return newURL
+            var finalURL = newURL
+            var counter = 1
+
+            // 循环检测直到找到不存在的文件名
+            while FileManager.default.fileExists(atPath: finalURL.path) {
+                let uniqueFileName = "\(baseFileName) (\(counter)).m4a"
+                finalURL = url.deletingLastPathComponent().appendingPathComponent(uniqueFileName)
+                counter += 1
             }
+
+            try FileManager.default.moveItem(at: url, to: finalURL)
+            return finalURL
         } catch {
             print("❌ 重命名失败: \(error.localizedDescription)")
             return url
@@ -914,6 +1092,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
         systemAudioSourceNode = nil
         self.recordingMixer = nil
         mixerNode = nil
+        cachedAudioConverter = nil
+        lastSrcFormat = nil
+        lastDstFormat = nil
 
         // 5. 清空缓冲队列
         systemAudioQueueLock.lock()
@@ -981,29 +1162,28 @@ class AudioRecorderManager: NSObject, ObservableObject {
     }
 
     private func checkTimeWarning() {
-        guard recordingDuration >= warningStartTime else { return }
-        if lastWarningTime == 0 || recordingDuration - lastWarningTime >= warningInterval {
-            lastWarningTime = recordingDuration
-            showTimeWarningNotification()
-        }
+        // 已根据用户需求移除提前预警逻辑
     }
 
     // MARK: - UI Alerts
 
-    private func showTimeWarningNotification() {
-        let remainingSeconds = max(0, maxDuration - recordingDuration)
-        let remainingMinutes = Int(remainingSeconds / 60)
-        let totalLimitMinutes = Int(maxDuration / 60)
+    private func showRecordingLimitReachedAlert(duration: TimeInterval) {
+        let minutes = Int(duration / 60)
+        let seconds = Int(duration) % 60
+        let timeString = minutes > 0 ? "\(minutes) 分钟 \(seconds) 秒" : "\(seconds) 秒"
 
         DispatchQueue.main.async {
             let alert = NSAlert()
-            alert.messageText = "录音时间提醒"
-            alert.informativeText =
-                "当前录音已接近您设置的上限 (\(totalLimitMinutes) 分钟)，距离自动保存还剩约 \(remainingMinutes) 分钟。\n\n已启用 fMP4 实时固化保护。"
+            alert.messageText = "录音已结束"
+            alert.informativeText = "录音已达到您设置的上限时间，文件已自动保存。\n\n录音时长：\(timeString)"
             alert.alertStyle = .informational
             alert.addButton(withTitle: "知道了")
             alert.runModal()
         }
+    }
+
+    private func showTimeWarningNotification() {
+        // 已根据用户需求移除提前预警弹窗
     }
 
     private func showMicrophonePermissionAlert() {

@@ -10,19 +10,9 @@
 		001 /* SimpleRecorderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101; };
 		002 /* AudioRecorderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 102; };
 		003 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103; };
-		004 /* TranscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104; };
 		005 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 105; };
-		006 /* Recording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106; };
-		007 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107; };
-		008 /* RecordingsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 108; };
-		009 /* VolcEngineService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 109; };
-		010 /* CloudBaseUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110; };
-		016 /* TencentCloudSignature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118; };
 		011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 111; };
 		012 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114; };
-		013 /* SummaryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115; };
-		014 /* AISummaryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116; };
-		015 /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,21 +20,11 @@
 		101 /* SimpleRecorderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleRecorderApp.swift; sourceTree = "<group>"; };
 		102 /* AudioRecorderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManager.swift; sourceTree = "<group>"; };
 		103 /* HotKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyManager.swift; sourceTree = "<group>"; };
-		104 /* TranscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionManager.swift; sourceTree = "<group>"; };
 		105 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
-		106 /* Recording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Recording.swift; sourceTree = "<group>"; };
-		107 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		108 /* RecordingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsListView.swift; sourceTree = "<group>"; };
-		109 /* VolcEngineService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolcEngineService.swift; sourceTree = "<group>"; };
-		110 /* CloudBaseUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudBaseUploader.swift; sourceTree = "<group>"; };
-		118 /* TencentCloudSignature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TencentCloudSignature.swift; sourceTree = "<group>"; };
 		111 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		112 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		113 /* SimpleRecorder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SimpleRecorder.entitlements; sourceTree = "<group>"; };
 		114 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
-		115 /* SummaryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryManager.swift; sourceTree = "<group>"; };
-		116 /* AISummaryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISummaryService.swift; sourceTree = "<group>"; };
-		117 /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,8 +74,6 @@
 			children = (
 				102 /* AudioRecorderManager.swift */,
 				103 /* HotKeyManager.swift */,
-				104 /* TranscriptionManager.swift */,
-				115 /* SummaryManager.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -104,7 +82,6 @@
 			isa = PBXGroup;
 			children = (
 				105 /* AppSettings.swift */,
-				106 /* Recording.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -112,10 +89,7 @@
 		305 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				107 /* SettingsView.swift */,
-				108 /* RecordingsListView.swift */,
 				114 /* MainWindowView.swift */,
-				117 /* TimelineView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -123,10 +97,6 @@
 		306 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				109 /* VolcEngineService.swift */,
-				110 /* CloudBaseUploader.swift */,
-				118 /* TencentCloudSignature.swift */,
-				116 /* AISummaryService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -212,18 +182,8 @@
 				001 /* SimpleRecorderApp.swift in Sources */,
 				002 /* AudioRecorderManager.swift in Sources */,
 				003 /* HotKeyManager.swift in Sources */,
-				004 /* TranscriptionManager.swift in Sources */,
 				005 /* AppSettings.swift in Sources */,
-				006 /* Recording.swift in Sources */,
-				007 /* SettingsView.swift in Sources */,
-				008 /* RecordingsListView.swift in Sources */,
-				009 /* VolcEngineService.swift in Sources */,
-				010 /* CloudBaseUploader.swift in Sources */,
-				016 /* TencentCloudSignature.swift in Sources */,
 				012 /* MainWindowView.swift in Sources */,
-				013 /* SummaryManager.swift in Sources */,
-				014 /* AISummaryService.swift in Sources */,
-				015 /* TimelineView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -355,7 +315,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = UZ285BC956;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SimpleRecorder/Info.plist;
@@ -384,7 +344,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = UZ285BC956;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SimpleRecorder/Info.plist;
