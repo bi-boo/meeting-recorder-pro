@@ -7,7 +7,7 @@ import SwiftUI
 
 struct MainWindowView: View {
     @State private var selectedTab = 0
-    
+
     var body: some View {
         TabView(selection: $selectedTab) {
             // 录音列表标签
@@ -16,21 +16,21 @@ struct MainWindowView: View {
                     Label("录音列表", systemImage: "list.bullet")
                 }
                 .tag(0)
-            
+
             // 存储路径设置
             StorageSettingsView()
                 .tabItem {
-                    Label("存储路径", systemImage: "folder")
+                    Label("通用设置", systemImage: "gear")
                 }
                 .tag(1)
-            
+
             // 转写设置
             TranscriptionSettingsView()
                 .tabItem {
                     Label("转写设置", systemImage: "text.badge.checkmark")
                 }
                 .tag(2)
-            
+
             // API 配置
             APISettingsView()
                 .tabItem {
@@ -47,7 +47,7 @@ struct StorageSettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var hotKeyManager = HotKeyManager.shared
     @State private var isRecordingShortcut = false
-    
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -65,7 +65,76 @@ struct StorageSettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                
+
+                // 录音选项
+                GroupBox("录音选项") {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // 音频源选择
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("音频源")
+                                .font(.headline)
+
+                            Picker("", selection: $settings.audioSource) {
+                                ForEach(AudioSource.allCases, id: \.self) { source in
+                                    Text(source.displayName).tag(source)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .disabled(
+                                !AppSettings.isSystemAudioSupported
+                                    && settings.audioSource == .microphone)
+
+                            Text(settings.audioSource.description)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            // 系统版本警告
+                            if !AppSettings.isSystemAudioSupported {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                    Text("系统音频需要 macOS 13.0 及以上版本")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                        }
+
+                        Divider()
+
+                        // 录音时长上限
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("单次录音时长上限")
+                                    .font(.headline)
+                                Text("到达上限后将自动停止并保存")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            HStack(spacing: 5) {
+                                Picker("", selection: $settings.maxDurationHours) {
+                                    ForEach(0...9, id: \.self) { hour in
+                                        Text("\(hour) 小时").tag(hour)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(width: 85)
+
+                                Picker("", selection: $settings.maxDurationMinutes) {
+                                    ForEach(Array(stride(from: 0, through: 50, by: 10)), id: \.self)
+                                    { minute in
+                                        Text("\(minute) 分钟").tag(minute)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(width: 85)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
                 // 存储路径设置
                 GroupBox("存储路径") {
                     VStack(alignment: .leading, spacing: 12) {
@@ -88,9 +157,9 @@ struct StorageSettingsView: View {
                                 selectFolder(for: \.recordingsPath)
                             }
                         }
-                        
+
                         Divider()
-                        
+
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("转写文件保存位置")
@@ -113,13 +182,13 @@ struct StorageSettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 Spacer()
             }
             .padding(20)
         }
     }
-    
+
     private func selectFolder(for keyPath: ReferenceWritableKeyPath<AppSettings, URL>) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -127,7 +196,7 @@ struct StorageSettingsView: View {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
         panel.prompt = "选择"
-        
+
         if panel.runModal() == .OK, let url = panel.url {
             settings[keyPath: keyPath] = url
         }
@@ -137,7 +206,7 @@ struct StorageSettingsView: View {
 // MARK: - 转写设置
 struct TranscriptionSettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
-    
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -153,9 +222,9 @@ struct TranscriptionSettingsView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        
+
                         Divider()
-                        
+
                         Toggle(isOn: $settings.enablePunctuation) {
                             VStack(alignment: .leading) {
                                 Text("自动标点")
@@ -165,9 +234,9 @@ struct TranscriptionSettingsView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        
+
                         Divider()
-                        
+
                         Toggle(isOn: $settings.enableDDC) {
                             VStack(alignment: .leading) {
                                 Text("语义顺滑")
@@ -177,9 +246,9 @@ struct TranscriptionSettingsView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        
+
                         Divider()
-                        
+
                         Toggle(isOn: $settings.showUtterances) {
                             VStack(alignment: .leading) {
                                 Text("分句显示")
@@ -192,7 +261,7 @@ struct TranscriptionSettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 // 高级功能
                 GroupBox("高级功能") {
                     VStack(alignment: .leading, spacing: 12) {
@@ -205,9 +274,9 @@ struct TranscriptionSettingsView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        
+
                         Divider()
-                        
+
                         Toggle(isOn: $settings.enableEmotionDetection) {
                             VStack(alignment: .leading) {
                                 Text("情绪检测")
@@ -217,9 +286,9 @@ struct TranscriptionSettingsView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        
+
                         Divider()
-                        
+
                         Toggle(isOn: $settings.enableGenderDetection) {
                             VStack(alignment: .leading) {
                                 Text("性别识别")
@@ -229,9 +298,9 @@ struct TranscriptionSettingsView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        
+
                         Divider()
-                        
+
                         Toggle(isOn: $settings.showSpeechRate) {
                             VStack(alignment: .leading) {
                                 Text("语速信息")
@@ -244,7 +313,7 @@ struct TranscriptionSettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 // 提示
                 HStack {
                     Image(systemName: "info.circle")
@@ -253,7 +322,7 @@ struct TranscriptionSettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                
+
                 Spacer()
             }
             .padding(20)
@@ -264,7 +333,7 @@ struct TranscriptionSettingsView: View {
 // MARK: - API 配置
 struct APISettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
-    
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -277,21 +346,21 @@ struct APISettingsView: View {
                             TextField("请输入 APP ID", text: $settings.volcengineAppId)
                                 .textFieldStyle(.roundedBorder)
                         }
-                        
+
                         HStack {
                             Text("Access Token")
                                 .frame(width: 100, alignment: .leading)
                             SecureField("请输入 Access Token", text: $settings.volcengineAccessToken)
                                 .textFieldStyle(.roundedBorder)
                         }
-                        
+
                         Text("用于将录音转换为文字，需要先在火山引擎控制台创建应用并获取密钥")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 // 腾讯云配置
                 GroupBox("腾讯云 CloudBase（文件上传）") {
                     VStack(alignment: .leading, spacing: 12) {
@@ -301,14 +370,14 @@ struct APISettingsView: View {
                             TextField("请输入 Env ID", text: $settings.cloudbaseEnvId)
                                 .textFieldStyle(.roundedBorder)
                         }
-                        
+
                         Text("用于临时存储音频文件供火山引擎访问")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 // AI 总结配置（豆包）
                 GroupBox("AI 总结生成（豆包大模型）") {
                     VStack(alignment: .leading, spacing: 12) {
@@ -319,13 +388,13 @@ struct APISettingsView: View {
                             SecureField("请输入豆包 API Key", text: $settings.doubaoApiKey)
                                 .textFieldStyle(.roundedBorder)
                         }
-                        
+
                         Text("使用豆包 doubao-seed 模型生成总结，需要先在火山方舟控制台获取 API Key")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        
+
                         Divider()
-                        
+
                         // 自动生成选项
                         Toggle(isOn: $settings.autoGenerateSummary) {
                             VStack(alignment: .leading) {
@@ -339,7 +408,7 @@ struct APISettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 // API 状态
                 GroupBox("状态") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -355,7 +424,7 @@ struct APISettingsView: View {
                             }
                             Spacer()
                         }
-                        
+
                         HStack {
                             if settings.isAIConfigured {
                                 Image(systemName: "checkmark.circle.fill")
@@ -371,7 +440,7 @@ struct APISettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 Spacer()
             }
             .padding(20)

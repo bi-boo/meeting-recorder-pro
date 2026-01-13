@@ -6,8 +6,8 @@ description: 核心规划规则 (Solo 模式)-通过强制使用项目级持久�
 # 核心规划规则 (Solo 模式)
 
 ## 核心指令
-1. **强制初始化**：在开始 any 多步骤任务前，必须在项目根目录检查或创建 `docs` 文件夹，并在此文件夹内维护 `prd.md`（产品需求文档）、`architecture.md`（技术架构文档）和 `changelog.md`（修改记录）。
-2. **状态实时同步**：每当有新的需求变更或重大执行进展时，必须同步更新 `docs/` 目录下的 `prd.md`、`architecture.md` 和 `changelog.md`。
+1. **强制初始化**：在开始任务前，必须在项目根目录检查或创建 `docs` 文件夹，并在此文件夹内维护 `prd.md`（产品需求文档）、`architecture.md`（技术架构文档）和 `changelog.md`（修改记录）。
+2. **状态实时同步**：每当有代码变化时，必须同步更新 `docs/` 目录下的 `prd.md`、`architecture.md` 和 `changelog.md`。
 3. **决策前寻根**：在执行 `replace_file_content` 等修改指令前，必须先 `view_file` 读取一次 `docs/` 目录下的 `prd.md` 和 `architecture.md`，确保当前操作符合产品需求与架构设计。
 
 ## prd.md 规范格式
