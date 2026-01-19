@@ -1,13 +1,15 @@
 import AVFoundation
 import AppKit
+import CoreAudio
 import Foundation
+import ServiceManagement
 
 // MARK: - 音频输入设备模型
 struct AudioInputDevice: Identifiable, Equatable, Codable {
     var id: String  // UniqueID
     var name: String  // Display Name
 
-    static let defaultDevice = AudioInputDevice(id: "default", name: "系统默认麦克风")
+    static let defaultDevice = AudioInputDevice(id: "default", name: "系统默认")
 }
 
 // MARK: - 音频源枚举
@@ -18,9 +20,9 @@ enum AudioSource: String, CaseIterable, Codable {
 
     var displayName: String {
         switch self {
-        case .microphone: return "录制电脑麦克风"
-        case .systemAudio: return "仅录制系统音频"
-        case .both: return "麦克风与系统音频"
+        case .microphone: return "仅麦克风"
+        case .systemAudio: return "仅系统声音"
+        case .both: return "麦克风 + 系统声音"
         }
     }
 
@@ -29,6 +31,19 @@ enum AudioSource: String, CaseIterable, Codable {
         case .microphone: return "录制电脑麦克风输入（如人声、环境音）"
         case .systemAudio: return "录制电脑内部发出的声音（如会议、音乐）"
         case .both: return "同时录制麦克风输入和系统内部声音"
+        }
+    }
+}
+
+// MARK: - 输出格式枚举
+enum OutputFormat: String, CaseIterable, Codable {
+    case m4a = "m4a"
+    case mp3 = "mp3"
+
+    var displayName: String {
+        switch self {
+        case .m4a: return "M4A"
+        case .mp3: return "MP3"
         }
     }
 }
@@ -57,6 +72,32 @@ class AppSettings: ObservableObject {
     // MARK: - 音频源设置
     @Published var audioSource: AudioSource {
         didSet { UserDefaults.standard.set(audioSource.rawValue, forKey: "audioSource") }
+    }
+
+    // MARK: - 输出格式设置
+    @Published var outputFormat: OutputFormat {
+        didSet { UserDefaults.standard.set(outputFormat.rawValue, forKey: "outputFormat") }
+    }
+
+    // MARK: - 行为设置
+    @Published var launchAtLogin: Bool {
+        didSet {
+            UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
+            updateLaunchAtLogin(launchAtLogin)
+        }
+    }
+
+    @Published var openFolderAfterRecording: Bool {
+        didSet {
+            UserDefaults.standard.set(openFolderAfterRecording, forKey: "openFolderAfterRecording")
+        }
+    }
+
+    @Published var dimIconWhenIdle: Bool {
+        didSet {
+            UserDefaults.standard.set(dimIconWhenIdle, forKey: "dimIconWhenIdle")
+            NotificationCenter.default.post(name: .iconStyleChanged, object: nil)
+        }
     }
 
     @Published var availableInputDevices: [AudioInputDevice] = [.defaultDevice]
@@ -120,7 +161,7 @@ class AppSettings: ObservableObject {
 
         // 加载录音上限设置
         self.maxDurationHours =
-            UserDefaults.standard.object(forKey: "maxDurationHours") as? Int ?? 5
+            UserDefaults.standard.object(forKey: "maxDurationHours") as? Int ?? 3
         self.maxDurationMinutes =
             UserDefaults.standard.object(forKey: "maxDurationMinutes") as? Int ?? 0
 
@@ -140,6 +181,21 @@ class AppSettings: ObservableObject {
 
         self.selectedDeviceID =
             UserDefaults.standard.string(forKey: "selectedDeviceID") ?? "default"
+
+        // 加载输出格式设置
+        if let savedFormat = UserDefaults.standard.string(forKey: "outputFormat"),
+            let format = OutputFormat(rawValue: savedFormat)
+        {
+            self.outputFormat = format
+        } else {
+            self.outputFormat = .m4a  // 默认 M4A
+        }
+
+        // 加载行为设置
+        self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
+        self.openFolderAfterRecording =
+            UserDefaults.standard.object(forKey: "openFolderAfterRecording") as? Bool ?? true  // 默认开启
+        self.dimIconWhenIdle = UserDefaults.standard.bool(forKey: "dimIconWhenIdle")
 
         // 初始刷新一次设备列表
         refreshInputDevices()
@@ -171,16 +227,117 @@ class AppSettings: ObservableObject {
         var newDevices = [AudioInputDevice.defaultDevice]
 
         for device in devices {
-            newDevices.append(AudioInputDevice(id: device.uniqueID, name: device.localizedName))
+            let deviceName = device.localizedName
+            let deviceUID = device.uniqueID
+
+            // 使用 Core Audio 检测设备传输类型
+            let isPhysical = isPhysicalAudioDevice(uid: deviceUID)
+
+            if isPhysical {
+                newDevices.append(AudioInputDevice(id: deviceUID, name: deviceName))
+            }
         }
 
-        DispatchQueue.main.async {
-            self.availableInputDevices = newDevices
-            // 如果当前选中的设备已经不在列表中（比如拔掉了），切回默认
-            if self.selectedDeviceID != "default"
-                && !newDevices.contains(where: { $0.id == self.selectedDeviceID })
-            {
-                self.selectedDeviceID = "default"
+        // 同步更新设备列表（确保菜单栏可以立即获取）
+        self.availableInputDevices = newDevices
+        // 如果当前选中的设备已经不在列表中（比如拔掉了），切回默认
+        if self.selectedDeviceID != "default"
+            && !newDevices.contains(where: { $0.id == self.selectedDeviceID })
+        {
+            self.selectedDeviceID = "default"
+        }
+    }
+
+    /// 使用 Core Audio 检测设备是否为物理设备
+    private func isPhysicalAudioDevice(uid: String) -> Bool {
+        var deviceID: AudioDeviceID = 0
+        var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
+
+        // 通过 UID 获取 AudioDeviceID
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDeviceForUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var cfUID: CFString = uid as CFString
+        var translation = AudioValueTranslation(
+            mInputData: &cfUID,
+            mInputDataSize: UInt32(MemoryLayout<CFString>.size),
+            mOutputData: &deviceID,
+            mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+
+        var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &translationSize,
+            &translation
+        )
+
+        guard status == noErr, deviceID != 0 else {
+            return false
+        }
+
+        // 获取传输类型
+        var transportType: UInt32 = 0
+        propertySize = UInt32(MemoryLayout<UInt32>.size)
+        address.mSelector = kAudioDevicePropertyTransportType
+
+        let transportStatus = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &propertySize,
+            &transportType
+        )
+
+        // 获取传输类型字符串用于调试
+        let transportTypeStr = String(
+            format: "%c%c%c%c",
+            (transportType >> 24) & 0xFF,
+            (transportType >> 16) & 0xFF,
+            (transportType >> 8) & 0xFF,
+            transportType & 0xFF
+        )
+        LogManager.shared.debug("设备传输类型检测 | 类型码: \(transportTypeStr) (\(transportType))")
+
+        // 物理设备类型
+        let physicalTransportTypes: [UInt32] = [
+            kAudioDeviceTransportTypeBuiltIn,  // 内置
+            kAudioDeviceTransportTypeUSB,  // USB
+            kAudioDeviceTransportTypeBluetooth,  // 蓝牙
+            kAudioDeviceTransportTypeBluetoothLE,  // 蓝牙低功耗
+            kAudioDeviceTransportTypeFireWire,  // FireWire
+            kAudioDeviceTransportTypeThunderbolt,  // 雷电
+            kAudioDeviceTransportTypePCI,  // PCI
+            kAudioDeviceTransportTypeHDMI,  // HDMI
+            kAudioDeviceTransportTypeDisplayPort,  // DisplayPort
+            kAudioDeviceTransportTypeAirPlay,  // AirPlay
+            kAudioDeviceTransportTypeAVB,  // AVB
+            kAudioDeviceTransportTypeContinuityCaptureWired,  // 连续互通（有线）
+            kAudioDeviceTransportTypeContinuityCaptureWireless,  // 连续互通（无线）
+        ]
+
+        return physicalTransportTypes.contains(transportType)
+    }
+
+    // MARK: - 开机自启动
+    private func updateLaunchAtLogin(_ enable: Bool) {
+        if #available(macOS 13.0, *) {
+            do {
+                if enable {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+                LogManager.shared.info("开机自启动设置: \(enable ? "已启用" : "已禁用")")
+            } catch {
+                LogManager.shared.error("开机自启动设置失败: \(error.localizedDescription)")
             }
         }
     }

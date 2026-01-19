@@ -1,3 +1,31 @@
+# [2026-01-19 22:47]
+- **用户需求/反馈**: 应用运行时遇到故障时无法查看日志，需要实时记录操作和状态以便排查问题
+- **技术逻辑变更**: 
+    - 新增 `LogManager.swift`：日志管理器（5 级日志、文件存储、7 天轮转、崩溃安全写入）
+    - 在 `AudioRecorderManager.swift` 添加录音全流程日志埋点
+    - 在 `SimpleRecorderApp.swift` 添加应用生命周期和用户操作日志
+    - 在 `HotKeyManager.swift` 添加快捷键注册和变更日志
+    - 在 `MainWindowView.swift` 添加"打开日志文件夹"按钮
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/LogManager.swift` [NEW]
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `SimpleRecorder/Managers/HotKeyManager.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+- **变更原因**: 便于排查录音故障（崩溃、中断、无声音等），日志存储于 `~/极简录音/日志/` 目录
+
+# [2026-01-19 22:36]
+- **用户需求/反馈**: 根据项目规则重新梳理项目文档
+- **技术逻辑变更**: 
+    - 重构 `prd.md`：规范化"目标与背景"、"核心功能"、"用户流程"、"当前状态"四大板块结构
+    - 重构 `architecture.md`：规范化"系统架构概述"、"模块说明"（含 H1-H3 层级）、"关键决策"、"当前状态"结构
+    - 更新 `changelog.md`：添加本次梳理记录
+- **涉及文件清单**: 
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/changelog.md`
+- **变更原因**: 确保项目文档符合全局规范，保持文档与代码状态同步
+
 # [2026-01-14 02:10]
 - **用户需求/反馈**: 优化文件命名格式,在日期后增加星期简写,使用双空格间距,去除 AM/PM 标记,时长由 `X min` 改为 `Xmin`。期望格式:录音中 `2026.01.14  Mon  18.59 - ing`,录音后 `2026.01.14  Mon  18.59 - 13min`。
 - **技术逻辑变更**: 

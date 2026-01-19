@@ -10,15 +10,52 @@ import Foundation
 class HotKeyManager: ObservableObject {
     static let shared = HotKeyManager()
 
-    @Published var currentHotKey: HotKeyConfiguration?
+    // 开始/停止录音快捷键
+    @Published var recordHotKey: HotKeyConfiguration?
+    // 暂停/继续录音快捷键
+    @Published var pauseHotKey: HotKeyConfiguration?
 
-    var onHotKeyPressed: (() -> Void)?
+    var onRecordHotKeyPressed: (() -> Void)?
+    var onPauseHotKeyPressed: (() -> Void)?
 
-    private var hotKeyRef: EventHotKeyRef?
+    // 兼容旧代码
+    var currentHotKey: HotKeyConfiguration? { recordHotKey }
+    var onHotKeyPressed: (() -> Void)? {
+        get { onRecordHotKeyPressed }
+        set { onRecordHotKeyPressed = newValue }
+    }
+
+    private var recordHotKeyRef: EventHotKeyRef?
+    private var pauseHotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
 
     private init() {
-        loadHotKey()
+        loadHotKeys()
+        setupEventHandler()
+    }
+
+    // MARK: - Event Handler Setup
+    private func setupEventHandler() {
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+
+        let handler: EventHandlerUPP = { (_, event, _) -> OSStatus in
+            var hotKeyID = EventHotKeyID()
+            GetEventParameter(
+                event, EventParamName(kEventParamDirectObject),
+                EventParamType(typeEventHotKeyID), nil,
+                MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
+
+            // 根据 ID 区分是哪个快捷键
+            if hotKeyID.id == 1 {
+                HotKeyManager.shared.onRecordHotKeyPressed?()
+            } else if hotKeyID.id == 2 {
+                HotKeyManager.shared.onPauseHotKeyPressed?()
+            }
+            return noErr
+        }
+
+        InstallEventHandler(GetApplicationEventTarget(), handler, 1, &eventType, nil, &eventHandler)
     }
 
     // MARK: - Hot Key Configuration
@@ -59,26 +96,19 @@ class HotKeyManager: ObservableObject {
 
     // MARK: - Register/Unregister
     func registerHotKey() {
-        guard let config = currentHotKey else {
-            print("未设置快捷键")
-            return
+        registerRecordHotKey()
+        registerPauseHotKey()
+    }
+
+    private func registerRecordHotKey() {
+        guard let config = recordHotKey else { return }
+
+        if let ref = recordHotKeyRef {
+            UnregisterEventHotKey(ref)
+            recordHotKeyRef = nil
         }
 
-        unregisterHotKey()
-
-        // 设置事件处理
-        var eventType = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-
-        let handler: EventHandlerUPP = { (_, event, _) -> OSStatus in
-            HotKeyManager.shared.onHotKeyPressed?()
-            return noErr
-        }
-
-        InstallEventHandler(GetApplicationEventTarget(), handler, 1, &eventType, nil, &eventHandler)
-
-        // 注册快捷键
-        let hotKeyID = EventHotKeyID(signature: OSType(0x4852_4B59), id: 1)  // "HRKY"
+        let hotKeyID = EventHotKeyID(signature: OSType(0x4852_4B31), id: 1)  // "HRK1"
 
         let status = RegisterEventHotKey(
             config.keyCode,
@@ -86,47 +116,122 @@ class HotKeyManager: ObservableObject {
             hotKeyID,
             GetApplicationEventTarget(),
             0,
-            &hotKeyRef
+            &recordHotKeyRef
         )
 
         if status == noErr {
-            print("快捷键已注册: \(config.displayString)")
+            LogManager.shared.info("录音快捷键已注册 | 快捷键: \(config.displayString)")
         } else {
-            print("快捷键注册失败: \(status)")
+            LogManager.shared.error("录音快捷键注册失败 | 状态码: \(status)")
+        }
+    }
+
+    private func registerPauseHotKey() {
+        guard let config = pauseHotKey else { return }
+
+        if let ref = pauseHotKeyRef {
+            UnregisterEventHotKey(ref)
+            pauseHotKeyRef = nil
+        }
+
+        let hotKeyID = EventHotKeyID(signature: OSType(0x4852_4B32), id: 2)  // "HRK2"
+
+        let status = RegisterEventHotKey(
+            config.keyCode,
+            config.modifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &pauseHotKeyRef
+        )
+
+        if status == noErr {
+            LogManager.shared.info("暂停快捷键已注册 | 快捷键: \(config.displayString)")
+        } else {
+            LogManager.shared.error("暂停快捷键注册失败 | 状态码: \(status)")
         }
     }
 
     func unregisterHotKey() {
-        if let ref = hotKeyRef {
+        if let ref = recordHotKeyRef {
             UnregisterEventHotKey(ref)
-            hotKeyRef = nil
+            recordHotKeyRef = nil
+        }
+        if let ref = pauseHotKeyRef {
+            UnregisterEventHotKey(ref)
+            pauseHotKeyRef = nil
         }
     }
 
     // MARK: - Save/Load
     func saveHotKey(_ config: HotKeyConfiguration) {
-        currentHotKey = config
+        saveRecordHotKey(config)
+    }
+
+    func saveRecordHotKey(_ config: HotKeyConfiguration) {
+        // 检查是否与暂停快捷键冲突
+        if let pauseKey = pauseHotKey, pauseKey == config {
+            LogManager.shared.warning("录音快捷键与暂停快捷键相同，已忽略")
+            return
+        }
+
+        let oldHotKey = recordHotKey?.displayString ?? "无"
+        recordHotKey = config
 
         if let data = try? JSONEncoder().encode(config) {
             UserDefaults.standard.set(data, forKey: "recordingHotKey")
         }
 
-        registerHotKey()
+        registerRecordHotKey()
+        LogManager.shared.info("录音快捷键已变更 | 旧: \(oldHotKey) -> 新: \(config.displayString)")
 
-        // 发送快捷键变更通知
         NotificationCenter.default.post(name: Notification.Name("hotKeyChanged"), object: nil)
     }
 
-    private func loadHotKey() {
+    func savePauseHotKey(_ config: HotKeyConfiguration) {
+        // 检查是否与录音快捷键冲突
+        if let recordKey = recordHotKey, recordKey == config {
+            LogManager.shared.warning("暂停快捷键与录音快捷键相同，已忽略")
+            return
+        }
+
+        let oldHotKey = pauseHotKey?.displayString ?? "无"
+        pauseHotKey = config
+
+        if let data = try? JSONEncoder().encode(config) {
+            UserDefaults.standard.set(data, forKey: "pauseHotKey")
+        }
+
+        registerPauseHotKey()
+        LogManager.shared.info("暂停快捷键已变更 | 旧: \(oldHotKey) -> 新: \(config.displayString)")
+
+        NotificationCenter.default.post(name: Notification.Name("hotKeyChanged"), object: nil)
+    }
+
+    private func loadHotKeys() {
+        // 加载录音快捷键
         if let data = UserDefaults.standard.data(forKey: "recordingHotKey"),
             let config = try? JSONDecoder().decode(HotKeyConfiguration.self, from: data)
         {
-            currentHotKey = config
+            recordHotKey = config
         } else {
-            // 默认快捷键: Cmd + Shift + R
-            currentHotKey = HotKeyConfiguration(
-                keyCode: UInt32(kVK_ANSI_R),
-                modifiers: UInt32(cmdKey | shiftKey)
+            // 默认快捷键: Control + Option + Cmd + 5
+            recordHotKey = HotKeyConfiguration(
+                keyCode: UInt32(kVK_ANSI_5),
+                modifiers: UInt32(cmdKey | optionKey | controlKey)
+            )
+        }
+
+        // 加载暂停快捷键
+        if let data = UserDefaults.standard.data(forKey: "pauseHotKey"),
+            let config = try? JSONDecoder().decode(HotKeyConfiguration.self, from: data)
+        {
+            pauseHotKey = config
+        } else {
+            // 默认快捷键: Control + Option + Cmd + 4
+            pauseHotKey = HotKeyConfiguration(
+                keyCode: UInt32(kVK_ANSI_4),
+                modifiers: UInt32(cmdKey | optionKey | controlKey)
             )
         }
     }
@@ -181,8 +286,6 @@ class HotKeyManager: ObservableObject {
 
         // 处理 F1-F12
         if keyCode >= UInt32(kVK_F1) && keyCode <= UInt32(kVK_F12) {
-            // 注意：NSMenuItem 的 F1-F12 处理较复杂，通常不建议直接作为 keyEquivalent
-            // 这里暂按字符串处理，后续根据需要优化
             return "f\(keyCode - UInt32(kVK_F1) + 1)"
         }
 

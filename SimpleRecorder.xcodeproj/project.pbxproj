@@ -10,6 +10,7 @@
 		001 /* SimpleRecorderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101; };
 		002 /* AudioRecorderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 102; };
 		003 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103; };
+		004 /* LogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104; };
 		005 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 105; };
 		011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 111; };
 		012 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114; };
@@ -20,6 +21,7 @@
 		101 /* SimpleRecorderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleRecorderApp.swift; sourceTree = "<group>"; };
 		102 /* AudioRecorderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManager.swift; sourceTree = "<group>"; };
 		103 /* HotKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyManager.swift; sourceTree = "<group>"; };
+		104 /* LogManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogManager.swift; sourceTree = "<group>"; };
 		105 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		111 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		112 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -74,6 +76,7 @@
 			children = (
 				102 /* AudioRecorderManager.swift */,
 				103 /* HotKeyManager.swift */,
+				104 /* LogManager.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -182,6 +185,7 @@
 				001 /* SimpleRecorderApp.swift in Sources */,
 				002 /* AudioRecorderManager.swift in Sources */,
 				003 /* HotKeyManager.swift in Sources */,
+				004 /* LogManager.swift in Sources */,
 				005 /* AppSettings.swift in Sources */,
 				012 /* MainWindowView.swift in Sources */,
 			);

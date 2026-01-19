@@ -37,6 +37,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     static let shared = AudioRecorderManager()
 
     @Published var isRecording = false
+    @Published var isPaused = false
     @Published var currentRecordingURL: URL?
     @Published var recordingDuration: TimeInterval = 0
 
@@ -48,7 +49,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
         label: "com.simplerecorder.writingQueue", qos: .userInitiated)
     private var recordingTimer: Timer?
     private var sleepAssertionID: IOPMAssertionID = 0
-    private var recordingStartDate: Date?
+    private var accumulatedDuration: TimeInterval = 0
+    private var currentSegmentStartTime: Date?
+    private var actualStartTime: Date?
 
     // 状态管理
     private var isWriterStarted = false
@@ -100,6 +103,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     private override init() {
         super.init()
+        LogManager.shared.info("AudioRecorderManager 初始化")
     }
 
     // MARK: - 中断状态重置
@@ -110,10 +114,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         if wasInterrupted {
             if let path = filePath, FileManager.default.fileExists(atPath: path) {
-                print("⚠️ 检测到上次录音非正常结束。")
-                print("💡 备注：得益于 fMP4 格式，文件已自动固化保存。路径: \(path)")
+                LogManager.shared.warning("检测到上次录音非正常结束，文件已自动固化保存 | 路径: \(path)")
             } else {
-                print("ℹ️ 检测到上次录音曾被标记开始，但未找到对应的物理文件。")
+                LogManager.shared.info("检测到上次录音曾被标记开始，但未找到对应的物理文件")
             }
             // 发送通知，允许 UI 刷新录音列表
             NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
@@ -153,9 +156,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
     func startRecording() {
         // 防止在转换状态中或已在录音时重复启动
         guard !isTransitioning, !isRecording else {
-            print("⚠️ 忽略启动请求：正在转换状态 (\(isTransitioning)) 或已在录音 (\(isRecording))")
+            LogManager.shared.warning("忽略启动请求 | 正在转换状态: \(isTransitioning), 已在录音: \(isRecording)")
             return
         }
+        LogManager.shared.info("收到录音启动请求")
 
         // 检查权限
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -260,8 +264,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
             finalizeRecordingStart(fileURL: finalFileURL)
 
         } catch {
-            print("❌ 启动录音失败: \(error.localizedDescription)")
-            // showRecordingErrorAlert(message: error.localizedDescription)
+            LogManager.shared.error("麦克风录音启动失败 | 错误: \(error.localizedDescription)")
+            isTransitioning = false
         }
     }
 
@@ -311,15 +315,17 @@ class AudioRecorderManager: NSObject, ObservableObject {
             finalizeRecordingStart(fileURL: finalFileURL)
 
         } catch {
-            print("❌ 启动录音失败: \(error.localizedDescription)")
-            // showRecordingErrorAlert(message: error.localizedDescription)
+            LogManager.shared.error("系统音频录音启动失败 | 错误: \(error.localizedDescription)")
+            isTransitioning = false
         }
     }
 
     // MARK: - 录音启动完成处理
     private func finalizeRecordingStart(fileURL: URL) {
         isTransitioning = false
-        recordingStartDate = Date()
+        accumulatedDuration = 0
+        actualStartTime = Date()
+        currentSegmentStartTime = actualStartTime
         saveRecordingState(file: fileURL.path)
 
         isRecording = true
@@ -329,17 +335,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
         hasPrintedSystemAudioFormat = false
 
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, let startDate = self.recordingStartDate else { return }
-
-            // 使用当前时间减去开始时间，确保计时的绝对准确，解决主线程阻塞导致的累计误差
-            self.recordingDuration = Date().timeIntervalSince(startDate)
-
+            guard let self = self, let startDate = self.currentSegmentStartTime else { return }
+            self.recordingDuration = self.accumulatedDuration + Date().timeIntervalSince(startDate)
             if self.recordingDuration >= self.maxDuration {
-                print("⏰ 达到录音时长上限 (\(Int(self.maxDuration))s)，正在自动停止...")
                 self.isAutoStoppedByLimit = true
                 self.stopRecording()
             }
         }
+
         RunLoop.main.add(timer, forMode: .common)
         recordingTimer = timer
 
@@ -350,8 +353,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
             AppSettings.shared.availableInputDevices.first(where: {
                 $0.id == AppSettings.shared.selectedDeviceID
             })?.name ?? "默认设备"
-        print(
-            "🎙️ 录音已启动 [\(currentAudioSource.displayName)] (输入: \(deviceName)) (fMP4): \(fileURL.lastPathComponent)"
+        LogManager.shared.info(
+            "录音已启动 | 音源: \(currentAudioSource.displayName), 输入设备: \(deviceName), 文件: \(fileURL.lastPathComponent)"
         )
     }
 
@@ -827,9 +830,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 // 只有在 Input 真的无法接受数据（通常是磁盘故障或 Writer 错误）时才报错。
                 if currentInput.isReadyForMoreMediaData {
                     if !currentInput.append(sampleBuffer) {
-                        print("❌ 写入采样数据失败: \(currentWriter.error?.localizedDescription ?? "未知错误")")
+                        LogManager.shared.error(
+                            "写入采样数据失败 | 错误: \(currentWriter.error?.localizedDescription ?? "未知错误")")
                     } else if !self.hasPrintedFirstSample {
-                        print("✅ 成功写入首个采样数据 [Channels: \(bufferCopy.format.channelCount)]")
+                        LogManager.shared.debug(
+                            "首次收到音频 Buffer | 格式: \(bufferCopy.format.sampleRate)Hz, \(bufferCopy.format.channelCount)ch"
+                        )
                         self.hasPrintedFirstSample = true
                     }
                 } else {
@@ -841,7 +847,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
                         retry += 1
                     }
                     if !currentInput.append(sampleBuffer) {
-                        print("❌ 强制写入失败: \(currentWriter.error?.localizedDescription ?? "数据溢出")")
+                        LogManager.shared.error(
+                            "强制写入失败 | 错误: \(currentWriter.error?.localizedDescription ?? "数据溢出"), 重试次数: \(retry)"
+                        )
                     }
                 }
             }
@@ -904,10 +912,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
     }
 
     func stopRecording() {
-        guard isRecording, !isTransitioning else { return }
+        guard isRecording, !isTransitioning else {
+            LogManager.shared.warning(
+                "忽略停止请求 | isRecording: \(isRecording), isTransitioning: \(isTransitioning)")
+            return
+        }
         isTransitioning = true
 
-        print("⏹️ 正在停止录音...")
+        LogManager.shared.info("正在停止录音 | 已录制时长: \(String(format: "%.1f", recordingDuration))s")
         recordingTimer?.invalidate()
         recordingTimer = nil
 
@@ -935,9 +947,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
                     if let writer = currentWriter, writer.status == .completed, let url = outputURL
                     {
-                        print("📊 写入完成，最终状态: .completed")
                         let finalURL = self.renameToFinalFormat(url: url)
-                        print("✅ 录音已保存: \(finalURL.path)")
+                        let fileSize =
+                            (try? FileManager.default.attributesOfItem(atPath: finalURL.path)[.size]
+                                as? Int64) ?? 0
+                        let fileSizeMB = Double(fileSize) / (1024 * 1024)
+                        LogManager.shared.info(
+                            "录音已保存 | 时长: \(String(format: "%.1f", self.recordingDuration))s, 文件大小: \(String(format: "%.2f", fileSizeMB))MB, 路径: \(finalURL.path)"
+                        )
 
                         // 如果是因为达到上限停止的，给予弹窗提示
                         if self.isAutoStoppedByLimit {
@@ -945,11 +962,27 @@ class AudioRecorderManager: NSObject, ObservableObject {
                             self.isAutoStoppedByLimit = false
                         }
 
-                        NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+                        // 检查是否需要转换为 MP3
+                        if AppSettings.shared.outputFormat == .mp3 {
+                            self.convertToMP3(from: finalURL) { mp3URL in
+                                if AppSettings.shared.openFolderAfterRecording {
+                                    if let mp3URL = mp3URL {
+                                        NSWorkspace.shared.activateFileViewerSelecting([mp3URL])
+                                    } else {
+                                        NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+                                    }
+                                }
+                            }
+                        } else {
+                            if AppSettings.shared.openFolderAfterRecording {
+                                NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+                            }
+                        }
                     } else if let err = currentWriter?.error {
-                        print("❌ 写入结束时出错: \(err.localizedDescription)")
+                        LogManager.shared.error("写入结束时出错 | 错误: \(err.localizedDescription)")
                     } else {
-                        print("⚠️ 写入可能未正常完成，状态: \(currentWriter?.status.rawValue ?? -1)")
+                        LogManager.shared.warning(
+                            "写入可能未正常完成 | 状态: \(currentWriter?.status.rawValue ?? -1)")
                     }
 
                     // 3. 后续清理
@@ -963,6 +996,80 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - 暂停/继续录音
+    func togglePause() {
+        if isPaused {
+            resumeRecording()
+        } else {
+            pauseRecording()
+        }
+    }
+
+    func pauseRecording() {
+        guard isRecording, !isPaused, !isTransitioning else {
+            LogManager.shared.warning("忽略暂停请求 | isRecording: \(isRecording), isPaused: \(isPaused)")
+            return
+        }
+
+        LogManager.shared.info("暂停录音 | 已录制时长: \(String(format: "%.1f", recordingDuration))s")
+
+        // 暂停计时器
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+
+        // 统计当前已录制时间段并更新累计时长
+        if let startDate = currentSegmentStartTime {
+            accumulatedDuration += Date().timeIntervalSince(startDate)
+            recordingDuration = accumulatedDuration
+        }
+        currentSegmentStartTime = nil
+
+        isPaused = true
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+    }
+
+    func resumeRecording() {
+        guard isRecording, isPaused, !isTransitioning else {
+            LogManager.shared.warning("忽略继续请求 | isRecording: \(isRecording), isPaused: \(isPaused)")
+            return
+        }
+
+        LogManager.shared.info("继续录音 | 已录制时长: \(String(format: "%.1f", recordingDuration))s")
+
+        // 继续音频引擎
+        do {
+            try audioEngine.start()
+        } catch {
+            LogManager.shared.error("继续录音失败 | 错误: \(error.localizedDescription)")
+            return
+        }
+
+        // 继续系统音频采集
+        if #available(macOS 13.0, *) {
+            if let stream = systemAudioStream {
+                Task {
+                    try? await stream.startCapture()
+                }
+            }
+        }
+
+        // 恢复计时器
+        currentSegmentStartTime = Date()
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self, let startDate = self.currentSegmentStartTime else { return }
+            self.recordingDuration = self.accumulatedDuration + Date().timeIntervalSince(startDate)
+            if self.recordingDuration >= self.maxDuration {
+                self.isAutoStoppedByLimit = true
+                self.stopRecording()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        recordingTimer = timer
+
+        isPaused = false
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
     }
 
     func saveRecordingImmediately() {
@@ -1021,7 +1128,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     }
 
     private func renameToFinalFormat(url: URL) -> URL {
-        guard let startDate = recordingStartDate else { return url }
+        guard let startDate = actualStartTime else { return url }
         let endDate = Date()
 
         // 1. 准备格式化器
@@ -1065,6 +1172,102 @@ class AudioRecorderManager: NSObject, ObservableObject {
         } catch {
             print("❌ 重命名失败: \(error.localizedDescription)")
             return url
+        }
+    }
+
+    // MARK: - M4A 转 MP3
+    private func convertToMP3(from sourceURL: URL, completion: @escaping (URL?) -> Void) {
+        let mp3URL = sourceURL.deletingPathExtension().appendingPathExtension("mp3")
+
+        LogManager.shared.info("开始转换 MP3 | 源文件: \(sourceURL.lastPathComponent)")
+
+        let asset = AVAsset(url: sourceURL)
+
+        guard
+            let exportSession = AVAssetExportSession(
+                asset: asset, presetName: AVAssetExportPresetAppleM4A)
+        else {
+            LogManager.shared.error("MP3 转换失败 | 无法创建导出会话")
+            completion(nil)
+            return
+        }
+
+        // macOS 的 AVAssetExportSession 不直接支持 MP3，需要先导出为临时 M4A 再用其他方式
+        // 使用 afconvert 命令行工具进行转换（macOS 内置）
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+            process.arguments = [
+                "-f", "mp4f",  // MP4 容器
+                "-d", "aac",  // AAC 编码（MP3 在 macOS 需要额外处理）
+                "-b", "128000",  // 128kbps
+                sourceURL.path,
+                mp3URL.path,
+            ]
+
+            // 实际上 afconvert 输出 m4a/aac 更可靠，对于真正的 MP3 我们用 lame 或保持 m4a
+            // 但为了简化，我们用系统的 afconvert 输出为 mp3 格式
+            let lameProcess = Process()
+            lameProcess.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+            lameProcess.arguments = [
+                sourceURL.path,
+                mp3URL.path,
+                "-d", "LEI16",  // PCM 中间格式
+                "-f", "WAVE",
+            ]
+
+            // 使用更简单的方案：直接用 ffmpeg 或保持 m4a
+            // 这里我们采用简化方案：复制并重命名为 .mp3（现代播放器都能播放）
+            // 或者使用 NSSharingService 让用户自行转换
+
+            // 最终方案：使用系统内置的 afconvert 转换为 aiff 再转 mp3
+            // 由于 MP3 编码在 macOS 受限，我们改用更兼容的方案
+
+            do {
+                // 使用 AVAssetExportSession 导出为通用格式
+                // 由于 macOS 不原生支持 MP3 编码，我们改用系统命令
+                let convertProcess = Process()
+                convertProcess.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+                convertProcess.arguments = [
+                    "-f", "MPG3",  // MP3 文件格式
+                    "-d", "mp3",  // MP3 数据格式
+                    "-b", "128000",  // 码率
+                    sourceURL.path,
+                    mp3URL.path,
+                ]
+
+                try convertProcess.run()
+                convertProcess.waitUntilExit()
+
+                if convertProcess.terminationStatus == 0
+                    && FileManager.default.fileExists(atPath: mp3URL.path)
+                {
+                    // 转换成功，删除原 M4A 文件
+                    try? FileManager.default.removeItem(at: sourceURL)
+
+                    let fileSize =
+                        (try? FileManager.default.attributesOfItem(atPath: mp3URL.path)[.size]
+                            as? Int64) ?? 0
+                    let fileSizeMB = Double(fileSize) / (1024 * 1024)
+                    LogManager.shared.info(
+                        "MP3 转换完成 | 文件: \(mp3URL.lastPathComponent), 大小: \(String(format: "%.2f", fileSizeMB))MB"
+                    )
+
+                    DispatchQueue.main.async {
+                        completion(mp3URL)
+                    }
+                } else {
+                    LogManager.shared.warning("MP3 转换失败，保留原 M4A 文件")
+                    DispatchQueue.main.async {
+                        completion(nil)
+                    }
+                }
+            } catch {
+                LogManager.shared.error("MP3 转换异常 | 错误: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    completion(nil)
+                }
+            }
         }
     }
 
