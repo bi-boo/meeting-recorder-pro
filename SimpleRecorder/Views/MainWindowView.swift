@@ -93,6 +93,7 @@ struct FeatureItem: View {
 struct BasicSettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var hotKeyManager = HotKeyManager.shared
+    @ObservedObject private var recordingManager = AudioRecorderManager.shared
     @State private var isRecordingShortcut = false
     @State private var isRecordingPauseShortcut = false
 
@@ -130,6 +131,7 @@ struct BasicSettingsView: View {
                         Text(source.displayName).tag(source)
                     }
                 }
+                .disabled(recordingManager.isRecording)  // 【边界逻辑】录音时禁用
                 .onChange(of: settings.audioSource) { newValue in
                     if newValue != .microphone {
                         AppSettings.requestScreenCapturePermission()
@@ -150,9 +152,22 @@ struct BasicSettingsView: View {
                             Text(device.name).tag(device.id)
                         }
                     }
+                    .disabled(recordingManager.isRecording)  // 【边界逻辑】录音时禁用
                     .onAppear {
                         settings.refreshInputDevices()
                     }
+                }
+
+                // 【边界逻辑】录音中提示
+                if recordingManager.isRecording {
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.blue)
+                        Text("录音中，设置将在下次录音时生效")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 4)
                 }
 
                 // 权限提示

@@ -19,14 +19,15 @@ extension AVAudioPCMBuffer {
             return nil
         }
         copy.frameLength = frameLength
-        if let src = floatChannelData, let dst = copy.mutableAudioBufferList.pointee.mBuffers.mData
+        if let srcChannels = self.floatChannelData,
+            let dstChannels = copy.floatChannelData
         {
-            // 注意：这里假设是单声道或交织/非交织的通用处理
-            // 对于单声道 48k Float，直接拷贝整个内存块是安全的
-            for i in 0..<Int(format.channelCount) {
-                if let s = floatChannelData?[i], let d = copy.floatChannelData?[i] {
-                    memcpy(d, s, Int(frameLength) * MemoryLayout<Float>.size)
-                }
+            let channels = min(Int(self.format.channelCount), Int(copy.format.channelCount))
+            for i in 0..<channels {
+                let s = srcChannels[i]
+                let d = dstChannels[i]
+                let framesToCopy = min(self.frameLength, copy.frameCapacity)
+                memcpy(d, s, Int(framesToCopy) * MemoryLayout<Float>.size)
             }
         }
         return copy
@@ -71,9 +72,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var recordingMixer: AVAudioMixerNode!
     private var systemAudioSourceNode: AVAudioSourceNode?
 
-    // 系统音频缓冲队列（用于从 ScreenCaptureKit 回调传递到 AVAudioEngine）
+    // 系统音频缓冲队列
     private var systemAudioBufferQueue = [AVAudioPCMBuffer]()
-    private let systemAudioQueueLimit = 200
+    private var systemAudioBufferReadOffset: AVAudioFrameCount = 0  // 追踪第一帧缓冲区的读取进度
+    private var isSystemAudioBuffering = true  // 缓冲状态机
+    private let systemAudioPreRollHighWaterMark = 3  // 降低到 3 个包（约 60ms），减少断续感
+    private let systemAudioQueueLimit = 600  // 容错缓冲区上限
     private let systemAudioQueueLock = NSLock()
 
     // 音频转换器缓存，用于修复系统音转换时的相位不连续/失真问题
@@ -86,10 +90,19 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var hasPrintedSystemAudioFormat = false
     private var lastLevelLogTime: TimeInterval = 0
 
+    // 【性能优化】音频 Buffer 池相关
+    // 预分配 Buffer 避免在音频回调线程中频繁进行内存分配
+    private let bufferPoolLimit = 32
+    private var audioBufferPool = [AVAudioPCMBuffer]()
+    private let bufferPoolLock = NSLock()
+
     // 动态时长限制设置
     private var maxDuration: TimeInterval {
         AppSettings.shared.maxRecordingDuration
     }
+
+    // 统一的内部录音格式（48kHz, 单声道）
+    private let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: 48000.0, channels: 1)!
     private let warningInterval: TimeInterval = 10 * 60  // 每 10 分钟提醒
     private var lastWarningTime: TimeInterval = 0
 
@@ -164,7 +177,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 检查权限
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         LogManager.shared.info("权限检测 | 当前麦克风授权状态: \(status.rawValue) (0:n/d, 1:res, 2:den, 3:auth)")
-        
+
         switch status {
         case .authorized:
             beginRecording()
@@ -276,32 +289,32 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         } catch {
             LogManager.shared.error("麦克风录音启动失败 | 错误: \(error.localizedDescription)")
-            
+
             // 轻量级清理：只清理本次录音创建的资源，不调用 reset() 避免破坏引擎状态
             // 移除可能已安装的 tap
             audioEngine.inputNode.removeTap(onBus: 0)
             recordingMixer?.removeTap(onBus: 0)
             audioEngine.stop()
-            
+
             // 清理 mixer 节点
             if let mixer = recordingMixer {
                 audioEngine.detach(mixer)
                 recordingMixer = nil
             }
-            
+
             // 清理已创建但未完成的 AssetWriter
             if let writer = assetWriter {
                 writer.cancelWriting()
                 assetWriter = nil
                 assetWriterInput = nil
             }
-            
+
             // 删除已创建但无效的临时文件
             if let url = currentRecordingURL {
                 try? FileManager.default.removeItem(at: url)
                 currentRecordingURL = nil
             }
-            
+
             isTransitioning = false
         }
     }
@@ -356,25 +369,25 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         } catch {
             LogManager.shared.error("系统音频录音启动失败 | 错误: \(error.localizedDescription)")
-            
+
             // 轻量级清理：只清理本次录音创建的资源
             // 移除可能已安装的 tap
             audioEngine.inputNode.removeTap(onBus: 0)
             recordingMixer?.removeTap(onBus: 0)
             audioEngine.stop()
-            
+
             // 清理 mixer 节点
             if let mixer = recordingMixer {
                 audioEngine.detach(mixer)
                 recordingMixer = nil
             }
-            
+
             // 清理 systemAudioSourceNode
             if let sourceNode = systemAudioSourceNode {
                 audioEngine.detach(sourceNode)
                 systemAudioSourceNode = nil
             }
-            
+
             // 【关键】必须停止 SCStream 以释放屏幕录制权限
             if #available(macOS 13.0, *) {
                 let stream = systemAudioStream
@@ -384,25 +397,25 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     try? await stream?.stopCapture()
                 }
             }
-            
+
             // 清空缓冲队列
             systemAudioQueueLock.lock()
             systemAudioBufferQueue.removeAll()
             systemAudioQueueLock.unlock()
-            
+
             // 清理已创建但未完成的 AssetWriter
             if let writer = assetWriter {
                 writer.cancelWriting()
                 assetWriter = nil
                 assetWriterInput = nil
             }
-            
+
             // 删除已创建但无效的临时文件
             if let url = currentRecordingURL {
                 try? FileManager.default.removeItem(at: url)
                 currentRecordingURL = nil
             }
-            
+
             isTransitioning = false
         }
     }
@@ -417,7 +430,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         isRecording = true
         recordingDuration = 0
+        totalFramesWritten = 0
+        systemAudioBufferReadOffset = 0
+        // 初始缓冲状态：仅在混合模式下默认开启以平滑时钟，仅系统音频模式下将由 setup 逻辑显式关闭
+        isSystemAudioBuffering = (currentAudioSource == .both)
         lastWarningTime = 0
+
         hasPrintedFirstSample = false
         hasPrintedSystemAudioFormat = false
 
@@ -453,11 +471,11 @@ class AudioRecorderManager: NSObject, ObservableObject {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
-        
+
         // 2. 移除所有可能存在的 tap
         audioEngine.inputNode.removeTap(onBus: 0)
         recordingMixer?.removeTap(onBus: 0)
-        
+
         // 3. 清理之前可能残留的节点
         if let mixer = recordingMixer {
             audioEngine.detach(mixer)
@@ -471,20 +489,20 @@ class AudioRecorderManager: NSObject, ObservableObject {
             audioEngine.detach(mixer)
             mixerNode = nil
         }
-        
+
         // 4. 重置引擎到初始状态
         audioEngine.reset()
-        
+
         // 5. 清空系统音频缓冲队列
         systemAudioQueueLock.lock()
         systemAudioBufferQueue.removeAll()
         systemAudioQueueLock.unlock()
-        
+
         // 6. 清理音频转换器缓存
         cachedAudioConverter = nil
         lastSrcFormat = nil
         lastDstFormat = nil
-        
+
         print("🔄 音频引擎已重置，准备开始新录音")
     }
 
@@ -496,12 +514,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 2. 【关键】获取输入节点的硬件格式
         // 必须在连接之前获取，且需要通过 inputNode 来触发格式初始化
         let inputNode = audioEngine.inputNode
-        
+
         // 触发 inputNode 初始化以获取正确的硬件格式
         // 在某些情况下，reset() 后需要重新访问 inputNode 来刷新格式
         let hwFormat = inputNode.inputFormat(forBus: 0)
         print("🎤 硬件输入格式: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch")
-        
+
         // 使用硬件的采样率，确保格式匹配
         let inputFormat: AVAudioFormat
         if hwFormat.sampleRate > 0 && hwFormat.channelCount > 0 {
@@ -512,42 +530,44 @@ class AudioRecorderManager: NSObject, ObservableObject {
             inputFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
         }
 
-        // 3. 设置录音混音器（使用输入格式）
-        setupRecordingMixer(inputFormat: inputFormat)
+        // 3. 设置录音混音器
+        setupRecordingMixer()
 
-        // 4. 连接麦克风到录音混音器
-        audioEngine.connect(inputNode, to: recordingMixer, format: inputFormat)
+        // 4. 连接麦克风到录音混音器 (AVAudioEngine 自动处理麦克风到 48k 的重采样)
+        audioEngine.connect(inputNode, to: recordingMixer, format: recordingFormat)
 
         installRecordingTap()
     }
 
-    private func setupRecordingMixer(inputFormat: AVAudioFormat? = nil) {
+    private func setupRecordingMixer() {
         recordingMixer = AVAudioMixerNode()
         audioEngine.attach(recordingMixer)
 
-        // 使用传入的格式，或者默认 48kHz
-        let format = inputFormat ?? AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+        // 统一输出为 48kHz 单声道
+        audioEngine.connect(recordingMixer, to: audioEngine.mainMixerNode, format: recordingFormat)
 
-        // 连接到主混音器：必须保持连接引擎才能运转
-        audioEngine.connect(recordingMixer, to: audioEngine.mainMixerNode, format: format)
-
-        // 【关键修复】recordingMixer 的音量必须为 1.0，否则 tap 捕获到的是静音
+        // 【音质优化】预留 3dB 以上的 Headroom，防止混合时的数字削波导致沙哑
         recordingMixer.outputVolume = 1.0
-
-        // 【静音监听】只把引擎的主输出音量关掉。这样内部数据流正常，但耳机没声音
         audioEngine.mainMixerNode.outputVolume = 0
 
-        print("🎛️ 混音链路已就位：录制音量 1.0, 监听音量 0.0, 采样率 \(format.sampleRate)Hz")
+        print("🎛️ 混音链路已就位：录制格式 48kHz 单声道")
     }
 
     private func installRecordingTap() {
         let format = recordingMixer.outputFormat(forBus: 0)
         recordingMixer.installTap(onBus: 0, bufferSize: 2048, format: format) {
             [weak self] buffer, time in
-            guard let self = self else { return }
-            // 检查是否有实际音频数据流入
+            guard let self = self, self.isRecording, !self.isPaused else { return }
+
+            // 【核心加固】：在此刻，即采集发生的瞬间读取当前的 totalFramesWritten
+            // 这确保了哪怕之后异步写入队列发生延迟，该 buffer 对应的 PTS 也是绝对准确的。
+            let pts = CMTime(value: self.totalFramesWritten, timescale: Int32(format.sampleRate))
+
+            // 立即累加帧数，防止下一个回调进来时 PTS 重叠
+            self.totalFramesWritten += Int64(buffer.frameLength)
+
             if buffer.frameLength > 0 {
-                self.processAudioBuffer(buffer, time: time)
+                self.processAudioBufferWithPTS(buffer, pts: pts)
             }
         }
     }
@@ -556,13 +576,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
     @available(macOS 13.0, *)
     private func setupSystemAudioOnlyRecording() async throws {
         setupRecordingMixer()
-
-        // 启动系统音频采集
         try await startSystemAudioCapture()
 
-        // 创建 SourceNode 接收来自 ScreenCaptureKit 的音频
-        let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
-        systemAudioSourceNode = AVAudioSourceNode(format: format) {
+        // 仅系统录音：设置增益为 1.0，并开启弹性缓冲以对抗时钟抖动
+        isSystemAudioBuffering = true
+
+        systemAudioSourceNode = AVAudioSourceNode(format: recordingFormat) {
             [weak self] _, _, frameCount, audioBufferList -> OSStatus in
             guard let self = self else { return noErr }
             return self.fillSystemAudioBuffer(audioBufferList, frameCount: frameCount)
@@ -570,7 +589,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         if let sourceNode = systemAudioSourceNode {
             audioEngine.attach(sourceNode)
-            audioEngine.connect(sourceNode, to: recordingMixer, format: format)
+            audioEngine.connect(sourceNode, to: recordingMixer, format: recordingFormat)
+            sourceNode.volume = 1.0
         }
 
         installRecordingTap()
@@ -581,7 +601,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     ) -> OSStatus {
         let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
 
-        // 先全部填充静音，确保未覆盖区域无杂音
+        // 默认填充静音
         for i in 0..<ablPointer.count {
             if let data = ablPointer[i].mData {
                 memset(data, 0, Int(ablPointer[i].mDataByteSize))
@@ -591,60 +611,53 @@ class AudioRecorderManager: NSObject, ObservableObject {
         systemAudioQueueLock.lock()
         defer { systemAudioQueueLock.unlock() }
 
+        // 【弹性滞后缓冲逻辑】
+
+        // 【弹性滞后缓冲逻辑】
+        if isSystemAudioBuffering {
+            // 水位只要达到轻量级指标（3个包）就恢复输出，减少等待感
+            if systemAudioBufferQueue.count < systemAudioPreRollHighWaterMark {
+                return noErr
+            } else {
+                isSystemAudioBuffering = false
+            }
+        }
+
+        // 如果输出态队列耗尽，立即进入缓冲态重积攒 3 个包，消除所有模式下的断续感
+        if systemAudioBufferQueue.isEmpty {
+            isSystemAudioBuffering = true
+            return noErr
+        }
+
         var framesCopied: AVAudioFrameCount = 0
         let sampleSize = MemoryLayout<Float>.size
 
-        // 循环从队列中取出数据直到填满当前请求的 frameCount
         while framesCopied < frameCount && !systemAudioBufferQueue.isEmpty {
             let buffer = systemAudioBufferQueue[0]
+            let framesAvailable = buffer.frameLength - systemAudioBufferReadOffset
             let framesLeft = frameCount - framesCopied
-            let framesInSource = buffer.frameLength
-            let framesToCopy = min(framesLeft, framesInSource)
+            let framesToCopy = min(framesLeft, framesAvailable)
 
             let srcPointer = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
 
             for i in 0..<min(ablPointer.count, srcPointer.count) {
-                let byteOffset = Int(framesCopied) * sampleSize
+                let dstByteOffset = Int(framesCopied) * sampleSize
+                let srcByteOffset = Int(systemAudioBufferReadOffset) * sampleSize
                 let bytesToCopy = Int(framesToCopy) * sampleSize
 
                 if let srcData = srcPointer[i].mData, let dstData = ablPointer[i].mData {
-                    // 【关键修复】确保将 srcNode 完整拷贝到 dst 的正确偏移位置
-                    memcpy(dstData.advanced(by: byteOffset), srcData, bytesToCopy)
+                    memcpy(
+                        dstData.advanced(by: dstByteOffset), srcData.advanced(by: srcByteOffset),
+                        bytesToCopy)
                 }
             }
 
             framesCopied += framesToCopy
+            systemAudioBufferReadOffset += framesToCopy
 
-            if framesToCopy >= framesInSource {
-                // 这个 buffer 用完了
+            if systemAudioBufferReadOffset >= buffer.frameLength {
                 systemAudioBufferQueue.removeFirst()
-            } else {
-                // 这个 buffer 没用完，需要处理剩下部分（极为关键，否则音频会产生微小截断失真）
-                // 方案：通过创建一个偏移后的子 buffer 替换掉当前的
-                let remainingFrames = framesInSource - framesToCopy
-                if let nextBuffer = AVAudioPCMBuffer(
-                    pcmFormat: buffer.format, frameCapacity: remainingFrames)
-                {
-                    nextBuffer.frameLength = remainingFrames
-                    let nextSrcPointer = UnsafeMutableAudioBufferListPointer(
-                        buffer.mutableAudioBufferList)
-                    let nextDstPointer = UnsafeMutableAudioBufferListPointer(
-                        nextBuffer.mutableAudioBufferList)
-
-                    for i in 0..<min(nextSrcPointer.count, nextDstPointer.count) {
-                        let srcOffset = Int(framesToCopy) * sampleSize
-                        if let sData = nextSrcPointer[i].mData, let dData = nextDstPointer[i].mData
-                        {
-                            memcpy(
-                                dData, sData.advanced(by: srcOffset),
-                                Int(remainingFrames) * sampleSize)
-                        }
-                    }
-                    systemAudioBufferQueue[0] = nextBuffer
-                } else {
-                    // 回退方案：如果无法创建子 buffer，则丢弃
-                    systemAudioBufferQueue.removeFirst()
-                }
+                systemAudioBufferReadOffset = 0
             }
         }
 
@@ -654,23 +667,24 @@ class AudioRecorderManager: NSObject, ObservableObject {
     // MARK: - 混合录音配置（麦克风 + 系统音频）
     @available(macOS 13.0, *)
     private func setupMixedRecording() async throws {
-        // 1. 设置硬件输入设备
+        // 1. 设置硬件输入设备 (麦克风)
         try updateInputDevice()
-
         setupRecordingMixer()
 
-        // 1. 连接麦克风到 Bus 0
-        let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        audioEngine.connect(
-            inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: inputFormat)
+        // 2. 混合录制：开启弹性缓冲以对齐异构时钟
+        isSystemAudioBuffering = true
 
-        // 2. 启动系统音频采集
+        // 3. 麦克风 -> Bus 0 (使用 0.7 增益)
+        let inputNode = audioEngine.inputNode
+        audioEngine.connect(
+            inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: recordingFormat)
+        inputNode.volume = 0.7
+
+        // 4. 启动系统音频采集
         try await startSystemAudioCapture()
 
-        // 系统音频统一使用 44.1kHz 单声道进行混音
-        let systemFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
-        systemAudioSourceNode = AVAudioSourceNode(format: systemFormat) {
+        // 5. 将系统音频包装为 SourceNode 接入混音器 Bus 1
+        systemAudioSourceNode = AVAudioSourceNode(format: recordingFormat) {
             [weak self] _, _, frameCount, audioBufferList -> OSStatus in
             guard let self = self else { return noErr }
             return self.fillSystemAudioBuffer(audioBufferList, frameCount: frameCount)
@@ -678,10 +692,11 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         if let sourceNode = systemAudioSourceNode {
             audioEngine.attach(sourceNode)
-            // 连接系统音频到 Bus 1，避免覆盖麦克风
             audioEngine.connect(
-                sourceNode, to: recordingMixer, fromBus: 0, toBus: 1, format: systemFormat)
-            print("🎸 混合连接成功：Bus 0 (麦克风), Bus 1 (系统音)")
+                sourceNode, to: recordingMixer, fromBus: 0, toBus: 1, format: recordingFormat)
+            // 6. 系统音也设为 0.7 增益，在轻量缓冲策略下 0.7 已足够安全
+            sourceNode.volume = 0.7
+            print("🎸 混合链路定向加固：Mic(v0.7), Sys(v0.7), 轻量弹性缓冲已开启")
         }
 
         installRecordingTap()
@@ -759,10 +774,11 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private func startSystemAudioCapture() async throws {
         let configuration = SCStreamConfiguration()
 
-        // 最小化视频配置（我们只需要音频）
+        // 【性能至上】配置精简，彻底解决外接鼠标卡顿问题
         configuration.width = 2
         configuration.height = 2
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 5)  // 极低帧率
+        configuration.showsCursor = false  // ！！！关键修复：禁止光标捕获，解决鼠标移动卡顿
 
         // 启用音频采集
         configuration.capturesAudio = true
@@ -827,6 +843,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // MARK: - 处理系统音频样本
     private func handleSystemAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        // 如果已暂停，直接丢弃数据
+        guard !isPaused else { return }
+
         guard CMSampleBufferIsValid(sampleBuffer),
             let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
             let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
@@ -836,19 +855,11 @@ class AudioRecorderManager: NSObject, ObservableObject {
         let srcFormat = AVAudioFormat(streamDescription: asbd)!
         let dstFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
 
-        if !hasPrintedSystemAudioFormat {
-            print(
-                "🔊 系统音频源格式: \(srcFormat.sampleRate)Hz, \(srcFormat.channelCount)声道, \(asbd.pointee.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0 ? "非交织" : "交织")"
-            )
-            hasPrintedSystemAudioFormat = true
-        }
-
-        // 步骤 1：创建一个格式完全匹配源的中转 Buffer
+        // 步骤 1：创建一个临时的中转 Buffer（局部变量分配足矣，无需在此处 deepCopy）
         guard let tempBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: frameCount)
         else { return }
         tempBuffer.frameLength = frameCount
 
-        // 步骤 2：采用官方推荐的拷贝方式将数据存入 tempBuffer
         let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
             sampleBuffer,
             at: 0,
@@ -856,21 +867,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
             into: tempBuffer.mutableAudioBufferList
         )
 
-        if status != noErr {
-            print("❌ 拷贝 PCM 数据失败: \(status)")
-            return
-        }
-
-        // 步骤 3：转换到混音引擎的标准格式 (48k/1ch)
-        guard let finalBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: frameCount)
-        else { return }
-        finalBuffer.frameLength = frameCount
+        if status != noErr { return }
 
         if srcFormat.isEqual(dstFormat) {
             self.enqueueSystemAudioBuffer(tempBuffer)
         } else {
-            // 获取（或初始化）缓存的转换器
-            let converter: AVAudioConverter?
+            // 获取转换器（使用锁保护成员变量访问）
+            var converter: AVAudioConverter?
+            systemAudioQueueLock.lock()
             if let cached = cachedAudioConverter,
                 let lastSrc = lastSrcFormat,
                 let lastDst = lastDstFormat,
@@ -878,57 +882,46 @@ class AudioRecorderManager: NSObject, ObservableObject {
             {
                 converter = cached
             } else {
-                print("🔄 为新的系统音格式初始化转换器: \(srcFormat.sampleRate) -> \(dstFormat.sampleRate)")
                 converter = AVAudioConverter(from: srcFormat, to: dstFormat)
                 cachedAudioConverter = converter
                 lastSrcFormat = srcFormat
                 lastDstFormat = dstFormat
             }
+            systemAudioQueueLock.unlock()
 
-            guard let activeConverter = converter else { return }
+            guard let activeConverter = converter,
+                let finalBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: frameCount)
+            else { return }
+            finalBuffer.frameLength = frameCount
 
+            // 【性能重构】：AVAudioConverter 的 convert 运行在主采集线程，不再持有 systemAudioQueueLock。
+            // 这样能够彻底消除由于采样率转换耗时导致的渲染线程（fillSystemAudioBuffer）阻塞，
+            // 进而消除了由于锁竞争产生的“断续感”。
             var error: NSError?
             activeConverter.convert(to: finalBuffer, error: &error) { inNumPackets, outStatus in
                 outStatus.pointee = .haveData
                 return tempBuffer
             }
 
-            if let err = error {
-                print("❌ 系统音频转换失败: \(err.localizedDescription)")
-            } else {
+            if error == nil {
                 self.enqueueSystemAudioBuffer(finalBuffer)
             }
+
         }
     }
 
     private func enqueueSystemAudioBuffer(_ buffer: AVAudioPCMBuffer) {
-        // 简易信号强度检测，仅用于调试
-        let now = Date().timeIntervalSince1970
-        if now - lastLevelLogTime > 5.0 {
-            if let channelData = buffer.floatChannelData?[0] {
-                var maxAmp: Float = 0
-                for i in 0..<Int(buffer.frameLength) {
-                    maxAmp = max(maxAmp, abs(channelData[i]))
-                }
-                if maxAmp > 0.0001 {
-                    print("✅ 系统音频信号正常 [有效峰值: \(String(format: "%.4f", maxAmp))]")
-                } else {
-                    print("⚠️ 系统音频采集正常但信号为静音/极微弱")
-                }
-            }
-            lastLevelLogTime = now
-        }
-
         systemAudioQueueLock.lock()
+        defer { systemAudioQueueLock.unlock() }
+
         systemAudioBufferQueue.append(buffer)
         if systemAudioBufferQueue.count > systemAudioQueueLimit {
             systemAudioBufferQueue.removeFirst()
-            // 减少日志频率，避免 IO 繁忙
-            if Int.random(in: 1...20) == 1 {
-                print("⚠️ 系统音频缓冲队列溢出 (\(systemAudioBufferQueue.count))，由于系统负载过高，部分音频采样已丢弃")
+            // 如果删掉的是当前正在读的帧（理论不应发生），重置偏移
+            if systemAudioBufferReadOffset > 0 {
+                systemAudioBufferReadOffset = 0
             }
         }
-        systemAudioQueueLock.unlock()
     }
 
     // MARK: - 直接处理系统音频并写入 AssetWriter
@@ -949,80 +942,97 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
     }
 
-    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        // 【核心修复】必须执行深拷贝。原先的 buffer.copy() 会导致崩溃，且 tap 会复用内存导致数据损坏。
-        guard let bufferCopy = buffer.deepCopy() else { return }
+    private func processAudioBufferWithPTS(_ buffer: AVAudioPCMBuffer, pts: CMTime) {
+        // 1. 实现 Buffer 池化复用
+        let bufferCopy: AVAudioPCMBuffer
+        bufferPoolLock.lock()
+        var pooledBuffer = audioBufferPool.popLast()
 
-        // 捕获当前的 writer 和 input，防止在录音切换时操作到错误的对象
-        let writer = self.assetWriter
-        let input = self.assetWriterInput
+        // 如果格式不匹配或容量不足，直接丢弃池中过期的 buffer
+        if let pb = pooledBuffer,
+            !pb.format.isEqual(buffer.format) || pb.frameCapacity < buffer.frameLength
+        {
+            pooledBuffer = nil
+        }
+
+        if let pb = pooledBuffer {
+            // 池中有合法的 Buffer，复用之
+            let channels = min(Int(buffer.format.channelCount), Int(pb.format.channelCount))
+            if let src = buffer.floatChannelData, let dstChannels = pb.floatChannelData {
+                for i in 0..<channels {
+                    let framesToCopy = min(buffer.frameLength, pb.frameCapacity)
+                    memcpy(dstChannels[i], src[i], Int(framesToCopy) * MemoryLayout<Float>.size)
+                }
+            }
+            pb.frameLength = buffer.frameLength
+            bufferCopy = pb
+        } else {
+            // 池空或不匹配，深拷贝
+            bufferCopy = buffer.deepCopy() ?? buffer
+        }
+        bufferPoolLock.unlock()
 
         writingQueue.async { [weak self] in
-            guard let self = self, let currentWriter = writer, let currentInput = input else {
+            guard let self = self, let currentWriter = self.assetWriter,
+                let currentInput = self.assetWriterInput, self.isRecording
+            else {
+                self?.returnBufferToPool(bufferCopy)
                 return
             }
 
-            // 检查 writer 状态，如果已失败则不再尝试
-            guard currentWriter.status == .writing else { return }
+            defer {
+                self.returnBufferToPool(bufferCopy)
+            }
 
+            // 【重磅加固】：确保在首次写入前启动 Session
             if !self.isWriterStarted {
                 currentWriter.startSession(atSourceTime: .zero)
                 self.isWriterStarted = true
-                print("📝 AssetWriter 写入会话已建立 (Queue-based)")
             }
 
-            // 计算并写入
-            if let sampleBuffer = self.createSampleBuffer(from: bufferCopy, time: time) {
-                // 不再手动 Thread.sleep 丢帧。让 Serial Queue 自动排队。
-                // 只有在 Input 真的无法接受数据（通常是磁盘故障或 Writer 错误）时才报错。
-                if currentInput.isReadyForMoreMediaData {
+            if currentInput.isReadyForMoreMediaData {
+                if let sampleBuffer = self.createSampleBuffer(from: bufferCopy, pts: pts) {
                     if !currentInput.append(sampleBuffer) {
-                        LogManager.shared.error(
-                            "写入采样数据失败 | 错误: \(currentWriter.error?.localizedDescription ?? "未知错误")")
-                    } else if !self.hasPrintedFirstSample {
-                        LogManager.shared.debug(
-                            "首次收到音频 Buffer | 格式: \(bufferCopy.format.sampleRate)Hz, \(bufferCopy.format.channelCount)ch"
-                        )
-                        self.hasPrintedFirstSample = true
+                        LogManager.shared.error("追加采样数据失败")
                     }
-                } else {
-                    // 如果长时间不 Ready，说明底层缓冲区满了，但为了保证时长完整，我们绝不在这里丢帧
-                    // 而是等待一小会重试，直到成功或 Writer 报错
-                    var retry = 0
-                    while !currentInput.isReadyForMoreMediaData && retry < 200 {
-                        Thread.sleep(forTimeInterval: 0.01)  // 10ms
-                        retry += 1
-                    }
-                    if !currentInput.append(sampleBuffer) {
-                        LogManager.shared.error(
-                            "强制写入失败 | 错误: \(currentWriter.error?.localizedDescription ?? "数据溢出"), 重试次数: \(retry)"
-                        )
-                    }
+                }
+            } else {
+                // 如果写入繁忙，跳过本帧，由于 pts 已锁定，不会缩短时长
+                if Date().timeIntervalSince1970 - self.lastWarningTime > 2.0 {
+                    LogManager.shared.warning("写入队列繁忙，临时丢弃采样")
+                    self.lastWarningTime = Date().timeIntervalSince1970
                 }
             }
         }
     }
 
-    private func createSampleBuffer(from buffer: AVAudioPCMBuffer, time: AVAudioTime)
-        -> CMSampleBuffer?
-    {
-        let timescale = Int32(buffer.format.sampleRate)
+    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
+        // 已废弃，由 processAudioBufferWithPTS 替代
+    }
 
-        // 【核心修复】改为基于累积帧数的物理时间戳，不再依赖硬件 mSampleTime
-        // 硬件时钟会因为负载或休眠产生微小抖动，而物理帧数永远是准的
-        let presentationTime = CMTime(value: totalFramesWritten, timescale: timescale)
+    // 将使用完的 Buffer 归还给池以便重用
+    private func returnBufferToPool(_ buffer: AVAudioPCMBuffer) {
+        bufferPoolLock.lock()
+        if audioBufferPool.count < bufferPoolLimit {
+            audioBufferPool.append(buffer)
+        }
+        bufferPoolLock.unlock()
+    }
+
+    private func createSampleBuffer(from buffer: AVAudioPCMBuffer, pts: CMTime) -> CMSampleBuffer? {
+        let timescale = pts.timescale
 
         var formatDescription: CMFormatDescription?
         let status = CMAudioFormatDescriptionCreate(
             allocator: kCFAllocatorDefault, asbd: buffer.format.streamDescription, layoutSize: 0,
             layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil,
             formatDescriptionOut: &formatDescription)
-
         guard status == noErr, let format = formatDescription else { return nil }
 
         var timing = CMSampleTimingInfo(
+
             duration: CMTime(value: 1, timescale: timescale),
-            presentationTimeStamp: presentationTime,
+            presentationTimeStamp: pts,
             decodeTimeStamp: .invalid
         )
 
@@ -1051,9 +1061,6 @@ class AudioRecorderManager: NSObject, ObservableObject {
             flags: 0,
             bufferList: buffer.audioBufferList
         )
-
-        // 写入成功后递增全局帧计数器
-        totalFramesWritten += Int64(buffer.frameLength)
 
         return sb
     }
@@ -1162,18 +1169,32 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         LogManager.shared.info("暂停录音 | 已录制时长: \(String(format: "%.1f", recordingDuration))s")
 
-        // 暂停计时器
+        // 1. 暂停计时器
         recordingTimer?.invalidate()
         recordingTimer = nil
 
-        // 统计当前已录制时间段并更新累计时长
+        // 2. 统计当前已录制时间段并更新累计时长
         if let startDate = currentSegmentStartTime {
             accumulatedDuration += Date().timeIntervalSince(startDate)
             recordingDuration = accumulatedDuration
         }
         currentSegmentStartTime = nil
 
+        // 3. 停止音频引擎，暂停麦克风采集
+        audioEngine.pause()
+
+        // 4. 【核心修复】暂停时清空滞后队列，防止恢复时播放陈旧数据
+        systemAudioQueueLock.lock()
+        for buffer in systemAudioBufferQueue {
+            returnBufferToPool(buffer)
+        }
+        systemAudioBufferQueue.removeAll()
+        systemAudioBufferReadOffset = 0
+        systemAudioQueueLock.unlock()
+
+        // 5. 【关键优化】系统音频采集 (SCStream) 在暂停时不关闭。
         isPaused = true
+
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
     }
 
@@ -1185,24 +1206,31 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         LogManager.shared.info("继续录音 | 已录制时长: \(String(format: "%.1f", recordingDuration))s")
 
-        // 继续音频引擎
+        // 1. 继续音频引擎（从 pause 状态恢复）
         do {
             try audioEngine.start()
         } catch {
             LogManager.shared.error("继续录音失败 | 错误: \(error.localizedDescription)")
+            showAudioEngineResumeFailedAlert()
             return
         }
 
-        // 继续系统音频采集
-        if #available(macOS 13.0, *) {
-            if let stream = systemAudioStream {
-                Task {
-                    try? await stream.startCapture()
-                }
-            }
+        // 2. 【核心修复】恢复录音前清空可能在间隙中残留的数据，并重置缓冲状态
+        systemAudioQueueLock.lock()
+        for buffer in systemAudioBufferQueue {
+            returnBufferToPool(buffer)
         }
+        systemAudioBufferQueue.removeAll()
+        systemAudioBufferReadOffset = 0
+        // 混合模式恢复时重新开启预缓冲建立储备，单系统音频模式保持实时
+        isSystemAudioBuffering = (currentAudioSource == .both)
+        systemAudioQueueLock.unlock()
 
-        // 恢复计时器
+        // 3. 重置转换器内部状态，防止相位残音
+        cachedAudioConverter?.reset()
+
+        // 3. 恢复计时器
+
         currentSegmentStartTime = Date()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self, let startDate = self.currentSegmentStartTime else { return }
@@ -1331,15 +1359,19 @@ class AudioRecorderManager: NSObject, ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             // 使用嵌入的 LameEncoder 进行转换
             let success = LameEncoder.convertToMP3(from: sourceURL, to: mp3URL)
-            
+
             if success {
                 // 转换成功，删除原 M4A 文件
                 try? FileManager.default.removeItem(at: sourceURL)
-                
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: mp3URL.path)[.size] as? Int64) ?? 0
+
+                let fileSize =
+                    (try? FileManager.default.attributesOfItem(atPath: mp3URL.path)[.size] as? Int64)
+                    ?? 0
                 let fileSizeMB = Double(fileSize) / (1024 * 1024)
-                LogManager.shared.info("MP3 转换完成 | 文件: \(mp3URL.lastPathComponent), 大小: \(String(format: "%.2f", fileSizeMB))MB")
-                
+                LogManager.shared.info(
+                    "MP3 转换完成 | 文件: \(mp3URL.lastPathComponent), 大小: \(String(format: "%.2f", fileSizeMB))MB"
+                )
+
                 DispatchQueue.main.async { completion(mp3URL) }
             } else {
                 LogManager.shared.warning("MP3 转换失败，保留原 M4A 文件")
@@ -1470,7 +1502,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = "麦克风访问受限"
-            alert.informativeText = "检测到由于重新构建或签名变更，系统可能未能正确识别本应用的权限。\n\n解决办法：\n1. 请在“系统设置 - 隐私与安全性 - 麦克风”中，手动将“极简录音”的任务开关先关闭再重新开启。\n2. 若列表中没有本应用，请在终端执行 'tccutil reset Microphone com.simplerecorder.app' 后重新运行。"
+            alert.informativeText =
+                "检测到由于重新构建或签名变更，系统可能未能正确识别本应用的权限。\n\n解决办法：\n1. 请在“系统设置 - 隐私与安全性 - 麦克风”中，手动将“极简录音”的任务开关先关闭再重新开启。\n2. 若列表中没有本应用，请在终端执行 'tccutil reset Microphone com.simplerecorder.app' 后重新运行。"
             alert.alertStyle = .warning
             alert.addButton(withTitle: "打开设置")
             alert.addButton(withTitle: "我知道了")
@@ -1517,6 +1550,17 @@ class AudioRecorderManager: NSObject, ObservableObject {
             alert.informativeText = message
             alert.alertStyle = .critical
             alert.addButton(withTitle: "确定")
+            alert.runModal()
+        }
+    }
+
+    private func showAudioEngineResumeFailedAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "继续录音失败"
+            alert.informativeText = "音频引擎无法恢复。请停止当前录音并重新开始。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "知道了")
             alert.runModal()
         }
     }

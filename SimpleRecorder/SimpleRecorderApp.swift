@@ -5,8 +5,8 @@
 //  Created by AI Assistant
 //
 
-import SwiftUI
 import AVFoundation
+import SwiftUI
 
 @main
 struct SimpleRecorderApp: App {
@@ -31,6 +31,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyManager = HotKeyManager.shared
     private var animationTimer: Timer?
     private var lastToggleTime: Date = .distantPast  // 用于防抖
+    private var lastTimeString: String = ""
+
+    // 缓存图标，避免频繁创建
+    private lazy var recordingImage: NSImage? = {
+        let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "录音中")
+        image?.isTemplate = true
+        return image
+    }()
+
+    private lazy var idleImage: NSImage? = {
+        let image = NSImage(systemSymbolName: "mic.circle", accessibilityDescription: "极简录音")
+        image?.isTemplate = true
+        return image
+    }()
+
+    private lazy var pausedImage: NSImage? = {
+        let image = NSImage(systemSymbolName: "pause.circle.fill", accessibilityDescription: "已暂停")
+        image?.isTemplate = true
+        return image
+    }()
 
     // 保持窗口引用，防止被释放
     private var mainWindow: NSWindow?
@@ -102,7 +122,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func triggerMicrophonePermissionCheck() {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         LogManager.shared.info("启动时权限预检 | 当前状态: \(status.rawValue)")
-        
+
         if status == .notDetermined {
             // 方法1：尝试访问 AVAudioEngine 的 inputNode
             // 这会触发系统级别的权限检查
@@ -110,7 +130,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let tempEngine = AVAudioEngine()
                 // 访问 inputNode 会触发系统权限弹窗
                 let _ = tempEngine.inputNode.inputFormat(forBus: 0)
-                
+
                 DispatchQueue.main.async {
                     let newStatus = AVCaptureDevice.authorizationStatus(for: .audio)
                     LogManager.shared.info("权限触发完成 | 新状态: \(newStatus.rawValue)")
@@ -118,7 +138,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-
 
     /// 退出前检查是否正在录音，确保保存
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -197,6 +216,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(sourceHeader)
 
         // 录制来源选项
+        let isCurrentlyRecording = recordingManager.isRecording
         for source in AudioSource.allCases {
             let item = NSMenuItem(
                 title: source.displayName, action: #selector(selectAudioSource(_:)),
@@ -204,6 +224,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
             item.representedObject = source.rawValue
             item.state = AppSettings.shared.audioSource == source ? .on : .off
+            // 【边界逻辑】录音时禁用录制来源切换，避免用户困惑
+            item.isEnabled = !isCurrentlyRecording
             menu.addItem(item)
         }
 
@@ -223,8 +245,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
             item.representedObject = device.id
             item.state = device.id == settings.selectedDeviceID ? .on : .off
-            // 仅系统声音模式下禁用麦克风选择
-            item.isEnabled = settings.audioSource != .systemAudio
+            // 【边界逻辑】录音时禁用麦克风切换；仅系统声音模式下也禁用
+            item.isEnabled = !isCurrentlyRecording && settings.audioSource != .systemAudio
             menu.addItem(item)
         }
 
@@ -391,11 +413,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             timeString = String(format: "%02d:%02d", minutes, seconds)
         }
 
+        // 【性能优化】如果时间字符串没变，不做任何 UI 操作
+        guard timeString != lastTimeString else { return }
+        lastTimeString = timeString
+
         if let button = statusItem.button {
-            // 使用麦克风图标 + 时间文字
-            let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "录音中")
-            image?.isTemplate = true
-            button.image = image
+            // 使用缓存的图片
+            button.image = recordingImage
             button.title = " \(timeString)"
             button.imagePosition = .imageLeading
         }

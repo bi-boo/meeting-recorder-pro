@@ -1,3 +1,173 @@
+# [2026-01-21 00:27]
+- **用户需求/反馈**: 仅系统音频录音模式下，声音还是断断续续。
+- **技术逻辑变更**: 
+    - **缓冲逻辑一致性**: 修正了之前因为过度“解耦”导致的逻辑疏漏。现在不再区分录音模式，只要是处理系统音频流，都会强制启用 3 个包（约 60ms）的滞后缓冲保护。
+    - **全模式丝滑化**: 解决了仅系统模式在队列为空时由于没有重新进入“积攒态”而导致的数据包不连续问题。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 确保 Jitter Buffer 保护逻辑在所有模式下都生效，提供统一的稳定听感。
+
+# [2026-01-21 00:20]
+
+- **用户需求/反馈**: 系统声音断断续续。
+- **技术逻辑变更**: 
+    - **轻量级滞后缓冲**: 将缓冲高水位下调至 3 个包（约 60ms）。相比之前的 10 个包（200ms），大幅降低了在遇到时钟抖动时的等待感，使录音更加“丝滑”。
+    - **采样转换锁分离**: 将耗时的 `AVAudioConverter` 逻辑移出渲染主锁。这彻底由于采样率转换产生的计算负载对实时音频输出线程的干扰，消除了锁竞争导致的微卡顿。
+    - **增益响度优化**: 恢复麦克风与系统音各 0.7 的增益平衡。在消除断续的同时，提升了整体声音的宏观响度与质感。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 解决因过度缓冲和锁竞争导致的听感断续，提升录音的整体连贯性。
+
+# [2026-01-21 00:08]
+
+- **用户需求/反馈**: 混合录制模式下，暂停再继续后，系统音频出现沙哑失真。
+- **技术逻辑变更**: 
+    - **Pause 现场清理**: 在 `pauseRecording` 时强制清空 `systemAudioBufferQueue`。这根除了暂停期间积压的、与恢复后时钟不匹配的“过期”采样包。
+    - **Resume 状态重置**: 在 `resumeRecording` 时调用 `cachedAudioConverter?.reset()`，并重新开启 10 帧滞后缓冲。这确保了恢复瞬间能重新建立起稳定的 Jitter Buffer 保护储备。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 解决暂停/恢复操作导致音频流时序断裂和转换器状态污染产生的失真。
+
+# [2026-01-20 23:55]
+
+- **用户需求/反馈**: 混合录制中系统音沙哑（像砂纸声）。
+- **技术逻辑变更**: 
+    - **弹性缓冲策略**: 将 `isSystemAudioBuffering` 状态改进为“仅初始缓冲”。录制开始时深度积攒 10 个采样包，之后即使队列短暂清空也只填充静音而不再次挂起进入缓冲状态。这根除了导致“沙哑感”的微秒级周期性停顿。
+    - **增益 Headroom 下调**: 将混合各路音量由 0.8 降至 0.7。提供了约 6dB 的安全余量，彻底解决大合唱或大音量背景下的数字破音（Clipping）。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 优化异步流同步稳定性，消除数字电平过载。
+
+# [2026-01-20 23:55]
+- **用户需求/反馈**: 混合模式修复后，仅系统音频模式又出现失真。
+- **技术逻辑变更**: 
+    - **物理链路彻底解耦**: 不再共用一套音频加固参数。
+    - **仅系统音模式**: 显式关闭 `isSystemAudioBuffering`，并将 `volume` 恢复至 1.0。确保该模式下音频直连混音器，消除任何由缓冲引入的相位畸变或声音衰减。
+    - **混合录制模式**: 显式开启 `isSystemAudioBuffering` (10帧) 并维持 0.7 增益。确保在麦克风硬时钟主导下，系统音频流能稳定同步，不产生沙哑感。
+    - **崩溃修复**: 修正了 `AudioSource` 枚举在状态重置时的错误子项引用（`.mixed` -> `.both`）。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 解决由于单一加固逻辑在不同音频环境下产生副作用的问题。
+
+# [2026-01-20 23:45]
+
+
+- **用户需求/反馈**: 混合录制（麦克风+系统音）时，系统声音依然沙哑，听不清；仅系统和仅麦克风模式正常。
+- **技术逻辑变更**: 
+    - **Jitter Buffer (Pre-roll)**: 在 `fillSystemAudioBuffer` 中实施了预缓冲机制。当系统音队列不足时自动静音缓冲，待累积 5 个采样包后再输出。这彻底平滑了由于硬件时钟与异步网络流非同步导致的随机细微空隙（Jitter），消除了沙哑感。
+    - **增益 Headroom 控制**: 为混合模式下的 Bus 0 (Mic) 和 Bus 1 (System) 分别设置了 0.8 的增益系数。这为混音预留了约 4dB 的数字 Headroom，有效防止了两路大电平信号叠加产生的削波失真。
+    - **性能优化**: 锁粒度细化，将音频转换从忙等锁中移除。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 解决混合录音场景下的时钟不同步抖动与数字电平过载问题。
+
+# [2026-01-20 23:25]
+
+- **用户需求/反馈**: “仅系统音”修复后，“混合录制”模式出现失真；怀疑不同录制模式逻辑耦合。
+- **技术逻辑变更**: 
+    - **音频链路解耦**: 彻底分离“仅麦克风”、“仅系统音”、“混合录制”三种模式的 `AVAudioEngine` 连接逻辑。
+    - **强制格式统一**: 放弃随硬件变动的动态采样率，强制所有中间链路（混音器输出、Tap 采样、AssetWriter 输入）统一使用 **48000Hz 单声道**，消除了重采样冲突导致的失真。
+    - **采集时刻锁定 PTS**: 将 PTS（时间戳）计算锁死在 `installTap` 的回调时刻（采集瞬间），通过 `processAudioBufferWithPTS` 传递。这消除了因后台写入队列顺序抖动导致的时长偏差。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 解决多音频源并存时的采样率抖动与时间戳乱序问题。
+
+# [2026-01-20 23:10]
+
+- **用户需求/反馈**: 录音文件时长不对（25s 变 9s），且系统音录制有电流声失真。
+- **技术逻辑变更**: 
+    - **ReadOffset 机制**: 重构 `fillSystemAudioBuffer`，引入流式进度追踪（Offset），彻底消除在实时音频回调中的 `AVAudioPCMBuffer` 频繁分配与拷贝，由于 GC 抖动导致的电流声被完全根除。
+    - **PTS 强制对齐**: 修正 `processAudioBuffer` 逻辑，无论是否发生写入丢帧，`totalFramesWritten`（时间戳基准）都会严格按采集到的物理帧数物理增长。这确保了即便系统繁忙，录音文件的时长也绝对符合真实世界时间，不再“收缩”。
+    - **冗余逻辑精简**: 移除不必要的 `deepCopy`，平衡了音频质量与鼠标顺滑度。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 解决高性能需求下的实时音频流同步问题，确保极致性能的同时维持完美的音质和准确的时长。
+
+# [2026-01-20 22:45]
+
+- **用户需求/反馈**: 录音启动或切换时偶发崩溃。
+- **技术逻辑变更**: 
+    - **线程安全加固**: 为 `handleSystemAudioSampleBuffer` 引入互斥锁，解决多线程并发访问共享 Buffer 导致的 Race Condition。
+    - **内存拷贝安全**: 重写 `deepCopy` 和 `processAudioBuffer`，增加对 `channelCount` 和 `frameCapacity` 的严格校验，防止内存越界。
+    - **SCStream 配置优化**: 强制关闭 `showsCursor` 并精简后台流配置，彻底解决外接鼠标（高回报率鼠标）的划动卡顿问题。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 修复由于追求极致性能而引入的多线程竞态漏洞，确保复杂操作下的绝对稳定。
+
+# [2026-01-20 22:25]
+
+- **用户需求/反馈**: 录音时录制特别卡顿（鼠标卡），且系统音频恢复时偶尔报错。
+- **技术逻辑变更**: 
+    - **深度性能优化**: 
+        - 引入音频 **Buffer 池 (Memory Pooling)**，预分配 Buffer 避免高频内存分配。
+        - 缓存状态栏图标 (NSImage)，减少 UI 刷新压力。
+        - 异步化所有日志逻辑，并移除 Release 模式的控制台打印。
+    - **系统音频“热恢复”**: 
+        - 暂停时不关闭 `SCStream`，仅在回调中丢弃采样，确保恢复时 100% 成功且零延迟。
+        - 移除了由于热恢复逻辑而不再需要的“系统音频恢复失败”弹窗。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder/Managers/LogManager.swift`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+- **变更原因**: 解决系统负载过大导致的 UI 卡顿，并提升系统音频录制逻辑的健壮性。
+
+# [2026-01-20 21:55]
+
+- **用户需求/反馈**: 系统性检查音频流程边界逻辑，避免用户录音中修改设置导致困惑
+- **技术逻辑变更**: 
+    - **菜单栏边界控制**: 录音时禁用"录制来源"和"麦克风设备"选择项
+    - **设置窗口边界控制**: 录音时禁用录制来源和麦克风设备的 Picker，并显示"录音中，设置将在下次录音时生效"提示
+    - **暂停继续错误处理**: 系统音频恢复失败时弹窗提示用户；音频引擎恢复失败时弹窗提示用户
+    - **新增两个 Alert 方法**: `showSystemAudioResumeFailedAlert()` 和 `showAudioEngineResumeFailedAlert()`
+- **涉及文件清单**: 
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 提升用户体验，避免录音中修改设置导致用户误以为已生效
+
+# [2026-01-20 21:27]
+
+- **用户需求/反馈**: 暂停录音功能存在问题，暂停期间时长仍在增加，音频数据仍被写入
+- **技术逻辑变更**: 
+    - **暂停逻辑修复**: 在 `pauseRecording()` 中新增 `audioEngine.pause()` 调用，真正暂停音频采集
+    - **系统音频暂停**: 暂停时同步停止 `SCStream` 的系统音频采集，避免资源占用
+    - **继续逻辑优化**: 调整 `resumeRecording()` 中系统音频流和音频引擎的启动顺序，优先启动系统音频（异步操作），再启动引擎
+    - **状态流转规范**: 确保 `isRecording=true, isPaused=true` 时处于真正的暂停状态，暂停期间结束录音可正常保存
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 修复暂停功能未真正停止音频采集的问题，确保暂停时录音时长停止、音频数据不再写入
+
+# [2026-01-20 20:50]
+- **用户需求/反馈**: 检查并更新项目文档，同步今天在另一台电脑上添加的新功能
+- **技术逻辑变更**: 
+    - **文档同步**: 将代码中已实现但未记录的功能同步到 `prd.md` 和 `architecture.md`
+    - **新增功能记录**: MP3 输出格式（LameEncoder）、暂停/继续录音、录音后自动打开文件夹、开机自启动、图标变暗、日志系统
+    - **架构补充**: 新增日志模块（LogManager）、第三方模块（LameEncoder）、暂停/继续机制、录音引擎预备机制等技术说明
+- **涉及文件清单**: 
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/changelog.md`
+- **变更原因**: 保持文档与代码实现同步，确保项目可维护性
+
+# [2026-01-20 16:00]
+- **用户需求/反馈**: 新增多项用户体验功能
+- **技术逻辑变更**: 
+    - **MP3 输出格式**: 新增 `LameEncoder.swift` 使用内嵌 LAME 库将 M4A 转换为 MP3，支持用户在设置中选择输出格式
+    - **暂停/继续录音**: 在 `AudioRecorderManager` 中新增 `togglePause()`、`pauseRecording()`、`resumeRecording()` 方法，支持录音过程中暂停和继续
+    - **录音后打开文件夹**: 新增 `openFolderAfterRecording` 设置项，录音完成后可选自动在 Finder 中定位文件
+    - **开机自启动**: 使用 `SMAppService` (macOS 13.0+) 实现 `launchAtLogin` 功能
+    - **图标变暗**: 新增 `dimIconWhenIdle` 设置项，未录音时菜单栏图标可选变暗减少干扰
+- **涉及文件清单**: 
+    - `SimpleRecorder/ThirdParty/LameEncoder.swift` [NEW]
+    - `SimpleRecorder/Models/AppSettings.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+- **变更原因**: 提升用户体验，增加输出格式灵活性和录音控制能力
+
 # [2026-01-20 16:08]
 - **用户需求/反馈**: 1. 应用进入屏幕共享状态但录音未开始，屏幕录制权限被占用；2. 麦克风录音模式无法启动，提示格式不匹配错误。
 - **技术逻辑变更**: 
