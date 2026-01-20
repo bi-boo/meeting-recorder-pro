@@ -1,3 +1,14 @@
+# [2026-01-20 16:08]
+- **用户需求/反馈**: 1. 应用进入屏幕共享状态但录音未开始，屏幕录制权限被占用；2. 麦克风录音模式无法启动，提示格式不匹配错误。
+- **技术逻辑变更**: 
+    - **录音启动失败资源泄漏修复**: 在 `startMicrophoneRecording()` 和 `startSystemAudioRecording()` 的 `catch` 块中增加轻量级资源清理逻辑，确保录音启动失败时正确释放已创建的 `SCStream`、`AssetWriter`、`recordingMixer` 等资源，避免屏幕录制权限被占用。
+    - **音频引擎重置机制**: 新增 `prepareAudioEngineForNewRecording()` 辅助函数，在每次录音启动前完全重置音频引擎（停止引擎、移除 tap、detach 所有节点、调用 `reset()`、清空缓冲队列），确保从干净状态开始。
+    - **音频格式匹配修复**: 修改 `setupMicrophoneOnlyRecording()` 使用 `inputNode.inputFormat(forBus: 0)` 获取硬件实际输入格式（而非 `outputFormat`），并将该格式传递给 `setupRecordingMixer()` 确保整条链路（inputNode → recordingMixer → mainMixerNode）采样率统一，解决"Format mismatch"错误。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 解决录音启动时的资源泄漏和音频格式不匹配问题，确保应用在各种场景下都能正常启动录音。
+
 # [2026-01-19 22:47]
 - **用户需求/反馈**: 应用运行时遇到故障时无法查看日志，需要实时记录操作和状态以便排查问题
 - **技术逻辑变更**: 

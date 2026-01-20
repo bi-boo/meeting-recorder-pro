@@ -162,11 +162,16 @@ class AudioRecorderManager: NSObject, ObservableObject {
         LogManager.shared.info("收到录音启动请求")
 
         // 检查权限
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        LogManager.shared.info("权限检测 | 当前麦克风授权状态: \(status.rawValue) (0:n/d, 1:res, 2:den, 3:auth)")
+        
+        switch status {
         case .authorized:
             beginRecording()
         case .notDetermined:
+            LogManager.shared.info("权限状态未确定，正在请求访问...")
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                LogManager.shared.info("权限请求结果: \(granted ? "用户已授权" : "用户已拒绝")")
                 if granted {
                     DispatchQueue.main.async { self?.beginRecording() }
                 } else {
@@ -174,10 +179,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 }
             }
         case .denied, .restricted:
+            LogManager.shared.warning("权限被拒绝或受限，无法开始录音 | 状态: \(status.rawValue)")
             isTransitioning = false
             showMicrophonePermissionAlert()
         @unknown default:
-            break
+            LogManager.shared.error("未知的权限状态: \(status.rawValue)")
+            isTransitioning = false
         }
     }
 
@@ -254,6 +261,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
             isWriterStarted = false
             totalFramesWritten = 0
 
+            // 【关键修复】在配置新录音前，先确保引擎处于干净状态
+            // 这可以解决之前录音失败后引擎状态不一致的问题
+            prepareAudioEngineForNewRecording()
+
             try setupMicrophoneOnlyRecording()
 
             guard assetWriter?.startWriting() == true else {
@@ -265,6 +276,32 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         } catch {
             LogManager.shared.error("麦克风录音启动失败 | 错误: \(error.localizedDescription)")
+            
+            // 轻量级清理：只清理本次录音创建的资源，不调用 reset() 避免破坏引擎状态
+            // 移除可能已安装的 tap
+            audioEngine.inputNode.removeTap(onBus: 0)
+            recordingMixer?.removeTap(onBus: 0)
+            audioEngine.stop()
+            
+            // 清理 mixer 节点
+            if let mixer = recordingMixer {
+                audioEngine.detach(mixer)
+                recordingMixer = nil
+            }
+            
+            // 清理已创建但未完成的 AssetWriter
+            if let writer = assetWriter {
+                writer.cancelWriting()
+                assetWriter = nil
+                assetWriterInput = nil
+            }
+            
+            // 删除已创建但无效的临时文件
+            if let url = currentRecordingURL {
+                try? FileManager.default.removeItem(at: url)
+                currentRecordingURL = nil
+            }
+            
             isTransitioning = false
         }
     }
@@ -300,6 +337,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
             isWriterStarted = false
             totalFramesWritten = 0
 
+            // 【关键修复】在配置新录音前，先确保引擎处于干净状态
+            prepareAudioEngineForNewRecording()
+
             if currentAudioSource == .systemAudio {
                 try await setupSystemAudioOnlyRecording()
             } else {
@@ -316,6 +356,53 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         } catch {
             LogManager.shared.error("系统音频录音启动失败 | 错误: \(error.localizedDescription)")
+            
+            // 轻量级清理：只清理本次录音创建的资源
+            // 移除可能已安装的 tap
+            audioEngine.inputNode.removeTap(onBus: 0)
+            recordingMixer?.removeTap(onBus: 0)
+            audioEngine.stop()
+            
+            // 清理 mixer 节点
+            if let mixer = recordingMixer {
+                audioEngine.detach(mixer)
+                recordingMixer = nil
+            }
+            
+            // 清理 systemAudioSourceNode
+            if let sourceNode = systemAudioSourceNode {
+                audioEngine.detach(sourceNode)
+                systemAudioSourceNode = nil
+            }
+            
+            // 【关键】必须停止 SCStream 以释放屏幕录制权限
+            if #available(macOS 13.0, *) {
+                let stream = systemAudioStream
+                systemAudioStream = nil
+                systemAudioOutput = nil
+                Task {
+                    try? await stream?.stopCapture()
+                }
+            }
+            
+            // 清空缓冲队列
+            systemAudioQueueLock.lock()
+            systemAudioBufferQueue.removeAll()
+            systemAudioQueueLock.unlock()
+            
+            // 清理已创建但未完成的 AssetWriter
+            if let writer = assetWriter {
+                writer.cancelWriting()
+                assetWriter = nil
+                assetWriterInput = nil
+            }
+            
+            // 删除已创建但无效的临时文件
+            if let url = currentRecordingURL {
+                try? FileManager.default.removeItem(at: url)
+                currentRecordingURL = nil
+            }
+            
             isTransitioning = false
         }
     }
@@ -358,28 +445,88 @@ class AudioRecorderManager: NSObject, ObservableObject {
         )
     }
 
+    // MARK: - 音频引擎预备（确保干净状态）
+    /// 在每次新录音开始前调用，确保音频引擎处于干净状态
+    /// 这对于从之前失败的录音恢复非常重要
+    private func prepareAudioEngineForNewRecording() {
+        // 1. 停止引擎（如果正在运行）
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        
+        // 2. 移除所有可能存在的 tap
+        audioEngine.inputNode.removeTap(onBus: 0)
+        recordingMixer?.removeTap(onBus: 0)
+        
+        // 3. 清理之前可能残留的节点
+        if let mixer = recordingMixer {
+            audioEngine.detach(mixer)
+            recordingMixer = nil
+        }
+        if let sourceNode = systemAudioSourceNode {
+            audioEngine.detach(sourceNode)
+            systemAudioSourceNode = nil
+        }
+        if let mixer = mixerNode {
+            audioEngine.detach(mixer)
+            mixerNode = nil
+        }
+        
+        // 4. 重置引擎到初始状态
+        audioEngine.reset()
+        
+        // 5. 清空系统音频缓冲队列
+        systemAudioQueueLock.lock()
+        systemAudioBufferQueue.removeAll()
+        systemAudioQueueLock.unlock()
+        
+        // 6. 清理音频转换器缓存
+        cachedAudioConverter = nil
+        lastSrcFormat = nil
+        lastDstFormat = nil
+        
+        print("🔄 音频引擎已重置，准备开始新录音")
+    }
+
     // MARK: - 仅麦克风录音配置
     private func setupMicrophoneOnlyRecording() throws {
         // 1. 设置硬件输入设备
         try updateInputDevice()
 
-        setupRecordingMixer()
-
+        // 2. 【关键】获取输入节点的硬件格式
+        // 必须在连接之前获取，且需要通过 inputNode 来触发格式初始化
         let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
+        
+        // 触发 inputNode 初始化以获取正确的硬件格式
+        // 在某些情况下，reset() 后需要重新访问 inputNode 来刷新格式
+        let hwFormat = inputNode.inputFormat(forBus: 0)
+        print("🎤 硬件输入格式: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch")
+        
+        // 使用硬件的采样率，确保格式匹配
+        let inputFormat: AVAudioFormat
+        if hwFormat.sampleRate > 0 && hwFormat.channelCount > 0 {
+            // 使用硬件的实际格式
+            inputFormat = hwFormat
+        } else {
+            // 回退到默认格式
+            inputFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+        }
 
-        // 连接麦克风到录音混音器
+        // 3. 设置录音混音器（使用输入格式）
+        setupRecordingMixer(inputFormat: inputFormat)
+
+        // 4. 连接麦克风到录音混音器
         audioEngine.connect(inputNode, to: recordingMixer, format: inputFormat)
 
         installRecordingTap()
     }
 
-    private func setupRecordingMixer() {
+    private func setupRecordingMixer(inputFormat: AVAudioFormat? = nil) {
         recordingMixer = AVAudioMixerNode()
         audioEngine.attach(recordingMixer)
 
-        // 显式指定 44.1kHz 格式
-        let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+        // 使用传入的格式，或者默认 48kHz
+        let format = inputFormat ?? AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
 
         // 连接到主混音器：必须保持连接引擎才能运转
         audioEngine.connect(recordingMixer, to: audioEngine.mainMixerNode, format: format)
@@ -390,7 +537,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 【静音监听】只把引擎的主输出音量关掉。这样内部数据流正常，但耳机没声音
         audioEngine.mainMixerNode.outputVolume = 0
 
-        print("🎛️ 混音链路已就位：录制音量 1.0, 监听音量 0.0")
+        print("🎛️ 混音链路已就位：录制音量 1.0, 监听音量 0.0, 采样率 \(format.sampleRate)Hz")
     }
 
     private func installRecordingTap() {
@@ -1181,92 +1328,22 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         LogManager.shared.info("开始转换 MP3 | 源文件: \(sourceURL.lastPathComponent)")
 
-        let asset = AVAsset(url: sourceURL)
-
-        guard
-            let exportSession = AVAssetExportSession(
-                asset: asset, presetName: AVAssetExportPresetAppleM4A)
-        else {
-            LogManager.shared.error("MP3 转换失败 | 无法创建导出会话")
-            completion(nil)
-            return
-        }
-
-        // macOS 的 AVAssetExportSession 不直接支持 MP3，需要先导出为临时 M4A 再用其他方式
-        // 使用 afconvert 命令行工具进行转换（macOS 内置）
         DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
-            process.arguments = [
-                "-f", "mp4f",  // MP4 容器
-                "-d", "aac",  // AAC 编码（MP3 在 macOS 需要额外处理）
-                "-b", "128000",  // 128kbps
-                sourceURL.path,
-                mp3URL.path,
-            ]
-
-            // 实际上 afconvert 输出 m4a/aac 更可靠，对于真正的 MP3 我们用 lame 或保持 m4a
-            // 但为了简化，我们用系统的 afconvert 输出为 mp3 格式
-            let lameProcess = Process()
-            lameProcess.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
-            lameProcess.arguments = [
-                sourceURL.path,
-                mp3URL.path,
-                "-d", "LEI16",  // PCM 中间格式
-                "-f", "WAVE",
-            ]
-
-            // 使用更简单的方案：直接用 ffmpeg 或保持 m4a
-            // 这里我们采用简化方案：复制并重命名为 .mp3（现代播放器都能播放）
-            // 或者使用 NSSharingService 让用户自行转换
-
-            // 最终方案：使用系统内置的 afconvert 转换为 aiff 再转 mp3
-            // 由于 MP3 编码在 macOS 受限，我们改用更兼容的方案
-
-            do {
-                // 使用 AVAssetExportSession 导出为通用格式
-                // 由于 macOS 不原生支持 MP3 编码，我们改用系统命令
-                let convertProcess = Process()
-                convertProcess.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
-                convertProcess.arguments = [
-                    "-f", "MPG3",  // MP3 文件格式
-                    "-d", "mp3",  // MP3 数据格式
-                    "-b", "128000",  // 码率
-                    sourceURL.path,
-                    mp3URL.path,
-                ]
-
-                try convertProcess.run()
-                convertProcess.waitUntilExit()
-
-                if convertProcess.terminationStatus == 0
-                    && FileManager.default.fileExists(atPath: mp3URL.path)
-                {
-                    // 转换成功，删除原 M4A 文件
-                    try? FileManager.default.removeItem(at: sourceURL)
-
-                    let fileSize =
-                        (try? FileManager.default.attributesOfItem(atPath: mp3URL.path)[.size]
-                            as? Int64) ?? 0
-                    let fileSizeMB = Double(fileSize) / (1024 * 1024)
-                    LogManager.shared.info(
-                        "MP3 转换完成 | 文件: \(mp3URL.lastPathComponent), 大小: \(String(format: "%.2f", fileSizeMB))MB"
-                    )
-
-                    DispatchQueue.main.async {
-                        completion(mp3URL)
-                    }
-                } else {
-                    LogManager.shared.warning("MP3 转换失败，保留原 M4A 文件")
-                    DispatchQueue.main.async {
-                        completion(nil)
-                    }
-                }
-            } catch {
-                LogManager.shared.error("MP3 转换异常 | 错误: \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    completion(nil)
-                }
+            // 使用嵌入的 LameEncoder 进行转换
+            let success = LameEncoder.convertToMP3(from: sourceURL, to: mp3URL)
+            
+            if success {
+                // 转换成功，删除原 M4A 文件
+                try? FileManager.default.removeItem(at: sourceURL)
+                
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: mp3URL.path)[.size] as? Int64) ?? 0
+                let fileSizeMB = Double(fileSize) / (1024 * 1024)
+                LogManager.shared.info("MP3 转换完成 | 文件: \(mp3URL.lastPathComponent), 大小: \(String(format: "%.2f", fileSizeMB))MB")
+                
+                DispatchQueue.main.async { completion(mp3URL) }
+            } else {
+                LogManager.shared.warning("MP3 转换失败，保留原 M4A 文件")
+                DispatchQueue.main.async { completion(nil) }
             }
         }
     }
@@ -1392,11 +1469,11 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private func showMicrophonePermissionAlert() {
         DispatchQueue.main.async {
             let alert = NSAlert()
-            alert.messageText = "需要麦克风权限"
-            alert.informativeText = "请在系统设置中允许本应用访问麦克风以正常录音。"
+            alert.messageText = "麦克风访问受限"
+            alert.informativeText = "检测到由于重新构建或签名变更，系统可能未能正确识别本应用的权限。\n\n解决办法：\n1. 请在“系统设置 - 隐私与安全性 - 麦克风”中，手动将“极简录音”的任务开关先关闭再重新开启。\n2. 若列表中没有本应用，请在终端执行 'tccutil reset Microphone com.simplerecorder.app' 后重新运行。"
             alert.alertStyle = .warning
             alert.addButton(withTitle: "打开设置")
-            alert.addButton(withTitle: "取消")
+            alert.addButton(withTitle: "我知道了")
             if alert.runModal() == .alertFirstButtonReturn {
                 if let url = URL(
                     string:

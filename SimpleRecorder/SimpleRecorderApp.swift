@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AVFoundation
 
 @main
 struct SimpleRecorderApp: App {
@@ -85,11 +86,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        // 【关键修复】应用启动时强制触发麦克风权限弹窗
+        // Ad-hoc 签名的应用有时 AVCaptureDevice.requestAccess 不会弹窗
+        // 通过实际访问 AVAudioEngine 的 inputNode 来强制触发系统权限检查
+        triggerMicrophonePermissionCheck()
+
         // 延迟检查中断状态（确保 UI 完全加载）
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.recordingManager.resetStatusAfterInterruption()
         }
     }
+
+    /// 强制触发麦克风权限检查
+    /// 通过实际访问音频硬件来让系统弹出权限申请窗口
+    private func triggerMicrophonePermissionCheck() {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        LogManager.shared.info("启动时权限预检 | 当前状态: \(status.rawValue)")
+        
+        if status == .notDetermined {
+            // 方法1：尝试访问 AVAudioEngine 的 inputNode
+            // 这会触发系统级别的权限检查
+            DispatchQueue.global(qos: .userInitiated).async {
+                let tempEngine = AVAudioEngine()
+                // 访问 inputNode 会触发系统权限弹窗
+                let _ = tempEngine.inputNode.inputFormat(forBus: 0)
+                
+                DispatchQueue.main.async {
+                    let newStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+                    LogManager.shared.info("权限触发完成 | 新状态: \(newStatus.rawValue)")
+                }
+            }
+        }
+    }
+
 
     /// 退出前检查是否正在录音，确保保存
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
