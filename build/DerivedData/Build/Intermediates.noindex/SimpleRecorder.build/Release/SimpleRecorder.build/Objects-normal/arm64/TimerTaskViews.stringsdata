@@ -1,0 +1,184 @@
+{
+  "source": "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Views/TimerTaskViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "暂无定时计划",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 27
+        }
+      },
+      {
+        "comment": "",
+        "key": "点击下方按钮添加您的第一个定时录音计划",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 30
+        }
+      },
+      {
+        "comment": "",
+        "key": "添加定时计划",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 54
+        }
+      },
+      {
+        "comment": "",
+        "key": "定时录音计划",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 59
+        }
+      },
+      {
+        "comment": "",
+        "key": "应用需保持运行状态才能触发",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 62
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 117
+        }
+      },
+      {
+        "comment": "",
+        "key": "取消",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 179
+        }
+      },
+      {
+        "comment": "",
+        "key": "保存",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 190
+        }
+      },
+      {
+        "comment": "",
+        "key": "时间",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 202
+        }
+      },
+      {
+        "comment": "",
+        "key": "重复",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 228
+        }
+      },
+      {
+        "comment": "",
+        "key": "选择星期",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 239
+        }
+      },
+      {
+        "comment": "",
+        "key": "触发方式",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 245
+        }
+      },
+      {
+        "comment": "",
+        "key": ":",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 212
+        }
+      },
+      {
+        "comment": "",
+        "key": "小时",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 204
+        }
+      },
+      {
+        "comment": "",
+        "key": "分钟",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 216
+        }
+      },
+      {
+        "comment": "",
+        "key": "循环类型",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 229
+        }
+      },
+      {
+        "comment": "",
+        "key": "到达时间前弹窗询问是否开始录音",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 260
+        }
+      },
+      {
+        "comment": "",
+        "key": "到达时间后自动开始录音",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 264
+        }
+      },
+      {
+        "comment": "",
+        "key": "定时类型",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 246
+        }
+      },
+      {
+        "comment": "",
+        "key": "提前提醒",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 254
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld 分钟",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 256
+        }
+      },
+      {
+        "comment": "",
+        "key": "启用此计划",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 272
+        }
+      }
+    ]
+  },
+  "version": 1
+}

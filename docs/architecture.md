@@ -109,6 +109,33 @@ MP3 编码器，封装 LAME 库。
 
 ---
 
+# H1 定时任务模块
+
+## H2 TimerTask
+定时任务数据模型，实现 `Codable` 协议。
+
+- **字段**：id、enabled、daysOfWeek、hour、minute、repeatType、nextTriggerTime、lastTriggerTime
+- **循环类型**：none（单次） / daily（每天） / weekly（每周）
+- **时间计算**：自动计算 `nextTriggerTime`，支持星期多选
+
+## H2 TimerTaskManager
+定时任务调度管理器，采用单例模式 (`shared`)。
+
+- **CRUD 操作**：创建、读取、更新、删除任务
+- **持久化**：使用 `UserDefaults` 存储 JSON 编码的任务列表
+- **调度器**：30 秒轮询定时器，检查是否需触发提醒
+- **防重复触发**：使用 `triggeredTaskIDs` 集合记录已触发任务
+- **时间变化监听**：监听 `NSSystemClockDidChange` 和 `NSWorkspace.didWakeNotification`
+
+## H2 ReminderWindowController
+提醒弹窗控制器，管理右上角浮窗。
+
+- **窗口位置**：屏幕右上角，距顶部和右侧各 20px
+- **动画效果**：淡入淡出显示/隐藏
+- **按钮操作**：「忽略」关闭弹窗，「开始录音」调用 AudioRecorderManager
+
+---
+
 # H1 视图层
 
 ## H2 MainWindowView / GeneralSettingsView
@@ -117,6 +144,13 @@ MP3 编码器，封装 LAME 库。
 - **快捷键设置**：自定义 `ShortcutRecorderView` 组件捕获按键
 - **录音选项**：音频源选择器、输入设备选择器、时长上限选择器
 - **存储位置**：路径显示、在 Finder 中打开、更改路径按钮
+
+## H2 TimerTaskListView / TimerTaskEditView
+定时计划设置视图，使用 SwiftUI `Form` 构建。
+
+- **列表视图**：展示所有定时计划，支持启用/禁用开关、滑动删除
+- **编辑视图**：时间选择器、循环类型选择、星期多选控件
+- **空状态**：暂无计划时显示引导提示
 
 ## 关键决策
 
@@ -133,3 +167,4 @@ MP3 编码器，封装 LAME 库。
 - [x] 2026-01-14: 引入 `NotificationCenter` 快捷键变更广播机制
 - [x] 2026-01-19: 项目梳理，架构文档结构规范化；新增 `LogManager` 日志模块
 - [x] 2026-01-20: 新增 `LameEncoder` MP3 编码模块；新增暂停/继续机制；新增录音引擎预备机制；修复启动失败资源泄漏
+- [x] 2026-01-21: 新增 `TimerTask` 数据模型、`TimerTaskManager` 调度器、`ReminderWindowController` 弹窗控制器、`TimerTaskViews` 设置界面

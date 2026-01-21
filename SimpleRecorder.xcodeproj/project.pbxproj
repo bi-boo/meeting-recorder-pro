@@ -16,6 +16,10 @@
 		007 /* libmp3lame.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 121; };
 		011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 111; };
 		012 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114; };
+		013 /* TimerTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130; };
+		014 /* TimerTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131; };
+		015 /* ReminderWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132; };
+		016 /* TimerTaskViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 133; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +37,10 @@
 		121 /* libmp3lame.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libmp3lame.a; sourceTree = "<group>"; };
 		122 /* lame.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lame.h; sourceTree = "<group>"; };
 		123 /* module.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; path = module.modulemap; sourceTree = "<group>"; };
+		130 /* TimerTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTask.swift; sourceTree = "<group>"; };
+		131 /* TimerTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskManager.swift; sourceTree = "<group>"; };
+		132 /* ReminderWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderWindowController.swift; sourceTree = "<group>"; };
+		133 /* TimerTaskViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -85,6 +93,7 @@
 				102 /* AudioRecorderManager.swift */,
 				103 /* HotKeyManager.swift */,
 				104 /* LogManager.swift */,
+				131 /* TimerTaskManager.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -93,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				105 /* AppSettings.swift */,
+				130 /* TimerTask.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -101,6 +111,8 @@
 			isa = PBXGroup;
 			children = (
 				114 /* MainWindowView.swift */,
+				132 /* ReminderWindowController.swift */,
+				133 /* TimerTaskViews.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -216,6 +228,10 @@
 				005 /* AppSettings.swift in Sources */,
 				006 /* LameEncoder.swift in Sources */,
 				012 /* MainWindowView.swift in Sources */,
+				013 /* TimerTask.swift in Sources */,
+				014 /* TimerTaskManager.swift in Sources */,
+				015 /* ReminderWindowController.swift in Sources */,
+				016 /* TimerTaskViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,3 +1,40 @@
+# [2026-01-21 22:55]
+- **用户需求/反馈**: 定时提醒时间可配置（1-10分钟），支持两种模式：提前提醒和自动录音。
+- **技术逻辑变更**: 
+    - **新增枚举**: `TimerActionType`（remind/autoStart）定义定时行为类型
+    - **全局设置**: 在 `AppSettings` 添加 `timerActionType` 和 `timerReminderMinutes` 属性
+    - **调度逻辑**: 修改 `TimerTaskManager.checkAndTriggerReminders()` 根据定时类型执行不同操作
+    - **自动录音**: 新增 `handleAutoStartRecording()` 方法，到时间直接开始录音
+    - **通知弹窗**: 新增 `AutoStartNotificationView` 视图，5秒后自动消失
+    - **设置界面**: 在「定时计划」Tab 添加全局设置 Section，包括定时类型和提醒时间选择
+- **涉及文件清单**: 
+    - `SimpleRecorder/Models/AppSettings.swift`
+    - `SimpleRecorder/Models/TimerTask.swift`
+    - `SimpleRecorder/Managers/TimerTaskManager.swift`
+    - `SimpleRecorder/Views/ReminderWindowController.swift`
+    - `SimpleRecorder/Views/TimerTaskViews.swift`
+- **变更原因**: 满足不同使用场景：需要确认时选择提前提醒，无人值守时选择自动录音。
+
+# [2026-01-21 22:35]
+- **用户需求/反馈**: 新增定时录音提醒与一键启动功能，支持多计划配置、提前2分钟弹窗提醒。
+- **技术逻辑变更**: 
+    - **数据模型**: 新增 `TimerTask.swift`，定义定时任务数据结构，支持三种循环类型（单次/每天/每周）和星期多选，实现自动计算下次触发时间。
+    - **调度管理器**: 新增 `TimerTaskManager.swift`（单例），实现 CRUD 操作、UserDefaults 持久化、30秒轮询调度、防重复触发机制、系统时间变化监听。
+    - **提醒弹窗**: 新增 `ReminderWindowController.swift`，实现右上角浮窗样式弹窗，支持「忽略」和「开始录音」两个操作按钮。
+    - **设置界面**: 新增 `TimerTaskViews.swift`（列表视图/编辑视图/星期选择器），在 MainWindowView 中添加「定时计划」Tab。
+    - **应用集成**: 在 AppDelegate 中初始化调度器（启动时启动，退出时停止）。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Models/TimerTask.swift` [NEW]
+    - `SimpleRecorder/Managers/TimerTaskManager.swift` [NEW]
+    - `SimpleRecorder/Views/ReminderWindowController.swift` [NEW]
+    - `SimpleRecorder/Views/TimerTaskViews.swift` [NEW]
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+- **变更原因**: 减少用户手动操作，覆盖会议、访谈等固定时间场景。
+
 # [2026-01-21 00:45]
 - **用户需求/反馈**: 录音开始后，没有禁用“录制来源”和“麦克风设备”菜单项。
 - **技术逻辑变更**: 

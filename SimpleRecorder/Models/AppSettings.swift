@@ -71,6 +71,26 @@ enum IconStyle: String, CaseIterable, Codable {
     }
 }
 
+// MARK: - 定时行为类型枚举
+enum TimerActionType: String, CaseIterable, Codable {
+    case remind = "remind"  // 提前提醒模式
+    case autoStart = "auto_start"  // 自动开始录音模式
+
+    var displayName: String {
+        switch self {
+        case .remind: return "提前提醒"
+        case .autoStart: return "自动录音"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .remind: return "提前弹窗询问是否开始录音"
+        case .autoStart: return "到时间自动开始录音"
+        }
+    }
+}
+
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
@@ -141,6 +161,15 @@ class AppSettings: ObservableObject {
     @Published var availableInputDevices: [AudioInputDevice] = [.defaultDevice]
     @Published var selectedDeviceID: String {
         didSet { UserDefaults.standard.set(selectedDeviceID, forKey: "selectedDeviceID") }
+    }
+
+    // MARK: - 定时录音设置
+    @Published var timerActionType: TimerActionType {
+        didSet { UserDefaults.standard.set(timerActionType.rawValue, forKey: "timerActionType") }
+    }
+
+    @Published var timerReminderMinutes: Int {
+        didSet { UserDefaults.standard.set(timerReminderMinutes, forKey: "timerReminderMinutes") }
     }
 
     /// 检测当前系统是否支持系统音频采集（需要 macOS 13.0+）
@@ -245,6 +274,17 @@ class AppSettings: ObservableObject {
         } else {
             self.iconStyle = .microphone  // 默认麦克风
         }
+
+        // 加载定时录音设置
+        if let savedTimerAction = UserDefaults.standard.string(forKey: "timerActionType"),
+            let actionType = TimerActionType(rawValue: savedTimerAction)
+        {
+            self.timerActionType = actionType
+        } else {
+            self.timerActionType = .remind  // 默认提前提醒模式
+        }
+        self.timerReminderMinutes =
+            UserDefaults.standard.object(forKey: "timerReminderMinutes") as? Int ?? 2  // 默认2分钟
 
         // 初始刷新一次设备列表
         refreshInputDevices()

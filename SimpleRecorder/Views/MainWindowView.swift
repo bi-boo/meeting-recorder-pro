@@ -5,19 +5,24 @@ import SwiftUI
 struct MainWindowView: View {
     var body: some View {
         TabView {
-            AboutView()
-                .tabItem {
-                    Label("关于我们", systemImage: "info.circle")
-                }
-
             BasicSettingsView()
                 .tabItem {
                     Label("基础设置", systemImage: "gear")
                 }
 
+            TimerTaskListView()
+                .tabItem {
+                    Label("定时计划", systemImage: "clock")
+                }
+
             AdvancedSettingsView()
                 .tabItem {
                     Label("高级设置", systemImage: "slider.horizontal.3")
+                }
+
+            AboutView()
+                .tabItem {
+                    Label("关于我们", systemImage: "info.circle")
                 }
         }
         .frame(minWidth: 560, minHeight: 620)  // 稍微增大窗口，给内容更多呼吸空间
@@ -44,20 +49,24 @@ struct AboutView: View {
                     FeatureItem(
                         title: "实时保存",
                         subtitle:
-                            "录音过程中，文件持续保存。即使电脑突然断电、应用意外崩溃或被强制退出，已录制的内容都不会丢失，安心录制每一场重要会议。"
+                            "录音过程中，文件循环保存。即使电脑突然断电、应用意外崩溃或被强制退出，已录制的内容都不会丢失。"
                     )
                     FeatureItem(
                         title: "防止休眠",
                         subtitle:
-                            "录音期间自动阻止系统进入休眠状态。即使合上笔记本节省电量，录音也能在后台继续进行，适合需要长时间录制的会议或讲座场景。"
+                            "录音期间自动阻止系统进入休眠状态。即使合上笔记本，录音也能在后台继续进行，适合需要长时间录音的场景。"
                     )
                     FeatureItem(
                         title: "全局快捷键",
-                        subtitle: "无论当前使用什么应用程序，只需按下预设的快捷键，即可立即开始或结束录音，无需切换窗口，完全不会打断你的工作流程和思路。"
+                        subtitle: "无论在使用什么应用程序，只需按下预设的快捷键，即可立即开始或结束录音，无需切换窗口。"
                     )
                     FeatureItem(
                         title: "双向录音",
-                        subtitle: "支持同时录制麦克风输入和系统内部声音。戴着耳机参加线上会议时，不需要外放扬声器，也能完整录下对方的发言和你自己的声音。"
+                        subtitle: "支持同时录制麦克风输入和系统内部声音。戴着耳机参加线上会议时，也能完整录下对方的发言和你自己的声音。"
+                    )
+                    FeatureItem(
+                        title: "定时录音",
+                        subtitle: "支持设置周期性定时计划，到点自动录音或提前弹窗提醒。再也不用担心忙碌时忘记开启录音，轻松捕捉每一场重要会议。"
                     )
                 }
                 .padding(.horizontal, 45)  // 增加水平间距，使行宽适中

@@ -4,7 +4,7 @@
     "Localizable": [
       {
         "comment": "",
-        "key": "关于我们",
+        "key": "基础设置",
         "location": {
           "startingColumn": 27,
           "startingLine": 10
@@ -12,7 +12,7 @@
       },
       {
         "comment": "",
-        "key": "基础设置",
+        "key": "定时计划",
         "location": {
           "startingColumn": 27,
           "startingLine": 15
@@ -28,10 +28,18 @@
       },
       {
         "comment": "",
+        "key": "关于我们",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 25
+        }
+      },
+      {
+        "comment": "",
         "key": "会议录音 Pro",
         "location": {
           "startingColumn": 22,
-          "startingLine": 33
+          "startingLine": 38
         }
       },
       {
@@ -39,7 +47,7 @@
         "key": "专为办公、演讲、会议场景设计",
         "location": {
           "startingColumn": 22,
-          "startingLine": 37
+          "startingLine": 42
         }
       },
       {
@@ -47,7 +55,7 @@
         "key": "开始/结束录音",
         "location": {
           "startingColumn": 30,
-          "startingLine": 102
+          "startingLine": 111
         }
       },
       {
@@ -55,7 +63,7 @@
         "key": "暂停/继续录音",
         "location": {
           "startingColumn": 30,
-          "startingLine": 114
+          "startingLine": 123
         }
       },
       {
@@ -63,7 +71,7 @@
         "key": "全局快捷键",
         "location": {
           "startingColumn": 22,
-          "startingLine": 127
+          "startingLine": 136
         }
       },
       {
@@ -71,7 +79,7 @@
         "key": "录制来源",
         "location": {
           "startingColumn": 28,
-          "startingLine": 132
+          "startingLine": 141
         }
       },
       {
@@ -79,7 +87,7 @@
         "key": "麦克风设备",
         "location": {
           "startingColumn": 32,
-          "startingLine": 153
+          "startingLine": 162
         }
       },
       {
@@ -87,7 +95,7 @@
         "key": "录音中，设置将在下次录音时生效",
         "location": {
           "startingColumn": 34,
-          "startingLine": 169
+          "startingLine": 178
         }
       },
       {
@@ -95,7 +103,7 @@
         "key": "系统声音录制需要 macOS 13.0 或更高版本",
         "location": {
           "startingColumn": 34,
-          "startingLine": 181
+          "startingLine": 190
         }
       },
       {
@@ -103,7 +111,7 @@
         "key": "录制系统声音需要授予「屏幕录制」权限",
         "location": {
           "startingColumn": 34,
-          "startingLine": 192
+          "startingLine": 201
         }
       },
       {
@@ -111,7 +119,7 @@
         "key": "前往设置",
         "location": {
           "startingColumn": 36,
-          "startingLine": 196
+          "startingLine": 205
         }
       },
       {
@@ -119,7 +127,7 @@
         "key": "录制来源",
         "location": {
           "startingColumn": 22,
-          "startingLine": 206
+          "startingLine": 215
         }
       },
       {
@@ -127,7 +135,7 @@
         "key": "录音完成后自动打开文件夹",
         "location": {
           "startingColumn": 28,
-          "startingLine": 234
+          "startingLine": 243
         }
       },
       {
@@ -135,7 +143,7 @@
         "key": "录音保存至",
         "location": {
           "startingColumn": 30,
-          "startingLine": 212
+          "startingLine": 221
         }
       },
       {
@@ -143,7 +151,7 @@
         "key": "在 Finder 中打开",
         "location": {
           "startingColumn": 36,
-          "startingLine": 215
+          "startingLine": 224
         }
       },
       {
@@ -151,7 +159,7 @@
         "key": "更改...",
         "location": {
           "startingColumn": 36,
-          "startingLine": 218
+          "startingLine": 227
         }
       },
       {
@@ -159,7 +167,7 @@
         "key": "存储位置",
         "location": {
           "startingColumn": 22,
-          "startingLine": 239
+          "startingLine": 248
         }
       },
       {
@@ -167,7 +175,7 @@
         "key": "保存格式",
         "location": {
           "startingColumn": 28,
-          "startingLine": 292
+          "startingLine": 301
         }
       },
       {
@@ -175,7 +183,7 @@
         "key": "单次录音时长上限",
         "location": {
           "startingColumn": 30,
-          "startingLine": 269
+          "startingLine": 278
         }
       },
       {
@@ -183,7 +191,7 @@
         "key": "",
         "location": {
           "startingColumn": 36,
-          "startingLine": 272
+          "startingLine": 281
         }
       },
       {
@@ -191,7 +199,7 @@
         "key": "",
         "location": {
           "startingColumn": 36,
-          "startingLine": 280
+          "startingLine": 289
         }
       },
       {
@@ -199,7 +207,7 @@
         "key": "%lld 小时",
         "location": {
           "startingColumn": 42,
-          "startingLine": 274
+          "startingLine": 283
         }
       },
       {
@@ -207,7 +215,7 @@
         "key": "%lld 分钟",
         "location": {
           "startingColumn": 42,
-          "startingLine": 284
+          "startingLine": 293
         }
       },
       {
@@ -215,7 +223,7 @@
         "key": "录音控制",
         "location": {
           "startingColumn": 22,
-          "startingLine": 300
+          "startingLine": 309
         }
       },
       {
@@ -223,7 +231,7 @@
         "key": "M4A",
         "location": {
           "startingColumn": 30,
-          "startingLine": 305
+          "startingLine": 314
         }
       },
       {
@@ -231,7 +239,7 @@
         "key": "体积小、音质优，Apple 设备首选",
         "location": {
           "startingColumn": 30,
-          "startingLine": 311
+          "startingLine": 320
         }
       },
       {
@@ -239,7 +247,7 @@
         "key": "MP3",
         "location": {
           "startingColumn": 30,
-          "startingLine": 314
+          "startingLine": 323
         }
       },
       {
@@ -247,7 +255,7 @@
         "key": "兼容性极佳，适合跨平台自由分享",
         "location": {
           "startingColumn": 30,
-          "startingLine": 320
+          "startingLine": 329
         }
       },
       {
@@ -255,7 +263,7 @@
         "key": "图标样式",
         "location": {
           "startingColumn": 28,
-          "startingLine": 330
+          "startingLine": 339
         }
       },
       {
@@ -263,7 +271,7 @@
         "key": "录制时显示时长",
         "location": {
           "startingColumn": 28,
-          "startingLine": 337
+          "startingLine": 346
         }
       },
       {
@@ -271,7 +279,7 @@
         "key": "空闲时图标变暗",
         "location": {
           "startingColumn": 28,
-          "startingLine": 340
+          "startingLine": 349
         }
       },
       {
@@ -279,7 +287,7 @@
         "key": "开机自动启动",
         "location": {
           "startingColumn": 28,
-          "startingLine": 343
+          "startingLine": 352
         }
       },
       {
@@ -287,7 +295,7 @@
         "key": "菜单栏",
         "location": {
           "startingColumn": 22,
-          "startingLine": 348
+          "startingLine": 357
         }
       },
       {
@@ -295,7 +303,7 @@
         "key": "快捷键冲突",
         "location": {
           "startingColumn": 16,
-          "startingLine": 391
+          "startingLine": 400
         }
       },
       {
@@ -303,7 +311,7 @@
         "key": "按下快捷键...",
         "location": {
           "startingColumn": 22,
-          "startingLine": 375
+          "startingLine": 384
         }
       },
       {
@@ -311,7 +319,7 @@
         "key": "点击设置",
         "location": {
           "startingColumn": 22,
-          "startingLine": 382
+          "startingLine": 391
         }
       },
       {
@@ -319,7 +327,7 @@
         "key": "确定",
         "location": {
           "startingColumn": 20,
-          "startingLine": 392
+          "startingLine": 401
         }
       },
       {
@@ -327,7 +335,7 @@
         "key": "该快捷键已被其他功能使用，请选择不同的快捷键。",
         "location": {
           "startingColumn": 18,
-          "startingLine": 394
+          "startingLine": 403
         }
       }
     ]

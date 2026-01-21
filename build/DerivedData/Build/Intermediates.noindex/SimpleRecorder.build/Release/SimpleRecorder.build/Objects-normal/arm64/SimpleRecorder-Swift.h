@@ -321,6 +321,12 @@ SWIFT_CLASS("_TtC14SimpleRecorder20AudioRecorderManager")
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
+/// 定时录音提醒弹窗控制器
+SWIFT_CLASS("_TtC14SimpleRecorder24ReminderWindowController")
+@interface ReminderWindowController : NSObject
+- (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
+@end
+
 #endif
 #if __has_attribute(external_source_symbol)
 # pragma clang attribute pop

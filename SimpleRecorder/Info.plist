@@ -13,9 +13,9 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>极简录音</string>
+    <string>会议录音 Pro</string>
     <key>CFBundleDisplayName</key>
-    <string>极简录音</string>
+    <string>会议录音 Pro</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -29,9 +29,9 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2024. All rights reserved.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>极简录音需要访问麦克风来录制音频</string>
+    <string>会议录音 Pro 需要访问麦克风来录制音频</string>
     <key>NSSystemAudioCaptureUsageDescription</key>
-    <string>极简录音需要访问系统音频来录制电脑内部声音（如会议音频、播放的音乐）</string>
+    <string>会议录音 Pro 需要访问系统音频来录制电脑内部声音（如会议音频、播放的音乐）</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>

@@ -106,6 +106,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 通过实际访问 AVAudioEngine 的 inputNode 来强制触发系统权限检查
         triggerMicrophonePermissionCheck()
 
+        // 启动定时任务调度器
+        TimerTaskManager.shared.startScheduler()
+
         // 延迟检查中断状态（确保 UI 完全加载）
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.recordingManager.resetStatusAfterInterruption()
@@ -136,6 +139,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 退出前检查是否正在录音，确保保存
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // 停止定时任务调度器
+        TimerTaskManager.shared.stopScheduler()
+
         // 如果正在录音，先保存
         if recordingManager.isRecording {
             // 弹出确认对话框
@@ -265,7 +271,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // 退出
-        let quitItem = NSMenuItem(title: "退出极简录音", action: #selector(quitApp), keyEquivalent: "")
+        let quitItem = NSMenuItem(
+            title: "退出会议录音 Pro", action: #selector(quitApp), keyEquivalent: "")
         quitItem.target = self
         menu.addItem(quitItem)
 

@@ -23,10 +23,20 @@
     "llvm-bc" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/LogManager.bc",
     "object" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/LogManager.o"
   },
+  "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Managers/TimerTaskManager.swift" : {
+    "index-unit-output-path" : "/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTaskManager.o",
+    "llvm-bc" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTaskManager.bc",
+    "object" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTaskManager.o"
+  },
   "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Models/AppSettings.swift" : {
     "index-unit-output-path" : "/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/AppSettings.o",
     "llvm-bc" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/AppSettings.bc",
     "object" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/AppSettings.o"
+  },
+  "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Models/TimerTask.swift" : {
+    "index-unit-output-path" : "/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTask.o",
+    "llvm-bc" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTask.bc",
+    "object" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTask.o"
   },
   "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/SimpleRecorderApp.swift" : {
     "index-unit-output-path" : "/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorderApp.o",
@@ -42,6 +52,16 @@
     "index-unit-output-path" : "/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/MainWindowView.o",
     "llvm-bc" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/MainWindowView.bc",
     "object" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/MainWindowView.o"
+  },
+  "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Views/ReminderWindowController.swift" : {
+    "index-unit-output-path" : "/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/ReminderWindowController.o",
+    "llvm-bc" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/ReminderWindowController.bc",
+    "object" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/ReminderWindowController.o"
+  },
+  "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Views/TimerTaskViews.swift" : {
+    "index-unit-output-path" : "/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTaskViews.o",
+    "llvm-bc" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTaskViews.bc",
+    "object" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/TimerTaskViews.o"
   },
   "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/DerivedSources/GeneratedAssetSymbols.swift" : {
     "index-unit-output-path" : "/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
