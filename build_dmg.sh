@@ -38,7 +38,7 @@ else
     echo "未检测到 Developer ID 证书，将使用 Ad-hoc 签名 (-)"
 fi
 
-codesign --force --deep --strict --options runtime --sign "${SIGNING_IDENTITY}" "${RELEASE_APP_PATH}"
+codesign --force --deep --strict --options runtime --entitlements "${PROJECT_DIR}/SimpleRecorder/SimpleRecorder.entitlements" --sign "${SIGNING_IDENTITY}" "${RELEASE_APP_PATH}"
 
 echo "--- [4/5] 生成 DMG 镜像 ---"
 hdiutil create -volname "${VOLUME_NAME}" -srcfolder "${RELEASE_APP_PATH}" -ov -format UDZO "${TEMP_DMG}"

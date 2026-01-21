@@ -10,7 +10,7 @@ import Foundation
 class HotKeyManager: ObservableObject {
     static let shared = HotKeyManager()
 
-    // 开始/停止录音快捷键
+    // 开始/结束录音快捷键
     @Published var recordHotKey: HotKeyConfiguration?
     // 暂停/继续录音快捷键
     @Published var pauseHotKey: HotKeyConfiguration?

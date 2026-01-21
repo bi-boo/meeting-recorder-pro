@@ -1,0 +1,12 @@
+{
+  "/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/SimpleRecorderApp.swift" : {
+    "abi-baseline-json" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorder.abi.json",
+    "const-values" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorder-primary.swiftconstvalues",
+    "dependencies" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorder-primary.d",
+    "diagnostics" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorder-primary.dia",
+    "objc-header" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorder-Swift.h",
+    "swiftdoc" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorder.swiftdoc",
+    "swiftmodule" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorder.swiftmodule",
+    "swiftsourceinfo" : "/Users/baozheng/代码文件/MAC 端录音软件/build/DerivedData/Build/Intermediates.noindex/SimpleRecorder.build/Release/SimpleRecorder.build/Objects-normal/arm64/SimpleRecorder.swiftsourceinfo"
+  }
+}

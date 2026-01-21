@@ -33,24 +33,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastToggleTime: Date = .distantPast  // 用于防抖
     private var lastTimeString: String = ""
 
-    // 缓存图标，避免频繁创建
-    private lazy var recordingImage: NSImage? = {
-        let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "录音中")
+    // 动态获取当前配置的图标
+    private func getStatusImage() -> NSImage? {
+        let symbolName = AppSettings.shared.iconStyle.symbolName
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "极简录音")
         image?.isTemplate = true
         return image
-    }()
+    }
 
-    private lazy var idleImage: NSImage? = {
-        let image = NSImage(systemSymbolName: "mic.circle", accessibilityDescription: "极简录音")
-        image?.isTemplate = true
-        return image
-    }()
-
-    private lazy var pausedImage: NSImage? = {
+    private func getPausedImage() -> NSImage? {
         let image = NSImage(systemSymbolName: "pause.circle.fill", accessibilityDescription: "已暂停")
         image?.isTemplate = true
         return image
-    }()
+    }
 
     // 保持窗口引用，防止被释放
     private var mainWindow: NSWindow?
@@ -171,8 +166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "mic.circle", accessibilityDescription: "极简录音")
-            button.image?.isTemplate = true
+            button.image = getStatusImage()
         }
 
         setupMenu()
@@ -180,10 +174,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupMenu() {
         let menu = NSMenu()
+        menu.autoenablesItems = false  // 必须禁用，否则手动设置的 isEnabled 会被覆盖
 
         // 录音控制
+        let isRecording = recordingManager.isRecording
+        let isPaused = recordingManager.isPaused
+
         let recordItem = NSMenuItem(
-            title: "开始录音", action: #selector(toggleRecording), keyEquivalent: "")
+            title: isRecording ? "结束录音" : "开始录音",
+            action: #selector(toggleRecording),
+            keyEquivalent: ""
+        )
         if let hotKey = HotKeyManager.shared.recordHotKey {
             recordItem.keyEquivalent = hotKey.keyEquivalent
             recordItem.keyEquivalentModifierMask = hotKey.modifierMask
@@ -196,7 +197,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 暂停/继续控制
         let pauseItem = NSMenuItem(
-            title: "暂停录音", action: #selector(togglePause), keyEquivalent: "")
+            title: isPaused ? "继续录音" : "暂停录音",
+            action: #selector(togglePause),
+            keyEquivalent: ""
+        )
         if let hotKey = HotKeyManager.shared.pauseHotKey {
             pauseItem.keyEquivalent = hotKey.keyEquivalent
             pauseItem.keyEquivalentModifierMask = hotKey.modifierMask
@@ -205,7 +209,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             pauseItem.keyEquivalentModifierMask = [.command, .option, .control]
         }
         pauseItem.target = self
-        pauseItem.isEnabled = false  // 初始禁用，录音时启用
+        pauseItem.isEnabled = isRecording  // 录音时启用
         menu.addItem(pauseItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -313,7 +317,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lastToggleTime = now
 
         if recordingManager.isRecording {
-            LogManager.shared.info("用户点击停止录音")
+            LogManager.shared.info("用户点击结束录音")
             recordingManager.stopRecording()
         } else {
             LogManager.shared.info("用户点击开始录音")
@@ -400,28 +404,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusBarTimer() {
-        let elapsed = Int(recordingManager.recordingDuration)
-
-        let hours = elapsed / 3600
-        let minutes = (elapsed % 3600) / 60
-        let seconds = elapsed % 60
-
-        let timeString: String
-        if hours > 0 {
-            timeString = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            timeString = String(format: "%02d:%02d", minutes, seconds)
-        }
-
-        // 【性能优化】如果时间字符串没变，不做任何 UI 操作
-        guard timeString != lastTimeString else { return }
-        lastTimeString = timeString
-
         if let button = statusItem.button {
-            // 使用缓存的图片
-            button.image = recordingImage
-            button.title = " \(timeString)"
-            button.imagePosition = .imageLeading
+            button.alphaValue = 1.0  // 录音状态下强制恢复完全不透明
+            button.image = getStatusImage()
+
+            // 根据设置决定是否显示录制时长
+            if AppSettings.shared.showDurationWhenRecording {
+                let elapsed = Int(recordingManager.recordingDuration)
+                let hours = elapsed / 3600
+                let minutes = (elapsed % 3600) / 60
+                let seconds = elapsed % 60
+
+                let timeString: String
+                if hours > 0 {
+                    timeString = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+                } else {
+                    timeString = String(format: "%02d:%02d", minutes, seconds)
+                }
+
+                // 【性能优化】如果时间字符串没变，不做任何 UI 操作
+                guard timeString != lastTimeString else { return }
+                lastTimeString = timeString
+
+                button.title = " \(timeString)"
+                button.imagePosition = .imageLeading
+            } else {
+                // 不显示时长，仅显示图标
+                button.title = ""
+                button.imagePosition = .imageOnly
+            }
         }
     }
 
@@ -434,14 +445,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateIdleIcon() {
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "mic.circle", accessibilityDescription: "极简录音")
-            image?.isTemplate = true
-            button.image = image
+            button.image = getStatusImage()
             button.title = ""
+            button.imagePosition = .imageOnly
 
-            // 如果启用了空闲时变暗，设置透明度
+            // 如果启用了空闲时变暗，设置更低的透明度
             if AppSettings.shared.dimIconWhenIdle {
-                button.alphaValue = 0.5
+                button.alphaValue = 0.35  // 更淡的透明度
             } else {
                 button.alphaValue = 1.0
             }
@@ -451,37 +461,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusBarPaused() {
         if let button = statusItem.button {
             button.alphaValue = 1.0  // 录音状态下恢复完全不透明
-            let image = NSImage(
-                systemSymbolName: "pause.circle.fill", accessibilityDescription: "已暂停")
-            image?.isTemplate = true
-            button.image = image
-            button.title = " 已暂停"
-            button.imagePosition = .imageLeading
+            button.image = getStatusImage()  // 统一图标样式
+
+            if AppSettings.shared.showDurationWhenRecording {
+                button.title = " 已暂停"
+                button.imagePosition = .imageLeading
+            } else {
+                button.title = ""
+                button.imagePosition = .imageOnly
+            }
         }
     }
 
     @objc private func handleIconStyleChanged() {
-        // 如果不在录音，更新空闲图标透明度
-        if !recordingManager.isRecording {
-            updateIdleIcon()
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.lastTimeString = ""  // 强制刷新计时器，以更新图标
+            if self.recordingManager.isRecording {
+                if self.recordingManager.isPaused {
+                    self.updateStatusBarPaused()
+                } else {
+                    self.updateStatusBarTimer()
+                }
+            } else {
+                self.updateIdleIcon()
+            }
         }
     }
 
     private func updateMenuRecordingState(isRecording: Bool, isPaused: Bool) {
-        if let menu = statusItem.menu {
-            // 更新录音菜单项
-            if let recordItem = menu.items.first {
-                recordItem.title = isRecording ? "停止录音" : "开始录音"
-            }
-            // 更新暂停菜单项（如果存在）
-            if menu.items.count > 1 {
-                let pauseItem = menu.items[1]
-                if pauseItem.action == #selector(togglePause) {
-                    pauseItem.isEnabled = isRecording
-                    pauseItem.title = isPaused ? "继续录音" : "暂停录音"
-                }
-            }
-        }
+        // 直接刷新整个菜单，setupMenu 会处理所有项的启用/禁用和标题状态
+        setupMenu()
     }
 
     @objc func togglePause() {

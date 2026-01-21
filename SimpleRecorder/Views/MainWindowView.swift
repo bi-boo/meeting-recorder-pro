@@ -20,7 +20,7 @@ struct MainWindowView: View {
                     Label("高级设置", systemImage: "slider.horizontal.3")
                 }
         }
-        .frame(minWidth: 520, minHeight: 580)
+        .frame(minWidth: 560, minHeight: 620)  // 稍微增大窗口，给内容更多呼吸空间
     }
 }
 
@@ -30,43 +30,39 @@ struct AboutView: View {
         ScrollView {
             VStack(spacing: 0) {
                 // 应用名称
-                Text("极简录音")
-                    .font(.system(size: 28, weight: .medium))
-                    .padding(.top, 30)
+                Text("会议录音 Pro")
+                    .font(.system(size: 32, weight: .semibold))  // 稍微放大标题
+                    .padding(.top, 60)  // 纯文字模式下增加顶部留白
 
-                Text("专为会议录制设计")
-                    .font(.subheadline)
+                Text("专为办公、演讲、会议场景设计")
+                    .font(.system(size: 15))
                     .foregroundColor(.secondary)
-                    .padding(.top, 4)
-
-                // 版本号
-                Text("版本 1.0.0")
-                    .font(.caption)
-                    .foregroundColor(.secondary.opacity(0.7))
-                    .padding(.top, 8)
+                    .padding(.top, 10)
 
                 // 特性列表
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 28) {  // 增加条目间的间距
                     FeatureItem(
                         title: "实时保存",
-                        subtitle: "采用流式写入技术，录音过程中持续保存。即使断电、崩溃或意外退出，已录制的内容完整保留。"
+                        subtitle:
+                            "录音过程中，文件持续保存。即使电脑突然断电、应用意外崩溃或被强制退出，已录制的内容都不会丢失，安心录制每一场重要会议。"
                     )
                     FeatureItem(
                         title: "防止休眠",
-                        subtitle: "录音期间自动阻止系统进入睡眠。适合长时间会议录制，无需手动调整电源设置。"
+                        subtitle:
+                            "录音期间自动阻止系统进入休眠状态。即使合上笔记本节省电量，录音也能在后台继续进行，适合需要长时间录制的会议或讲座场景。"
                     )
                     FeatureItem(
                         title: "全局快捷键",
-                        subtitle: "无论在使用什么应用，按下快捷键即可立即开始或停止录音，无需切换窗口。"
+                        subtitle: "无论当前使用什么应用程序，只需按下预设的快捷键，即可立即开始或结束录音，无需切换窗口，完全不会打断你的工作流程和思路。"
                     )
                     FeatureItem(
                         title: "双向录音",
-                        subtitle: "支持同时录制麦克风和系统内部声音。戴耳机线上会议时，对方的声音和你的发言都会被完整录下。"
+                        subtitle: "支持同时录制麦克风输入和系统内部声音。戴着耳机参加线上会议时，不需要外放扬声器，也能完整录下对方的发言和你自己的声音。"
                     )
                 }
-                .padding(.horizontal, 30)
-                .padding(.top, 30)
-                .padding(.bottom, 20)
+                .padding(.horizontal, 45)  // 增加水平间距，使行宽适中
+                .padding(.top, 45)
+                .padding(.bottom, 40)
             }
             .frame(maxWidth: .infinity)
         }
@@ -78,11 +74,12 @@ struct FeatureItem: View {
     let subtitle: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {  // 稍微增加标题和描述的间距
             Text(title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 14, weight: .semibold))  // 标题加粗一点
             Text(subtitle)
-                .font(.system(size: 12))
+                .font(.system(size: 13))  // 描述字体稍微大一点，更易读
+                .lineSpacing(4)  // 增加行间距，解决拥挤感
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -99,126 +96,151 @@ struct BasicSettingsView: View {
 
     var body: some View {
         Form {
-            Section("快捷键") {
-                HStack {
-                    Text("开始/停止录音")
-                    Spacer()
-                    ShortcutRecorderView(
-                        isRecording: $isRecordingShortcut,
-                        currentHotKey: hotKeyManager.recordHotKey,
-                        conflictKey: hotKeyManager.pauseHotKey
-                    ) { config in
-                        hotKeyManager.saveRecordHotKey(config)
+            Section {
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("开始/结束录音")
+                        Spacer()
+                        ShortcutRecorderView(
+                            isRecording: $isRecordingShortcut,
+                            currentHotKey: hotKeyManager.recordHotKey,
+                            conflictKey: hotKeyManager.pauseHotKey
+                        ) { config in
+                            hotKeyManager.saveRecordHotKey(config)
+                        }
                     }
-                }
 
-                HStack {
-                    Text("暂停/继续录音")
-                    Spacer()
-                    ShortcutRecorderView(
-                        isRecording: $isRecordingPauseShortcut,
-                        currentHotKey: hotKeyManager.pauseHotKey,
-                        conflictKey: hotKeyManager.recordHotKey
-                    ) { config in
-                        hotKeyManager.savePauseHotKey(config)
+                    HStack {
+                        Text("暂停/继续录音")
+                        Spacer()
+                        ShortcutRecorderView(
+                            isRecording: $isRecordingPauseShortcut,
+                            currentHotKey: hotKeyManager.pauseHotKey,
+                            conflictKey: hotKeyManager.recordHotKey
+                        ) { config in
+                            hotKeyManager.savePauseHotKey(config)
+                        }
                     }
                 }
+                .padding(.vertical, 4)
+            } header: {
+                Text("全局快捷键").padding(.bottom, 4)
             }
 
-            Section("录制来源") {
-                Picker("录制来源", selection: $settings.audioSource) {
-                    ForEach(AudioSource.allCases, id: \.self) { source in
-                        Text(source.displayName).tag(source)
+            Section {
+                VStack(spacing: 14) {
+                    Picker("录制来源", selection: $settings.audioSource) {
+                        ForEach(AudioSource.allCases, id: \.self) { source in
+                            Text(source.displayName).tag(source)
+                        }
                     }
-                }
-                .disabled(recordingManager.isRecording)  // 【边界逻辑】录音时禁用
-                .onChange(of: settings.audioSource) { newValue in
-                    if newValue != .microphone {
-                        AppSettings.requestScreenCapturePermission()
-                        if !AppSettings.hasScreenCapturePermission {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    .disabled(recordingManager.isRecording)
+                    .onChange(of: settings.audioSource) { newValue in
+                        if newValue != .microphone {
+                            AppSettings.requestScreenCapturePermission()
+                            if !AppSettings.hasScreenCapturePermission {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    AppSettings.openScreenCaptureSettings()
+                                }
+                                DispatchQueue.main.async {
+                                    settings.audioSource = .microphone
+                                }
+                            }
+                        }
+                    }
+
+                    if settings.audioSource != .systemAudio {
+                        Picker("麦克风设备", selection: $settings.selectedDeviceID) {
+                            ForEach(settings.availableInputDevices) { device in
+                                Text(device.name).tag(device.id)
+                            }
+                        }
+                        .disabled(recordingManager.isRecording)
+                        .onAppear {
+                            settings.refreshInputDevices()
+                        }
+                    }
+
+                    // 【边界逻辑】录音中提示
+                    if recordingManager.isRecording {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.blue)
+                            Text("录音中，设置将在下次录音时生效")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                    }
+
+                    // 权限提示
+                    if !AppSettings.isSystemAudioSupported {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.orange)
+                            Text("系统声音录制需要 macOS 13.0 或更高版本")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                    } else if !AppSettings.hasScreenCapturePermission
+                        && settings.audioSource != .microphone
+                    {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.shield")
+                                .foregroundColor(.orange)
+                            Text("录制系统声音需要授予「屏幕录制」权限")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("前往设置") {
                                 AppSettings.openScreenCaptureSettings()
                             }
-                            DispatchQueue.main.async {
-                                settings.audioSource = .microphone
+                            .font(.caption)
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("录制来源").padding(.bottom, 4)
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Text("录音保存至")
+                        Spacer()
+                        HStack(spacing: 8) {
+                            Button("在 Finder 中打开") {
+                                NSWorkspace.shared.open(settings.recordingsPath)
+                            }
+                            Button("更改...") {
+                                selectFolder(for: \.recordingsPath)
                             }
                         }
                     }
-                }
 
-                if settings.audioSource != .systemAudio {
-                    Picker("麦克风设备", selection: $settings.selectedDeviceID) {
-                        ForEach(settings.availableInputDevices) { device in
-                            Text(device.name).tag(device.id)
-                        }
-                    }
-                    .disabled(recordingManager.isRecording)  // 【边界逻辑】录音时禁用
-                    .onAppear {
-                        settings.refreshInputDevices()
-                    }
-                }
+                    Text(settings.recordingsPath.path)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary.opacity(0.8))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Color.secondary.opacity(0.05))
+                        .cornerRadius(6)
 
-                // 【边界逻辑】录音中提示
-                if recordingManager.isRecording {
-                    HStack(spacing: 6) {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.blue)
-                        Text("录音中，设置将在下次录音时生效")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.top, 4)
+                    Toggle("录音完成后自动打开文件夹", isOn: $settings.openFolderAfterRecording)
+                        .tint(.green)
                 }
-
-                // 权限提示
-                if !AppSettings.isSystemAudioSupported {
-                    HStack(spacing: 6) {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.orange)
-                        Text("系统声音录制需要 macOS 13.0 或更高版本")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.top, 4)
-                } else if !AppSettings.hasScreenCapturePermission
-                    && settings.audioSource != .microphone
-                {
-                    HStack(spacing: 6) {
-                        Image(systemName: "lock.shield")
-                            .foregroundColor(.orange)
-                        Text("录制系统声音需要授予「屏幕录制」权限")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Button("前往设置") {
-                            AppSettings.openScreenCaptureSettings()
-                        }
-                        .font(.caption)
-                        .buttonStyle(.borderless)
-                    }
-                    .padding(.top, 4)
-                }
-            }
-
-            Section("存储位置") {
-                HStack {
-                    Text("录音保存至")
-                    Spacer()
-                    Button("在 Finder 中打开") {
-                        NSWorkspace.shared.open(settings.recordingsPath)
-                    }
-                    Button("更改...") {
-                        selectFolder(for: \.recordingsPath)
-                    }
-                }
-                Text(settings.recordingsPath.path)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                .padding(.vertical, 4)
+            } header: {
+                Text("存储位置").padding(.bottom, 4)
             }
         }
         .formStyle(.grouped)
+        .padding(.top, 10)
     }
 
     private func selectFolder(for keyPath: ReferenceWritableKeyPath<AppSettings, URL>) {
@@ -241,89 +263,93 @@ struct AdvancedSettingsView: View {
 
     var body: some View {
         Form {
-            Section("录音") {
-                HStack {
-                    Text("单次录音时长上限")
-                    Spacer()
-                    HStack(spacing: 5) {
-                        Picker("", selection: $settings.maxDurationHours) {
-                            ForEach(0...9, id: \.self) { hour in
-                                Text("\(hour) 小时").tag(hour)
+            Section {
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("单次录音时长上限")
+                        Spacer()
+                        HStack(spacing: 10) {
+                            Picker("", selection: $settings.maxDurationHours) {
+                                ForEach(0...9, id: \.self) { hour in
+                                    Text("\(hour) 小时").tag(hour)
+                                }
                             }
-                        }
-                        .labelsHidden()
-                        .frame(width: 80)
+                            .labelsHidden()
+                            .frame(width: 85)
 
-                        Picker("", selection: $settings.maxDurationMinutes) {
-                            ForEach([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], id: \.self) {
-                                minute in
-                                Text("\(minute) 分钟").tag(minute)
+                            Picker("", selection: $settings.maxDurationMinutes) {
+                                ForEach([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], id: \.self)
+                                {
+                                    minute in
+                                    Text("\(minute) 分钟").tag(minute)
+                                }
                             }
+                            .labelsHidden()
+                            .frame(width: 85)
                         }
-                        .labelsHidden()
-                        .frame(width: 80)
                     }
-                }
 
-                Picker("保存格式", selection: $settings.outputFormat) {
-                    ForEach(OutputFormat.allCases, id: \.self) { format in
-                        Text(format.displayName).tag(format)
+                    Picker("保存格式", selection: $settings.outputFormat) {
+                        ForEach(OutputFormat.allCases, id: \.self) { format in
+                            Text(format.displayName).tag(format)
+                        }
                     }
                 }
-
-                // 格式说明
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "info.circle")
-                        .foregroundColor(.secondary)
-                        .font(.caption)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("M4A：体积小、音质好，适合 Apple 设备")
-                        Text("MP3：兼容性最广，便于分享到其他平台")
+                .padding(.vertical, 4)
+            } header: {
+                Text("录音控制").padding(.bottom, 4)
+            } footer: {
+                // 格式说明移至外部 footer，更符合 macOS 原生规范
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text("M4A")
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 0.5)
+                            .background(Color.secondary.opacity(0.12))
+                            .cornerRadius(2)
+                        Text("体积小、音质优，Apple 设备首选")
                     }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    HStack(spacing: 6) {
+                        Text("MP3")
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 0.5)
+                            .background(Color.secondary.opacity(0.12))
+                            .cornerRadius(2)
+                        Text("兼容性极佳，适合跨平台自由分享")
+                    }
                 }
-                .padding(.top, 2)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary.opacity(0.8))
+                .padding(.top, 6)
             }
 
-            Section("行为") {
-                Toggle(isOn: $settings.openFolderAfterRecording) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("录音完成后打开文件夹")
-                        Text("自动在 Finder 中显示录音文件")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+            Section {
+                VStack(spacing: 16) {
+                    Picker("图标样式", selection: $settings.iconStyle) {
+                        ForEach(IconStyle.allCases, id: \.self) { style in
+                            Label(style.displayName, systemImage: style.symbolName)
+                                .tag(style)
+                        }
                     }
-                }
 
-                Toggle(isOn: $settings.dimIconWhenIdle) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("空闲时菜单栏图标变暗")
-                        Text("不录音时降低图标亮度，减少视觉干扰")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
+                    Toggle("录制时显示时长", isOn: $settings.showDurationWhenRecording)
+                        .tint(.green)
 
-                Toggle("开机时自动启动", isOn: $settings.launchAtLogin)
-            }
+                    Toggle("空闲时图标变暗", isOn: $settings.dimIconWhenIdle)
+                        .tint(.green)
 
-            Section("诊断") {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("运行日志")
-                        Text("用于排查录音故障")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Button("查看日志") {
-                        NSWorkspace.shared.open(LogManager.shared.getLogDirectory())
-                    }
+                    Toggle("开机自动启动", isOn: $settings.launchAtLogin)
+                        .tint(.green)
                 }
+                .padding(.vertical, 4)
+            } header: {
+                Text("菜单栏").padding(.bottom, 4)
             }
         }
         .formStyle(.grouped)
+        .padding(.top, 10)  // 与基础设置保持一致
     }
 }
 
@@ -416,5 +442,5 @@ struct ShortcutRecorderView: View {
 
 #Preview {
     MainWindowView()
-        .frame(width: 600, height: 500)
+        .frame(width: 560, height: 620)
 }

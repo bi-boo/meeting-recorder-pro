@@ -48,6 +48,29 @@ enum OutputFormat: String, CaseIterable, Codable {
     }
 }
 
+// MARK: - 图标样式枚举
+enum IconStyle: String, CaseIterable, Codable {
+    case microphone = "microphone"  // 麦克风
+    case circleDot = "circle_dot"  // 圆圈点
+    case waveform = "waveform"  // 波形图
+
+    var displayName: String {
+        switch self {
+        case .microphone: return "麦克风"
+        case .circleDot: return "指示点"
+        case .waveform: return "波形图"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .microphone: return "mic.fill"
+        case .circleDot: return "record.circle"
+        case .waveform: return "waveform"
+        }
+    }
+}
+
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
@@ -96,6 +119,21 @@ class AppSettings: ObservableObject {
     @Published var dimIconWhenIdle: Bool {
         didSet {
             UserDefaults.standard.set(dimIconWhenIdle, forKey: "dimIconWhenIdle")
+            NotificationCenter.default.post(name: .iconStyleChanged, object: nil)
+        }
+    }
+
+    @Published var showDurationWhenRecording: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                showDurationWhenRecording, forKey: "showDurationWhenRecording")
+            NotificationCenter.default.post(name: .iconStyleChanged, object: nil)
+        }
+    }
+
+    @Published var iconStyle: IconStyle {
+        didSet {
+            UserDefaults.standard.set(iconStyle.rawValue, forKey: "iconStyle")
             NotificationCenter.default.post(name: .iconStyleChanged, object: nil)
         }
     }
@@ -196,6 +234,17 @@ class AppSettings: ObservableObject {
         self.openFolderAfterRecording =
             UserDefaults.standard.object(forKey: "openFolderAfterRecording") as? Bool ?? true  // 默认开启
         self.dimIconWhenIdle = UserDefaults.standard.bool(forKey: "dimIconWhenIdle")
+        self.showDurationWhenRecording =
+            UserDefaults.standard.object(forKey: "showDurationWhenRecording") as? Bool ?? true  // 默认开启
+
+        // 加载图标样式设置
+        if let savedIconStyle = UserDefaults.standard.string(forKey: "iconStyle"),
+            let style = IconStyle(rawValue: savedIconStyle)
+        {
+            self.iconStyle = style
+        } else {
+            self.iconStyle = .microphone  // 默认麦克风
+        }
 
         // 初始刷新一次设备列表
         refreshInputDevices()

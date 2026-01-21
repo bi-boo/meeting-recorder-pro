@@ -1073,7 +1073,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
         isTransitioning = true
 
-        LogManager.shared.info("正在停止录音 | 已录制时长: \(String(format: "%.1f", recordingDuration))s")
+        LogManager.shared.info("正在结束录音 | 已录制时长: \(String(format: "%.1f", recordingDuration))s")
         recordingTimer?.invalidate()
         recordingTimer = nil
 
