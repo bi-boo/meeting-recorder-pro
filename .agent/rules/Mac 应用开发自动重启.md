@@ -1,10 +1,10 @@
 ---
 trigger: always_on
 glob: "**/*.swift,**/*.m,**/*.h,**/*.xib,**/*.storyboard,**/*.plist,**/*.xcconfig"
-description: Mac 应用开发规则 - 每次代码修改后自动重新构建并启动应用
+description: 会议录音 Pro 开发规则 - 每次代码修改后自动重新构建并启动应用
 ---
 
-# Mac 应用开发规则
+# 会议录音 Pro 开发规则
 
 ## 核心原则
 
@@ -26,17 +26,17 @@ pkill -9 -f "SimpleRecorder.app" 2>/dev/null || true
 sleep 1
 ```
 
-3. **构建应用**
+3. **构建应用（会议录音 Pro）**
 ```bash
-cd "/Users/baozheng/代码文件/MAC 端录音软件" && xcodebuild -project SimpleRecorder.xcodeproj -scheme SimpleRecorder -configuration Debug build 2>&1 | grep -E "(BUILD|error:|warning:)" | tail -10
+cd "/Users/baozheng/代码文件/MAC 端录音软件" && xcodebuild -project SimpleRecorder.xcodeproj -scheme SimpleRecorder -configuration Release build 2>&1 | grep -E "(BUILD|error:|warning:)" | tail -10
 ```
 
 4. **启动应用**
 ```bash
-open "/Users/baozheng/Library/Developer/Xcode/DerivedData/SimpleRecorder-djrwyvonylczszfzilmxwhrqevyb/Build/Products/Debug/SimpleRecorder.app"
+open "/Users/baozheng/Library/Developer/Xcode/DerivedData/SimpleRecorder-djrwyvonylczszfzilmxwhrqevyb/Build/Products/Release/SimpleRecorder.app"
 ```
 
-5. **通知用户**：告知用户应用已重新启动，可以开始测试
+5. **通知用户**：告知用户「会议录音 Pro」已重新启动，可以开始测试
 
 ### 2. 注意事项
 
