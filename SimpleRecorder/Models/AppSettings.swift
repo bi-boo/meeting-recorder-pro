@@ -173,6 +173,22 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(timerReminderMinutes, forKey: "timerReminderMinutes") }
     }
 
+    // MARK: - 睡眠控制设置
+    @Published var preventSleepDuringRecording: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                preventSleepDuringRecording, forKey: "preventSleepDuringRecording")
+        }
+    }
+
+    @Published var preventSleepWithSchedule: Bool {
+        didSet {
+            UserDefaults.standard.set(preventSleepWithSchedule, forKey: "preventSleepWithSchedule")
+            // 发送通知让 TimerTaskManager 更新睡眠状态
+            NotificationCenter.default.post(name: .scheduleSettingsChanged, object: nil)
+        }
+    }
+
     /// 检测当前系统是否支持系统音频采集（需要 macOS 13.0+）
     static var isSystemAudioSupported: Bool {
         if #available(macOS 13.0, *) {
@@ -307,6 +323,12 @@ class AppSettings: ObservableObject {
         }
         self.timerReminderMinutes =
             UserDefaults.standard.object(forKey: "timerReminderMinutes") as? Int ?? 2  // 默认2分钟
+
+        // 加载睡眠控制设置
+        self.preventSleepDuringRecording =
+            UserDefaults.standard.object(forKey: "preventSleepDuringRecording") as? Bool ?? true  // 默认开启
+        self.preventSleepWithSchedule =
+            UserDefaults.standard.object(forKey: "preventSleepWithSchedule") as? Bool ?? true  // 默认开启
 
         // 初始刷新一次设备列表
         refreshInputDevices()

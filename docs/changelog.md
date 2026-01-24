@@ -1,3 +1,21 @@
+# [2026-01-25 00:21]
+- **用户需求/反馈**: 把"开机自动启动"移到定时计划页面，并增加"录音时禁止系统睡眠"和"有计划时禁止系统睡眠"两个开关，三个开关默认都开启。
+- **技术逻辑变更**: 
+    - 在 `AppSettings` 添加 `preventSleepDuringRecording` 和 `preventSleepWithSchedule` 两个设置项（默认开启）。
+    - 在 `TimerTaskListView` 添加"系统控制"Section，包含三个开关：开机自动启动、录音时禁止系统睡眠、有计划时禁止系统睡眠。
+    - 修改 `AudioRecorderManager.finalizeRecordingStart()` 根据 `preventSleepDuringRecording` 设置决定是否启用防睡眠。
+    - 在 `TimerTaskManager` 添加 `IOPMAssertion` 防睡眠逻辑：当有已启用的计划且 `preventSleepWithSchedule` 开启时，禁止系统空闲睡眠。
+    - 从 `MainWindowView` 的高级设置中移除"开机自动启动"开关。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Models/AppSettings.swift`
+    - `SimpleRecorder/Views/TimerTaskViews.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder/Managers/TimerTaskManager.swift`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `docs/changelog.md`
+- **变更原因**: 将系统控制相关设置集中到定时计划页面，方便用户统一管理；禁止睡眠功能确保定时计划和录音不会被系统睡眠打断。
+
 # [2026-01-25 00:15]
 - **用户需求/反馈**: 相同时间不允许设置多个计划；最多只允许设置6个定时计划；修改提示文案为"系统唤醒且应用运行时，计划才能启动"，去掉图标。
 - **技术逻辑变更**: 

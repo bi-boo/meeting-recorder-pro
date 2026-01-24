@@ -523,4 +523,5 @@ extension Notification.Name {
     static let openSettingsWindow = Notification.Name("openSettingsWindow")
     static let hotKeyChanged = Notification.Name("hotKeyChanged")
     static let iconStyleChanged = Notification.Name("iconStyleChanged")
+    static let scheduleSettingsChanged = Notification.Name("scheduleSettingsChanged")
 }

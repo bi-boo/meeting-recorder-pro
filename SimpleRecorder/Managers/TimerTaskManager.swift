@@ -8,6 +8,7 @@
 import AppKit
 import Combine
 import Foundation
+import IOKit.pwr_mgt
 
 // MARK: - 定时任务管理器
 
@@ -29,11 +30,15 @@ class TimerTaskManager: ObservableObject {
     // 防止同一任务重复触发的集合
     private var triggeredTaskIDs: Set<UUID> = []
 
+    // 睡眠防止断言 ID
+    private var sleepAssertionID: IOPMAssertionID = 0
+
     // MARK: - 初始化
 
     private init() {
         loadTasks()
         setupTimeChangeObserver()
+        setupScheduleSettingsObserver()
 
         LogManager.shared.info("TimerTaskManager 初始化完成 | 任务数量: \(tasks.count)")
     }
@@ -122,6 +127,9 @@ class TimerTaskManager: ObservableObject {
         // 立即执行一次检查
         checkAndTriggerReminders()
 
+        // 检查并更新睡眠防止状态
+        updateSleepPreventionState()
+
         LogManager.shared.info("定时任务调度器已启动")
     }
 
@@ -129,6 +137,7 @@ class TimerTaskManager: ObservableObject {
     func stopScheduler() {
         schedulerTimer?.invalidate()
         schedulerTimer = nil
+        releaseSleepPrevention()
 
         LogManager.shared.info("定时任务调度器已停止")
     }
@@ -295,6 +304,9 @@ class TimerTaskManager: ObservableObject {
             let encoder = JSONEncoder()
             let data = try encoder.encode(tasks)
             UserDefaults.standard.set(data, forKey: storageKey)
+
+            // 保存后更新睡眠防止状态
+            updateSleepPreventionState()
         } catch {
             LogManager.shared.error("保存定时任务失败 | 错误: \(error.localizedDescription)")
         }
@@ -350,5 +362,71 @@ class TimerTaskManager: ObservableObject {
     deinit {
         NotificationCenter.default.removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        releaseSleepPrevention()
+    }
+
+    // MARK: - 睡眠控制
+
+    /// 设置变化监听
+    private func setupScheduleSettingsObserver() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScheduleSettingsChanged),
+            name: .scheduleSettingsChanged,
+            object: nil
+        )
+    }
+
+    @objc private func handleScheduleSettingsChanged() {
+        updateSleepPreventionState()
+    }
+
+    /// 更新睡眠防止状态
+    func updateSleepPreventionState() {
+        let settings = AppSettings.shared
+        let hasEnabledTasks = tasks.contains { $0.enabled }
+
+        if settings.preventSleepWithSchedule && hasEnabledTasks {
+            setupSleepPrevention()
+        } else {
+            releaseSleepPrevention()
+        }
+    }
+
+    /// 开启防止休眠断言
+    private func setupSleepPrevention() {
+        // 已经有断言时不重复创建
+        guard sleepAssertionID == 0 else { return }
+
+        let reason = "有已启用的定时录音计划，保持系统唤醒以确保计划触发。" as CFString
+        let result = IOPMAssertionCreateWithDescription(
+            kIOPMAssertionTypeNoIdleSleep as CFString,
+            "MeetingRecorderProScheduledTask" as CFString,
+            reason,
+            nil,
+            nil,
+            0,
+            nil,
+            &sleepAssertionID
+        )
+
+        if result == kIOReturnSuccess {
+            LogManager.shared.info("已开启定时计划防休眠断言")
+        } else {
+            LogManager.shared.warning("开启定时计划防休眠断言失败 | 错误码: \(result)")
+        }
+    }
+
+    /// 释放防止休眠断言
+    private func releaseSleepPrevention() {
+        guard sleepAssertionID != 0 else { return }
+
+        let result = IOPMAssertionRelease(sleepAssertionID)
+        if result == kIOReturnSuccess {
+            LogManager.shared.info("已释放定时计划防休眠断言")
+            sleepAssertionID = 0
+        } else {
+            LogManager.shared.warning("释放定时计划防休眠断言失败 | 错误码: \(result)")
+        }
     }
 }

@@ -356,9 +356,6 @@ struct AdvancedSettingsView: View {
 
                     Toggle("空闲时图标变暗", isOn: $settings.dimIconWhenIdle)
                         .tint(.green)
-
-                    Toggle("开机自动启动", isOn: $settings.launchAtLogin)
-                        .tint(.green)
                 }
                 .padding(.vertical, 4)
             } header: {

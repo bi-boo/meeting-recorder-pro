@@ -82,6 +82,30 @@ struct TimerTaskListView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            // 系统控制开关
+            Section {
+                Toggle("开机自动启动", isOn: $settings.launchAtLogin)
+                    .tint(.green)
+
+                // 录音时禁止系统睡眠：始终开启且不可修改（仅作为信息展示）
+                Toggle("录音时禁止系统睡眠", isOn: .constant(true))
+                    .tint(.green)
+                    .disabled(true)
+
+                Toggle("有定时计划时禁止系统睡眠", isOn: $settings.preventSleepWithSchedule)
+                    .tint(.green)
+            } header: {
+                Text("系统控制")
+                    .padding(.bottom, 4)
+            } footer: {
+                let enabledCount = manager.tasks.filter { $0.enabled }.count
+                if enabledCount > 0 && settings.preventSleepWithSchedule {
+                    Text("当前有 \(enabledCount) 个已启用的计划")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .sheet(isPresented: $showingAddSheet) {

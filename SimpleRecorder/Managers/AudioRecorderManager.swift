@@ -429,6 +429,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
         recordingTimer = timer
 
+        // 录音时始终禁止系统睡眠
         setupSleepPrevention()
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
 
@@ -1578,7 +1579,8 @@ private class SystemAudioStreamOutput: NSObject, SCStreamOutput {
 // MARK: - AVAudioPCMBuffer 扩展
 extension AVAudioPCMBuffer {
     func deepCopy() -> AVAudioPCMBuffer? {
-        guard let copy = AVAudioPCMBuffer(pcmFormat: self.format, frameCapacity: self.frameCapacity) else { return nil }
+        guard let copy = AVAudioPCMBuffer(pcmFormat: self.format, frameCapacity: self.frameCapacity)
+        else { return nil }
         copy.frameLength = self.frameLength
         for i in 0..<Int(self.format.channelCount) {
             if let src = self.floatChannelData?[i], let dst = copy.floatChannelData?[i] {
