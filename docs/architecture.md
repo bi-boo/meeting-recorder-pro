@@ -124,69 +124,59 @@ MP3 编码器，封装 LAME 库。
 
 ---
 
-# H1 定时任务模块
+# H1 定 shortcut 计划 (Timer Tasks)
 
 ## H2 TimerTask
 定时任务数据模型，实现 `Codable` 协议。
 
-- **字段**：id、enabled、daysOfWeek、hour、minute、repeatType、nextTriggerTime、lastTriggerTime
-- **循环类型**：none（单次） / daily（每天） / weekly（每周）
-- **时间计算**：自动计算 `nextTriggerTime`，支持星期多选
+- **字段**：id、enabled、daysOfWeek、hour、minute、repeatType、actionType、reminderMinutes、nextTriggerTime、lastTriggerTime
+- **循环类型**：none（单次/不循环） / daily（每天） / weekly（每周）
+- **时间计算**：自动计算 `nextTriggerTime`，支持星期多选。
 
 ## H2 TimerTaskManager
 定时任务调度管理器，采用单例模式 (`shared`)。
 
-- **CRUD 操作**：创建、读取、更新、删除任务
-- **持久化**：使用 `UserDefaults` 存储 JSON 编码的任务列表
-- **调度器**：30 秒轮询定时器，检查是否需触发提醒
-- **防重复触发**：使用 `triggeredTaskIDs` 集合记录已触发任务
-- **时间变化监听**：监听 `NSSystemClockDidChange` 和 `NSWorkspace.didWakeNotification`
+- **CRUD 操作**：支持任务的增删改查及冲突检测（同一时间点仅允许一个计划）。
+- **持久化**：使用 `UserDefaults` 存储 JSON 编码的任务列表。
+- **调度器**：30 秒轮询定时器，检查是否需触发提醒或自动录音。
+- **睡眠控制 (增强)**：
+    - 集成 `IOKit` 电源管理 API。
+    - **原理**：监听设置变更及任务列表状态，若存在**已启用**的任务且开启了“有定时计划时禁止系统睡眠”，则启动 `kIOPMAssertionTypeNoIdleSleep` 电源断言，防止计划因系统休眠而漏触发。
+- **防重复触发**：使用 `triggeredTaskIDs` 集合记录已触发任务。
+- **通知系统**：监听 `NSSystemClockDidChange`、`NSWorkspace.didWakeNotification` 以及 `scheduleSettingsChanged` 通知。
 
 ## H2 ReminderWindowController
 提醒弹窗控制器，管理右上角浮窗。
 
-- **窗口位置**：屏幕右上角，距顶部和右侧各 20px
-- **动画效果**：淡入淡出显示/隐藏
-- **按钮操作**：「忽略」关闭弹窗，「开始录音」调用 AudioRecorderManager
+- **逻辑表现**：根据 `actionType` 表现为“提前提醒”或“自动录音”反馈。预览标签集成在计划列表的 `TimerTaskRow` 中。
 
 ---
 
 # H1 视图层
 
 ## H2 MainWindowView / AboutView
-设置窗口的主视图，使用 SwiftUI `Form` 构建。
+设置窗口的主视图。
 
-- **关于我们**：展示品牌 Logo (`BrandLogo`)、应用名称及核心特性。
-- **快捷键设置**：自定义 `ShortcutRecorderView` 组件捕获按键
-- **录音选项**：音频源选择器、输入设备选择器、时长上限选择器
-- **存储位置**：路径显示、在 Finder 中打开、更改路径按钮
+- **关于我们**：采用极简纯文字排版，移除品牌 Logo 展示。
+- **快捷键设置**：支持录音、暂停两个关键动作的响应式设置。
 
 ## H2 TimerTaskListView / TimerTaskEditView
-定时计划设置视图，使用 SwiftUI `Form` 构建。
+定时计划设置视图。
 
-- **列表视图**：展示所有定时计划，支持启用/禁用开关、滑动删除
-- **编辑视图**：时间选择器、循环类型选择、星期多选控件
-- **空状态**：暂无计划时显示引导提示
+- **列表排序**：通过 `sortedTasks` 计算属性，实现基于 0-24 小时绝对时间的自动排序显示。
+- **编辑逻辑**：新增计划时，`repeatType` 默认为 `.none`，`actionType` 默认为 `.autoStart`。
+- **系统控制**：集成“开机自启动”和“睡眠控制”开关组。
 
 ## 关键决策
 
-- **Fragmented MP4 优于分段录音**：消除了文件合并的延迟和 `ffmpeg` 外部依赖，同时保持同等级别的崩溃可靠性
-- **完全本地化**：废除所有云端上传与转写逻辑，极致保护用户数据隐私
-- **Carbon 热键 API**：虽然是遗留 API，但在 macOS 上仍是注册系统级全局热键的唯一可靠方式
-- **独立混音器节点**：通过不连接输出的 `recordingMixer`，实现无监听录制
-- **离线签名规约**：通过手动 codesign 和隔离属性清理，彻底解决分发后的权限与运行故障
-- **屏显权限预触发方案**：放弃单纯依赖 `CGRequestScreenCaptureAccess` 弹窗，引入 `SCShareableContent` 获取请求作为“预热”，强制系统将应用冷启动记录在 TCC 权限列表中，极大优化了用户的授权体验。
+- **电源断言双保险**：在针对“录音中”设置断言的基础上，新增针对“活跃定时计划”的独立断言，确保 Mac 在作为后台任务中心时的稳定性。
+- **UI 扁平化**：移除 About 页 Logo 及精简 TimerTask 列表的标签层级（提醒方式与循环描述合并显示），遵循更加纯粹的功能主义原则。
+- **时间冲突拦截**：在数据源头（TimerTaskEditView）拦截同时间点的重复设置，维持调度器的确定性。
 
 ## 当前状态
-- [x] 2026-01-12: 初始化架构文档
-- [x] 2026-01-13: 实现多音频源架构（ScreenCaptureKit + AVAudioMixerNode）
-- [x] 2026-01-14: 精简化架构重构，移除流水线相关服务
-- [x] 2026-01-14: 引入 `AVAudioConverter` 缓存机制，解决音频转换失真
-- [x] 2026-01-14: 引入 `NotificationCenter` 快捷键变更广播机制
-- [x] 2026-01-19: 项目梳理，架构文档结构规范化；新增 `LogManager` 日志模块
-- [x] 2026-01-20: 新增 `LameEncoder` MP3 编码模块；新增暂停/继续机制；新增录音引擎预备机制；新增图标样式切换（NotificationCenter 广播）
-- [x] 2026-01-21: 新增 `TimerTask` 调度器及提醒模式配置（Remind/AutoStart）
-- [x] 2026-01-24: 完善 `build_dmg.sh` 签名与隔离清理规约，实现符合 macOS 分发标准的工程化打包
-- [x] 2026-01-24: **架构与 PRD 同步增强**，完成文档层级的深度对齐与需求细节详述
-- [x] 2026-01-24: **一致性修复实施**，完成日志命名规约及动态弹窗超时逻辑的代码级对齐。
-- [x] 2026-01-24: **权限申请流程优化**，在 `AppSettings` 中集成 `ScreenCaptureKit` 预触发逻辑，提升 TCC 授权自动化水平。
+- [x] 2026-01-25: **定时计划架构增强**：实现在线/离线任务的系统休眠保护逻辑；优化任务排序与冲突检测算法。
+- [x] 2026-01-24: **打包规约与安全对齐**：完善自动化签名脚本与 TCC 权限预触发机制。
+- [x] 2026-01-20: 新增 `LameEncoder`；新增暂停/继续机制；新增录音引擎预备机制。
+- [x] 2026-01-14: 架构重构，移除流处理流水线。
+- [x] 2026-01-13: 实现多音频源架构。
+- [x] 2026-01-12: 初始化架构文档。
