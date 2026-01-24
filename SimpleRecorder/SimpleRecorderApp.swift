@@ -1,6 +1,6 @@
 //
 //  SimpleRecorderApp.swift
-//  极简录音 - Mac 菜单栏录音应用
+//  会议录音 Pro - Mac 菜单栏录音应用
 //
 //  Created by AI Assistant
 //
@@ -36,7 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // 动态获取当前配置的图标
     private func getStatusImage() -> NSImage? {
         let symbolName = AppSettings.shared.iconStyle.symbolName
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "极简录音")
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "会议录音 Pro")
         image?.isTemplate = true
         return image
     }

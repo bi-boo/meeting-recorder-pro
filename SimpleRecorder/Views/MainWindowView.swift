@@ -356,6 +356,20 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("菜单栏").padding(.bottom, 4)
             }
+
+            Section {
+                HStack {
+                    Text("运行日志")
+                    Spacer()
+                    Button("打开日志文件夹") {
+                        let logDir = LogManager.shared.getLogDirectory()
+                        NSWorkspace.shared.open(logDir)
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("日志").padding(.bottom, 4)
+            }
         }
         .formStyle(.grouped)
         .padding(.top, 10)  // 与基础设置保持一致

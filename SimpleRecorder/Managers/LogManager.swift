@@ -1,6 +1,6 @@
 //
 //  LogManager.swift
-//  极简录音 - 日志管理器
+//  会议录音 Pro - 日志管理器
 //
 //  功能：记录应用运行日志到本地文件，便于排查问题
 //
@@ -38,7 +38,7 @@ class LogManager {
         let realHomeDirectory = URL(fileURLWithPath: "/Users/\(NSUserName())")
         let logDir =
             realHomeDirectory
-            .appendingPathComponent("极简录音")
+            .appendingPathComponent("会议录音 Pro")
             .appendingPathComponent("日志")
 
         // 确保目录存在
@@ -50,7 +50,7 @@ class LogManager {
     private var currentLogFile: URL {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
-        let fileName = "\(dateFormatter.string(from: Date())).log"
+        let fileName = "MeetingRecorderPro_\(dateFormatter.string(from: Date())).log"
         return logDirectory.appendingPathComponent(fileName)
     }
 
@@ -61,7 +61,7 @@ class LogManager {
     private var currentFileDate: String = ""
 
     /// 写入队列（串行，确保线程安全）
-    private let writeQueue = DispatchQueue(label: "com.simplerecorder.log", qos: .utility)
+    private let writeQueue = DispatchQueue(label: "com.meetingrecorderpro.log", qos: .utility)
 
     /// 时间戳格式化器
     private let timestampFormatter: DateFormatter = {

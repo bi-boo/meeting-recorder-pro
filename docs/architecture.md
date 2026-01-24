@@ -1,4 +1,4 @@
-# 极简录音 - 技术架构文档
+# 会议录音 Pro - 技术架构文档
 
 ## 系统架构概述
 
@@ -94,7 +94,7 @@
 日志管理器，采用单例模式 (`shared`)。
 
 - **5 级日志**：debug / info / warning / error / critical
-- **文件路径**：`~/极简录音/日志/SimpleRecorder_YYYY-MM-DD.log`
+- **文件路径**：`~/会议录音 Pro/日志/MeetingRecorderPro_YYYY-MM-DD.log`
 - **7 天轮转**：启动时自动清理过期日志
 - **崩溃安全**：使用 `FileHandle.synchronize()` 确保写入
 
@@ -186,3 +186,4 @@ MP3 编码器，封装 LAME 库。
 - [x] 2026-01-21: 新增 `TimerTask` 调度器及提醒模式配置（Remind/AutoStart）
 - [x] 2026-01-24: 完善 `build_dmg.sh` 签名与隔离清理规约，实现符合 macOS 分发标准的工程化打包
 - [x] 2026-01-24: **架构与 PRD 同步增强**，完成文档层级的深度对齐与需求细节详述
+- [x] 2026-01-24: **一致性修复实施**，完成日志命名规约及动态弹窗超时逻辑的代码级对齐。

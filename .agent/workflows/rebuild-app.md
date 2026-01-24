@@ -1,5 +1,5 @@
 ---
-description: 重新构建并启动极简录音 Mac 应用
+description: 重新构建并启动会议录音 Pro Mac 应用
 ---
 # 重新构建并启动应用
 

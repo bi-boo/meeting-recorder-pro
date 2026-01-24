@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 极简录音 打包脚本
+# 会议录音 Pro 打包脚本
 # 功能：清理 -> 构建 -> 签名 -> 生成 DMG -> DMG 签名
 
 set -e
@@ -9,7 +9,7 @@ APP_NAME="SimpleRecorder"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build"
 RELEASE_APP_PATH="${BUILD_DIR}/Release/${APP_NAME}.app"
-DMG_NAME="会议录音Pro_$(date +%Y%m%d).dmg"
+DMG_NAME="MeetingRecorderPro_$(date +%Y%m%d).dmg"
 TEMP_DMG="temp.dmg"
 VOLUME_NAME="会议录音 Pro"
 

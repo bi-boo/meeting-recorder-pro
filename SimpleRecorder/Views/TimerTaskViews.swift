@@ -1,6 +1,6 @@
 //
 //  TimerTaskViews.swift
-//  极简录音 - 定时任务设置视图
+//  会议录音 Pro - 定时任务设置视图
 //
 //  Created by AI Assistant
 //

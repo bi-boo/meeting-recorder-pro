@@ -1,6 +1,6 @@
 //
 //  ReminderWindowController.swift
-//  极简录音 - 定时提醒弹窗控制器
+//  会议录音 Pro - 定时提醒弹窗控制器
 //
 //  Created by AI Assistant
 //
@@ -69,6 +69,17 @@ class ReminderWindowController: NSObject {
         }
 
         self.reminderWindow = window
+
+        // 【PRD 强制要求】按用户设置的提醒时间动态失效
+        let timeoutSeconds = Double(task.reminderMinutes * 60)
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeoutSeconds) {
+            [weak self, weak window] in
+            // 只有当窗口仍然是当前显示的那个窗口时才关闭
+            if let self = self, self.reminderWindow === window {
+                LogManager.shared.info("定时提醒弹窗到达预设提醒时间（\(task.reminderMinutes)min），自动失效")
+                self.dismissReminder()
+            }
+        }
 
         LogManager.shared.info("显示定时提醒弹窗 | 任务: \(task.timeDisplay)")
     }

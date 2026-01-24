@@ -1,3 +1,36 @@
+# [2026-01-24 19:40]
+- **用户需求/反馈**: 全方位品牌更名：将“极简录音”统一更名为“会议录音 Pro”。
+- **技术逻辑变更**: 
+    - **项目配置**: 更新 Xcode 项目文件中的 `CFBundleDisplayName`、`PRODUCT_BUNDLE_IDENTIFIER`（变更为 `com.meetingrecorderpro.app`）及权限描述。
+    - **代码字符串**: 替换 UI 界面显示、注释、以及日志管理类中的应用名称。
+    - **日志系统**: 更新日志存储目录为 `~/会议录音 Pro/日志/`，并修改日志文件名前缀为 `MeetingRecorderPro_`。
+    - **构建脚本**: 更新 `build_dmg.sh` 以生成正确命名的 `.dmg` 文件和卷标。
+- **涉及文件清单**: 
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `SimpleRecorder/Info.plist`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `SimpleRecorder/Managers/LogManager.swift`
+    - `SimpleRecorder/Views/ReminderWindowController.swift`
+    - `SimpleRecorder/Views/TimerTaskViews.swift`
+    - `build_dmg.sh`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/changelog.md`
+- **变更原因**: 根据产品战略调整，确立正式品牌名称，增强会议场景的专业属性定位。
+
+# [2026-01-24 18:58]
+- **用户需求/反馈**: PRD 一致性专项修复（日志命名、弹窗超时、显示优化）。
+- **技术逻辑变更**: 
+    - **日志命名对齐**: 在 `LogManager` 中为文件名增加 `SimpleRecorder_` 前缀，完全闭环 PRD 规范。
+    - **提醒弹窗动态失效**: 在 `ReminderWindowController` 中为提醒弹窗（Remind 模式）增加动态失效定时器，其持续时长与用户设置的“提前提醒时间”保持一致（例如设置提前 5 分钟提醒，则弹窗在 5 分钟后自动消失）。
+    - **高级设置增强**: 在“高级设置”中新增“打开日志文件夹”按钮，提升问题排查的便利性。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/LogManager.swift`
+    - `SimpleRecorder/Views/ReminderWindowController.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `docs/changelog.md`
+- **变更原因**: 确保代码实现与 PRD 需求文档实现 100% 同步，消除工程细节上的歧义。
+
 # [2026-01-24 18:52]
 - **用户需求/反馈**: PRD V6 精修反馈（计时格式 mm:ss、冲突逻辑校验、视觉策略分析、特性文案对齐）。
 - **技术逻辑变更**: 
