@@ -272,10 +272,25 @@ struct TimerTaskEditView: View {
                     Toggle("启用此计划", isOn: $enabled)
                         .tint(.green)
                 }
+
+                // 删除按钮（仅编辑模式显示）
+                if case .edit = mode {
+                    Section {
+                        Button(action: { deleteTask() }) {
+                            HStack {
+                                Spacer()
+                                Text("删除此计划")
+                                    .foregroundColor(.red)
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
             .formStyle(.grouped)
         }
-        .frame(width: 400, height: 500)
+        .frame(width: 400, height: 520)
         .onAppear {
             loadExistingTask()
         }
@@ -323,6 +338,13 @@ struct TimerTaskEditView: View {
             manager.addTask(task)
         }
 
+        dismiss()
+    }
+
+    private func deleteTask() {
+        // 仅在编辑模式下有效
+        guard let task = mode.existingTask else { return }
+        manager.deleteTask(id: task.id)
         dismiss()
     }
 }
