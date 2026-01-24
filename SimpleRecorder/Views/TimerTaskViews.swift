@@ -15,6 +15,33 @@ struct TimerTaskListView: View {
     @State private var showingAddSheet = false
     @State private var editingTask: TimerTask? = nil
 
+    /// 按时间早晚排序的任务列表
+    /// 规则：已启用的在前，按 nextTriggerTime 升序；未启用的在后，按 hour:minute 升序
+    private var sortedTasks: [TimerTask] {
+        manager.tasks.sorted { task1, task2 in
+            // 已启用的优先于未启用的
+            if task1.enabled != task2.enabled {
+                return task1.enabled
+            }
+
+            // 对于已启用的任务，按 nextTriggerTime 排序
+            if task1.enabled {
+                if let time1 = task1.nextTriggerTime, let time2 = task2.nextTriggerTime {
+                    return time1 < time2
+                }
+                // 有触发时间的优先于无触发时间的
+                if task1.nextTriggerTime != nil { return true }
+                if task2.nextTriggerTime != nil { return false }
+            }
+
+            // 按设定时间 (hour:minute) 排序
+            if task1.hour != task2.hour {
+                return task1.hour < task2.hour
+            }
+            return task1.minute < task2.minute
+        }
+    }
+
     var body: some View {
         Form {
             Section {
@@ -35,8 +62,8 @@ struct TimerTaskListView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 30)
                 } else {
-                    // 任务列表
-                    ForEach(manager.tasks) { task in
+                    // 任务列表（按时间早晚排序）
+                    ForEach(sortedTasks) { task in
                         TimerTaskRow(task: task)
                             .contentShape(Rectangle())
                             .onTapGesture {
@@ -87,16 +114,39 @@ struct TimerTaskRow: View {
     let task: TimerTask
     @ObservedObject private var manager = TimerTaskManager.shared
 
+    /// 提醒方式描述
+    private var triggerModeDescription: String {
+        if task.actionType == .autoStart {
+            return "到点自动录音"
+        } else {
+            return "提前 \(task.reminderMinutes) 分钟提醒"
+        }
+    }
+
+    /// 提醒方式标签颜色
+    private var triggerModeColor: Color {
+        task.actionType == .autoStart ? .green : .blue
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // 时间显示
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(task.timeDisplay)
                     .font(.system(size: 20, weight: .medium, design: .monospaced))
                 Text(task.fullDescription)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+
+                // 提醒方式标签
+                Text(triggerModeDescription)
+                    .font(.caption2)
+                    .foregroundColor(triggerModeColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(triggerModeColor.opacity(0.12))
+                    .cornerRadius(4)
             }
 
             Spacer()
