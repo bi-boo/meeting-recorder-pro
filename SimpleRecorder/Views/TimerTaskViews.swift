@@ -25,6 +25,14 @@ struct TimerTaskListView: View {
         }
     }
 
+    /// 最大允许的定时计划数量
+    private let maxTaskCount = 6
+
+    /// 是否已达到上限
+    private var isAtLimit: Bool {
+        manager.tasks.count >= maxTaskCount
+    }
+
     var body: some View {
         Form {
             Section {
@@ -56,20 +64,21 @@ struct TimerTaskListView: View {
                     .onDelete(perform: deleteTasks)
                 }
 
-                // 添加按钮
+                // 添加按钮（达到上限时禁用）
                 Button(action: { showingAddSheet = true }) {
                     HStack {
                         Image(systemName: "plus.circle.fill")
-                            .foregroundColor(.green)
-                        Text("添加定时计划")
+                            .foregroundColor(isAtLimit ? .secondary : .green)
+                        Text(isAtLimit ? "已达上限（最多\(maxTaskCount)个）" : "添加定时计划")
                     }
                 }
                 .buttonStyle(.plain)
+                .disabled(isAtLimit)
             } header: {
                 Text("定时录音计划")
                     .padding(.bottom, 4)
             } footer: {
-                Label("应用需保持运行状态才能触发", systemImage: "info.circle")
+                Text("系统唤醒且应用运行时，计划才能启动")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -202,6 +211,7 @@ struct TimerTaskEditView: View {
     @State private var repeatType: RepeatType = .weekly
     @State private var actionType: TimerActionType = .remind
     @State private var reminderMinutes: Int = 2
+    @State private var showConflictAlert: Bool = false
 
     // 1分钟粒度的分钟选项（方便测试）
     private let minuteOptions = stride(from: 0, to: 60, by: 1).map { $0 }
@@ -328,6 +338,11 @@ struct TimerTaskEditView: View {
         .onAppear {
             loadExistingTask()
         }
+        .alert("时间冲突", isPresented: $showConflictAlert) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("该时间点已有定时计划，请选择其他时间")
+        }
     }
 
     private func loadExistingTask() {
@@ -343,6 +358,17 @@ struct TimerTaskEditView: View {
     }
 
     private func saveTask() {
+        // 检查时间冲突（相同时间点不允许重复）
+        let existingTaskID = mode.existingTask?.id
+        let hasConflict = manager.tasks.contains { task in
+            task.id != existingTaskID && task.hour == hour && task.minute == minute
+        }
+
+        if hasConflict {
+            showConflictAlert = true
+            return
+        }
+
         // 构建任务
         var task: TimerTask
 
