@@ -33,18 +33,10 @@ struct AboutView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                // App Logo
-                Image("BrandLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 80, height: 80)
-                    .cornerRadius(16)
-                    .padding(.top, 60)
-
                 // 应用名称
                 Text("会议录音 Pro")
                     .font(.system(size: 32, weight: .semibold))  // 稍微放大标题
-                    .padding(.top, 20)
+                    .padding(.top, 60)  // 增加顶部边距填补 Logo 消失后的空白
 
                 Text("专为办公、演讲、会议场景设计")
                     .font(.system(size: 15))

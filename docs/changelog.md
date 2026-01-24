@@ -1,3 +1,14 @@
+# [2026-01-25 00:38]
+- **用户需求/反馈**: 定时计划循环类型默认为“不循环”，触发方式默认为“自动录音”；“关于我们”页面移除产品 Logo。
+- **技术逻辑变更**: 
+    - 修改 `TimerTaskEditView` 中 `@State` 初始值：`repeatType` 设为 `.none`，`actionType` 设为 `.autoStart`。
+    - 修改 `AboutView`：移除 `Image("BrandLogo")` 相关布局，调优标题顶部边距。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Views/TimerTaskViews.swift`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `docs/changelog.md`
+- **变更原因**: 优化用户添加计划的流程体验，使初始选项更符合常规预期；精简关于页面布局。
+
 # [2026-01-25 00:21]
 - **用户需求/反馈**: 把"开机自动启动"移到定时计划页面，并增加"录音时禁止系统睡眠"和"有计划时禁止系统睡眠"两个开关，三个开关默认都开启。
 - **技术逻辑变更**: 

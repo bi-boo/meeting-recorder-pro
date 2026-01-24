@@ -232,8 +232,8 @@ struct TimerTaskEditView: View {
     @State private var selectedDays: Set<Int> = [1, 2, 3, 4, 5]  // 默认工作日
     @State private var hour: Int = 9
     @State private var minute: Int = 0
-    @State private var repeatType: RepeatType = .weekly
-    @State private var actionType: TimerActionType = .remind
+    @State private var repeatType: RepeatType = .none
+    @State private var actionType: TimerActionType = .autoStart
     @State private var reminderMinutes: Int = 2
     @State private var showConflictAlert: Bool = false
 
