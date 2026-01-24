@@ -12,28 +12,6 @@ import Foundation
 import IOKit.pwr_mgt
 import ScreenCaptureKit
 
-// MARK: - AVAudioPCMBuffer 扩展 (深拷贝支持)
-extension AVAudioPCMBuffer {
-    func deepCopy() -> AVAudioPCMBuffer? {
-        guard let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else {
-            return nil
-        }
-        copy.frameLength = frameLength
-        if let srcChannels = self.floatChannelData,
-            let dstChannels = copy.floatChannelData
-        {
-            let channels = min(Int(self.format.channelCount), Int(copy.format.channelCount))
-            for i in 0..<channels {
-                let s = srcChannels[i]
-                let d = dstChannels[i]
-                let framesToCopy = min(self.frameLength, copy.frameCapacity)
-                memcpy(d, s, Int(framesToCopy) * MemoryLayout<Float>.size)
-            }
-        }
-        return copy
-    }
-}
-
 class AudioRecorderManager: NSObject, ObservableObject {
     static let shared = AudioRecorderManager()
 

@@ -41,12 +41,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return image
     }
 
-    private func getPausedImage() -> NSImage? {
-        let image = NSImage(systemSymbolName: "pause.circle.fill", accessibilityDescription: "已暂停")
-        image?.isTemplate = true
-        return image
-    }
-
     // 保持窗口引用，防止被释放
     private var mainWindow: NSWindow?
 

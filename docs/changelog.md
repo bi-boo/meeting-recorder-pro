@@ -1,4 +1,31 @@
+# [2026-01-24 20:01]
+- **用户需求/反馈**: 检查项目里没用的文件和代码并进行清理。
+- **技术逻辑变更**: 
+    - **目录清理**: 删除了 `auc_python` 冗余目录及内部 Python 脚本。
+    - **代码清理**: 移除了 `SimpleRecorderApp` 中未调用的 `getPausedImage()` 函数。
+    - **逻辑优化**: 删除了 `AudioRecorderManager` 中冗余的 `AVAudioPCMBuffer.deepCopy` 扩展。
+- **涉及文件清单**: 
+    - `auc_python/` [DELETE]
+    - `SimpleRecorder/Services/` [DELETE]
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+- **变更原因**: 提高项目代码库的整洁度，移除历史遗留的废弃逻辑。
+
+# [2026-01-24 19:46]
+- **用户需求/反馈**: 将全局规则 `GEMINI.md` 拆分为 3 个当前项目空间的 `.cursor/rules` 规则文件。
+- **技术逻辑变更**: 
+    - 创建了 `.cursor/rules` 目录。
+    - 按照职能拆分为 `language_and_execution.mdc`、`docs_and_privacy.mdc` 和 `mac_packaging_and_signing.mdc`。
+    - 使用 `.mdc` 格式以契合 Cursor/Antigravity 的结构化规则系统。
+- **涉及文件清单**: 
+    - `.agent/rules/语言与执行规范.md` [NEW]
+    - `.agent/rules/文档与隐私规范.md` [NEW]
+    - `.agent/rules/Mac签名与发布规范.md` [NEW]
+    - `docs/changelog.md`
+- **变更原因**: 提高 AI 助理对项目规则理解的精确度，实现规则的结构化管理。
+
 # [2026-01-24 19:40]
+
 - **用户需求/反馈**: 全方位品牌更名：将“极简录音”统一更名为“会议录音 Pro”。
 - **技术逻辑变更**: 
     - **项目配置**: 更新 Xcode 项目文件中的 `CFBundleDisplayName`、`PRODUCT_BUNDLE_IDENTIFIER`（变更为 `com.meetingrecorderpro.app`）及权限描述。
