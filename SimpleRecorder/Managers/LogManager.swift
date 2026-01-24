@@ -210,11 +210,3 @@ class LogManager {
         }
     }
 }
-
-// MARK: - 便捷全局函数
-func Log(
-    _ level: LogLevel, _ message: String, file: String = #file, function: String = #function,
-    line: Int = #line
-) {
-    LogManager.shared.log(level, message, file: file, function: function, line: line)
-}

@@ -1,4 +1,3 @@
-// MARK: - Shortcut Recorder View
 import Carbon
 import SwiftUI
 
@@ -121,10 +120,11 @@ struct BasicSettingsView: View {
                         ShortcutRecorderView(
                             isRecording: $isRecordingShortcut,
                             currentHotKey: hotKeyManager.recordHotKey,
-                            conflictKey: hotKeyManager.pauseHotKey
-                        ) { config in
-                            hotKeyManager.saveRecordHotKey(config)
-                        }
+                            conflictKey: hotKeyManager.pauseHotKey,
+                            onHotKeyRecorded: { config in
+                                hotKeyManager.saveRecordHotKey(config)
+                            }
+                        )
                     }
 
                     HStack {
@@ -133,10 +133,11 @@ struct BasicSettingsView: View {
                         ShortcutRecorderView(
                             isRecording: $isRecordingPauseShortcut,
                             currentHotKey: hotKeyManager.pauseHotKey,
-                            conflictKey: hotKeyManager.recordHotKey
-                        ) { config in
-                            hotKeyManager.savePauseHotKey(config)
-                        }
+                            conflictKey: hotKeyManager.recordHotKey,
+                            onHotKeyRecorded: { config in
+                                hotKeyManager.savePauseHotKey(config)
+                            }
+                        )
                     }
                 }
                 .padding(.vertical, 4)
@@ -152,7 +153,7 @@ struct BasicSettingsView: View {
                         }
                     }
                     .disabled(recordingManager.isRecording)
-                    .onChange(of: settings.audioSource) { newValue in
+                    .onChange(of: settings.audioSource) { _, newValue in
                         if newValue != .microphone {
                             AppSettings.requestScreenCapturePermission()
                             if !AppSettings.hasScreenCapturePermission {
@@ -296,8 +297,7 @@ struct AdvancedSettingsView: View {
 
                             Picker("", selection: $settings.maxDurationMinutes) {
                                 ForEach([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], id: \.self)
-                                {
-                                    minute in
+                                { minute in
                                     Text("\(minute) 分钟").tag(minute)
                                 }
                             }
