@@ -418,16 +418,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // 根据设置决定是否显示录制时长
             if AppSettings.shared.showDurationWhenRecording {
                 let elapsed = Int(recordingManager.recordingDuration)
-                let hours = elapsed / 3600
-                let minutes = (elapsed % 3600) / 60
+                let totalMinutes = elapsed / 60
                 let seconds = elapsed % 60
 
-                let timeString: String
-                if hours > 0 {
-                    timeString = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-                } else {
-                    timeString = String(format: "%02d:%02d", minutes, seconds)
-                }
+                let timeString = String(format: "%02d:%02d", totalMinutes, seconds)
 
                 // 【性能优化】如果时间字符串没变，不做任何 UI 操作
                 guard timeString != lastTimeString else { return }

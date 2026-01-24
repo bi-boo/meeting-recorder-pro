@@ -71,7 +71,7 @@ struct AboutView: View {
                 }
                 .padding(.horizontal, 45)  // 增加水平间距，使行宽适中
                 .padding(.top, 45)
-                .padding(.bottom, 40)
+                .padding(.bottom, 60)
             }
             .frame(maxWidth: .infinity)
         }

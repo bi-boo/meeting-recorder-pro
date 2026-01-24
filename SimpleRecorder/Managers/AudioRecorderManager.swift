@@ -106,8 +106,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private let warningInterval: TimeInterval = 10 * 60  // 每 10 分钟提醒
     private var lastWarningTime: TimeInterval = 0
 
-    // 最小磁盘空间要求（500MB）
-    private let minimumDiskSpace: Int64 = 500 * 1024 * 1024
+    // 最小磁盘空间要求（100MB，足以保证 1 小时录制）
+    private let minimumDiskSpace: Int64 = 100 * 1024 * 1024
 
     // 崩溃恢复相关的 UserDefaults 键
     private let recordingInProgressKey = "recording_in_progress"
@@ -1522,7 +1522,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = "磁盘空间不足"
-            alert.informativeText = "请至少保留 500MB 可用空间。"
+            alert.informativeText = "请至少保留 100MB 可用空间。"
             alert.alertStyle = .critical
             alert.addButton(withTitle: "确定")
             alert.runModal()
