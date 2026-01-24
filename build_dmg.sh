@@ -19,6 +19,7 @@ rm -f "${PROJECT_DIR}"/*.dmg
 
 echo "--- [2/5] 执行 Xcode 构建 (Release) ---"
 cd "${PROJECT_DIR}"
+set -o pipefail
 xcodebuild -project "${APP_NAME}.xcodeproj" \
            -scheme "${APP_NAME}" \
            -configuration Release \
@@ -26,7 +27,9 @@ xcodebuild -project "${APP_NAME}.xcodeproj" \
            SYMROOT="${BUILD_DIR}" \
            CODE_SIGNING_ALLOWED=NO \
            CODE_SIGNING_REQUIRED=NO \
+           CODE_SIGN_IDENTITY="" \
            build | grep -E "(BUILD|error:|warning:)"
+set +o pipefail
 
 echo "--- [3/5] 代码签名 ---"
 

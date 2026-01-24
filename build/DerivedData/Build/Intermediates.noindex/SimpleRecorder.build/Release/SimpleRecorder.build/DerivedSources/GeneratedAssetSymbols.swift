@@ -34,6 +34,9 @@ extension ColorResource {
 @available(iOS 11.0, macOS 10.7, tvOS 11.0, *)
 extension ImageResource {
 
+    /// The "BrandLogo" asset catalog image resource.
+    static let brandLogo = ImageResource(name: "BrandLogo", bundle: resourceBundle)
+
 }
 
 // MARK: - Color Symbol Extensions -
@@ -97,6 +100,15 @@ extension SwiftUI.ShapeStyle where Self == SwiftUI.Color {
 @available(macCatalyst, unavailable)
 extension AppKit.NSImage {
 
+    /// The "BrandLogo" asset catalog image.
+    static var brandLogo: AppKit.NSImage {
+#if !targetEnvironment(macCatalyst)
+        .init(resource: .brandLogo)
+#else
+        .init()
+#endif
+    }
+
 }
 #endif
 
@@ -104,6 +116,15 @@ extension AppKit.NSImage {
 @available(iOS 11.0, tvOS 11.0, *)
 @available(watchOS, unavailable)
 extension UIKit.UIImage {
+
+    /// The "BrandLogo" asset catalog image.
+    static var brandLogo: UIKit.UIImage {
+#if !os(watchOS)
+        .init(resource: .brandLogo)
+#else
+        .init()
+#endif
+    }
 
 }
 #endif
@@ -225,6 +246,26 @@ extension ImageResource {
     }
 
 }
+
+#if canImport(AppKit)
+@available(macOS 10.7, *)
+@available(macCatalyst, unavailable)
+extension AppKit.NSImage {
+
+    private convenience init?(thinnableResource: ImageResource?) {
+#if !targetEnvironment(macCatalyst)
+        if let resource = thinnableResource {
+            self.init(resource: resource)
+        } else {
+            return nil
+        }
+#else
+        return nil
+#endif
+    }
+
+}
+#endif
 
 #if canImport(UIKit)
 @available(iOS 11.0, tvOS 11.0, *)

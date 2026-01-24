@@ -16,7 +16,18 @@
 		</dict>
 	</array>
 	<key>images</key>
-	<array/>
+	<array>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/baozheng/代码文件/MAC 端录音软件/SimpleRecorder/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameBrandLogo</string>
+			<key>relativePath</key>
+			<string>./BrandLogo.imageset</string>
+			<key>swiftSymbol</key>
+			<string>brandLogo</string>
+		</dict>
+	</array>
 	<key>symbols</key>
 	<array/>
 </dict>

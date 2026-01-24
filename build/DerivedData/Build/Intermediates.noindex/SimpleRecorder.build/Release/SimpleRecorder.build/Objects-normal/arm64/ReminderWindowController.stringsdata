@@ -7,7 +7,7 @@
         "key": "是否启动录音",
         "location": {
           "startingColumn": 18,
-          "startingLine": 173
+          "startingLine": 184
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "计划时间 %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 177
+          "startingLine": 188
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "忽略",
         "location": {
           "startingColumn": 26,
-          "startingLine": 184
+          "startingLine": 195
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "开始录音",
         "location": {
           "startingColumn": 26,
-          "startingLine": 191
+          "startingLine": 202
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "录音已开始",
         "location": {
           "startingColumn": 18,
-          "startingLine": 222
+          "startingLine": 233
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "计划时间 %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 226
+          "startingLine": 237
         }
       }
     ]

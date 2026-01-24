@@ -24,6 +24,25 @@
     - `docs/changelog.md`
 - **变更原因**: 提高 AI 助理对项目规则理解的精确度，实现规则的结构化管理。
 
+# [2026-01-24 22:55]
+- **用户需求/反馈**: 将 logo.jpeg 设置为产品的 logo。
+- **技术逻辑变更**: 
+    - 使用 `sips` 生成适配 macOS 的全尺寸 `AppIcon` 系统资源。
+    - 创建 `BrandLogo.imageset` 用于 UI 展示。
+    - 在 `AboutView` 界面嵌入 `BrandLogo` 图片展示。
+    - **编译修复**：修复 `AboutView` 语法错误并发起打包。
+    - **编译修复**：在 `AudioRecorderManager.swift` 中补全缺失的 `AVAudioPCMBuffer` 深拷贝 (`deepCopy`) 扩展。
+    - **工程化优化**：优化 `build_dmg.sh` 脚本，引入 `pipefail` 并显式禁用 Xcode 内建签名，支持 Ad-hoc 编译环境。
+    - **配置优化**：移除项目文件 (`project.pbxproj`) 中的硬编码 Team ID，确保无证书环境下亦可顺利编译。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json`
+    - `SimpleRecorder/Resources/Assets.xcassets/BrandLogo.imageset/`
+    - `SimpleRecorder/Views/MainWindowView.swift`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/changelog.md`
+- **变更原因**: 建立统一的品牌视觉标识，提升应用专业感。
+
 # [2026-01-24 19:40]
 
 - **用户需求/反馈**: 全方位品牌更名：将“极简录音”统一更名为“会议录音 Pro”。
@@ -31,7 +50,7 @@
     - **项目配置**: 更新 Xcode 项目文件中的 `CFBundleDisplayName`、`PRODUCT_BUNDLE_IDENTIFIER`（变更为 `com.meetingrecorderpro.app`）及权限描述。
     - **代码字符串**: 替换 UI 界面显示、注释、以及日志管理类中的应用名称。
     - **日志系统**: 更新日志存储目录为 `~/会议录音 Pro/日志/`，并修改日志文件名前缀为 `MeetingRecorderPro_`。
-    - **构建脚本**: 更新 `build_dmg.sh` 以生成正确命名的 `.dmg` 文件和卷标。
+    - **构建脚本**: 更新 `build_dmg.sh` 以生成正确命名 `.dmg` 文件和卷标。
 - **涉及文件清单**: 
     - `SimpleRecorder.xcodeproj/project.pbxproj`
     - `SimpleRecorder/Info.plist`

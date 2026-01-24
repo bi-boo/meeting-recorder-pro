@@ -42,6 +42,7 @@
     "overrides" : {
       "commandLine" : {
         "table" : {
+          "CODE_SIGN_IDENTITY" : "",
           "CODE_SIGNING_ALLOWED" : "NO",
           "CODE_SIGNING_REQUIRED" : "NO",
           "SYMROOT" : "/Users/baozheng/代码文件/MAC 端录音软件/build"

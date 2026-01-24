@@ -7,9 +7,12 @@
 #endif
 
 /// The resource bundle ID.
-static NSString * const ACBundleID AC_SWIFT_PRIVATE = @"com.simplerecorder.app";
+static NSString * const ACBundleID AC_SWIFT_PRIVATE = @"com.meetingrecorderpro.app";
 
 /// The "AccentColor" asset catalog color resource.
 static NSString * const ACColorNameAccentColor AC_SWIFT_PRIVATE = @"AccentColor";
+
+/// The "BrandLogo" asset catalog image resource.
+static NSString * const ACImageNameBrandLogo AC_SWIFT_PRIVATE = @"BrandLogo";
 
 #undef AC_SWIFT_PRIVATE

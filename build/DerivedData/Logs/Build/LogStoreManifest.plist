@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>9C684A6F-51A7-4136-8DB9-294696C413C3</key>
+		<key>016873E3-A1DA-4C33-BE55-8B21C6B72A34</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>9C684A6F-51A7-4136-8DB9-294696C413C3.xcactivitylog</string>
+			<string>016873E3-A1DA-4C33-BE55-8B21C6B72A34.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -40,13 +40,13 @@
 			<key>signature</key>
 			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Release</string>
 			<key>timeStartedRecording</key>
-			<real>790936559.05857003</real>
+			<real>790959390.76121104</real>
 			<key>timeStoppedRecording</key>
-			<real>790936593.01541305</real>
+			<real>790959416.16530597</real>
 			<key>title</key>
 			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Release</string>
 			<key>uniqueIdentifier</key>
-			<string>9C684A6F-51A7-4136-8DB9-294696C413C3</string>
+			<string>016873E3-A1DA-4C33-BE55-8B21C6B72A34</string>
 		</dict>
 	</dict>
 </dict>

@@ -153,9 +153,10 @@ MP3 编码器，封装 LAME 库。
 
 # H1 视图层
 
-## H2 MainWindowView / GeneralSettingsView
+## H2 MainWindowView / AboutView
 设置窗口的主视图，使用 SwiftUI `Form` 构建。
 
+- **关于我们**：展示品牌 Logo (`BrandLogo`)、应用名称及核心特性。
 - **快捷键设置**：自定义 `ShortcutRecorderView` 组件捕获按键
 - **录音选项**：音频源选择器、输入设备选择器、时长上限选择器
 - **存储位置**：路径显示、在 Finder 中打开、更改路径按钮
@@ -174,6 +175,7 @@ MP3 编码器，封装 LAME 库。
 - **Carbon 热键 API**：虽然是遗留 API，但在 macOS 上仍是注册系统级全局热键的唯一可靠方式
 - **独立混音器节点**：通过不连接输出的 `recordingMixer`，实现无监听录制
 - **离线签名规约**：通过手动 codesign 和隔离属性清理，彻底解决分发后的权限与运行故障
+- **屏显权限预触发方案**：放弃单纯依赖 `CGRequestScreenCaptureAccess` 弹窗，引入 `SCShareableContent` 获取请求作为“预热”，强制系统将应用冷启动记录在 TCC 权限列表中，极大优化了用户的授权体验。
 
 ## 当前状态
 - [x] 2026-01-12: 初始化架构文档
@@ -187,3 +189,4 @@ MP3 编码器，封装 LAME 库。
 - [x] 2026-01-24: 完善 `build_dmg.sh` 签名与隔离清理规约，实现符合 macOS 分发标准的工程化打包
 - [x] 2026-01-24: **架构与 PRD 同步增强**，完成文档层级的深度对齐与需求细节详述
 - [x] 2026-01-24: **一致性修复实施**，完成日志命名规约及动态弹窗超时逻辑的代码级对齐。
+- [x] 2026-01-24: **权限申请流程优化**，在 `AppSettings` 中集成 `ScreenCaptureKit` 预触发逻辑，提升 TCC 授权自动化水平。

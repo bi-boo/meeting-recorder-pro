@@ -34,15 +34,23 @@ struct AboutView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
+                // App Logo
+                Image("BrandLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 80, height: 80)
+                    .cornerRadius(16)
+                    .padding(.top, 60)
+
                 // 应用名称
                 Text("会议录音 Pro")
                     .font(.system(size: 32, weight: .semibold))  // 稍微放大标题
-                    .padding(.top, 60)  // 纯文字模式下增加顶部留白
+                    .padding(.top, 20)
 
                 Text("专为办公、演讲、会议场景设计")
                     .font(.system(size: 15))
                     .foregroundColor(.secondary)
-                    .padding(.top, 10)
+                    .padding(.top, 8)
 
                 // 特性列表
                 VStack(alignment: .leading, spacing: 28) {  // 增加条目间的间距

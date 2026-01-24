@@ -1574,3 +1574,17 @@ private class SystemAudioStreamOutput: NSObject, SCStreamOutput {
         onSampleBuffer(sampleBuffer)
     }
 }
+
+// MARK: - AVAudioPCMBuffer 扩展
+extension AVAudioPCMBuffer {
+    func deepCopy() -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: self.format, frameCapacity: self.frameCapacity) else { return nil }
+        copy.frameLength = self.frameLength
+        for i in 0..<Int(self.format.channelCount) {
+            if let src = self.floatChannelData?[i], let dst = copy.floatChannelData?[i] {
+                memcpy(dst, src, Int(self.frameLength) * MemoryLayout<Float>.size)
+            }
+        }
+        return copy
+    }
+}

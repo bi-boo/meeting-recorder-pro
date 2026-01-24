@@ -2,6 +2,7 @@ import AVFoundation
 import AppKit
 import CoreAudio
 import Foundation
+import ScreenCaptureKit
 import ServiceManagement
 
 // MARK: - 音频输入设备模型
@@ -192,9 +193,30 @@ class AppSettings: ObservableObject {
 
     /// 触发系统原生权限申请弹窗 (用于确保应用出现在系统权限列表中)
     static func requestScreenCapturePermission() {
-        if #available(macOS 10.15, *) {
-            // 调用此 API 如果未授权会触发系统弹窗，并将应用加入列表
+        if #available(macOS 14.2, *) {
+            // macOS 14.2+ 推荐先尝试触发内容获取
+            triggerScreenCapturePermissionCheck()
             CGRequestScreenCaptureAccess()
+        } else if #available(macOS 10.15, *) {
+            // 旧版本直接调用此 API
+            CGRequestScreenCaptureAccess()
+        }
+    }
+
+    /// 【核心优化】主动触发 ScreenCaptureKit 的资源获取
+    /// 这会强制系统发现应用需要“屏幕录制”权限，从而将其加入权限列表，而不仅仅是弹窗
+    static func triggerScreenCapturePermissionCheck() {
+        if #available(macOS 13.0, *) {
+            // 获取可共享内容是一个轻量操作，但在未授权时会触发系统记录该应用
+            SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) {
+                _, error in
+                if let error = error {
+                    LogManager.shared.debug(
+                        "ScreenCaptureKit 权限预检触发结果: \(error.localizedDescription)")
+                } else {
+                    LogManager.shared.debug("ScreenCaptureKit 权限预检触发成功")
+                }
+            }
         }
     }
 

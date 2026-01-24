@@ -100,6 +100,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 通过实际访问 AVAudioEngine 的 inputNode 来强制触发系统权限检查
         triggerMicrophonePermissionCheck()
 
+        // 【新增优化】应用启动时预触发屏幕录制（系统音频）权限
+        // 确保应用能自动出现在系统设置的权限列表中，而不需要用户手动点击“+”号添加
+        AppSettings.triggerScreenCapturePermissionCheck()
+
         // 启动定时任务调度器
         TimerTaskManager.shared.startScheduler()
 
