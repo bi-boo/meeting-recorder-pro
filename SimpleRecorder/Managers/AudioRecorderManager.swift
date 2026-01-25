@@ -74,6 +74,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var systemAudioStream: SCStream?
     private var systemAudioOutput: SystemAudioStreamOutput?
 
+    // 【新增】麦克风设备激活相关（用于激活 iPhone 连续互通设备）
+    private var deviceActivationSession: AVCaptureSession?
+    private var deviceActivationInput: AVCaptureDeviceInput?
+
     // 用于混音的 Mixer Node
     private var mixerNode: AVAudioMixerNode?
     private var recordingMixer: AVAudioMixerNode!
@@ -868,13 +872,62 @@ class AudioRecorderManager: NSObject, ObservableObject {
     }
 
     /// 根据 AppSettings 切换硬件输入设备
-    /// 如果切换失败，仅记录警告，系统将使用默认设备
+    /// 使用 AVCaptureSession 激活设备，支持 iPhone 连续互通麦克风
     private func updateInputDevice() throws {
         let selectedID = AppSettings.shared.selectedDeviceID
+
+        // 先清理之前的激活会话
+        stopDeviceActivationSession()
+
         guard selectedID != "default" else { return }
 
-        // 获取要切换的 CoreAudio AudioDeviceID
-        var targetDeviceID: AudioDeviceID = 0
+        // 通过 AVCaptureDevice 查找目标设备
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInMicrophone, .externalUnknown],
+            mediaType: .audio,
+            position: .unspecified
+        )
+
+        guard
+            let targetDevice = discoverySession.devices.first(where: { $0.uniqueID == selectedID })
+        else {
+            LogManager.shared.warning("未找到匹配的麦克风设备 | 请求的设备ID: \(selectedID)，将使用默认设备")
+            return
+        }
+
+        LogManager.shared.info("正在激活麦克风设备 | 名称: \(targetDevice.localizedName), ID: \(selectedID)")
+
+        // 创建 AVCaptureSession 来激活设备
+        // 这对于 iPhone 连续互通设备特别重要，会触发 iPhone 进入麦克风模式
+        do {
+            let session = AVCaptureSession()
+            let input = try AVCaptureDeviceInput(device: targetDevice)
+
+            if session.canAddInput(input) {
+                session.addInput(input)
+                session.startRunning()
+
+                // 保存引用，以便录音结束时清理
+                deviceActivationSession = session
+                deviceActivationInput = input
+
+                LogManager.shared.info("设备激活成功 | 名称: \(targetDevice.localizedName)")
+
+                // 【关键】设置系统默认输入设备
+                setDefaultInputDevice(deviceUID: selectedID)
+
+                // 重新创建 AVAudioEngine 以使用新设备
+                audioEngine = AVAudioEngine()
+            } else {
+                LogManager.shared.warning("无法添加设备输入 | 名称: \(targetDevice.localizedName)，将使用默认设备")
+            }
+        } catch {
+            LogManager.shared.warning("激活设备失败 | 错误: \(error.localizedDescription)，将使用默认设备")
+        }
+    }
+
+    /// 设置系统默认输入设备
+    private func setDefaultInputDevice(deviceUID: String) {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -900,44 +953,37 @@ class AudioRecorderManager: NSObject, ObservableObject {
             var uidSize = UInt32(MemoryLayout<CFString?>.size)
             AudioObjectGetPropertyData(id, &uidAddress, 0, nil, &uidSize, &uid)
 
-            if let uidString = uid as String?, uidString == selectedID {
-                targetDeviceID = id
+            if let uidString = uid as String?, uidString == deviceUID {
+                var defaultInputAddress = AudioObjectPropertyAddress(
+                    mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain
+                )
+
+                var mutableDeviceID = id
+                AudioObjectSetPropertyData(
+                    AudioObjectID(kAudioObjectSystemObject),
+                    &defaultInputAddress,
+                    0,
+                    nil,
+                    UInt32(MemoryLayout<AudioDeviceID>.size),
+                    &mutableDeviceID
+                )
                 break
             }
         }
+    }
 
-        guard targetDeviceID != 0 else {
-            LogManager.shared.warning("未找到匹配的麦克风设备 | 请求的设备ID: \(selectedID)，将使用默认设备")
-            return
+    /// 停止设备激活会话
+    private func stopDeviceActivationSession() {
+        if let session = deviceActivationSession {
+            session.stopRunning()
+            if let input = deviceActivationInput {
+                session.removeInput(input)
+            }
         }
-
-        // 【关键修复】设置系统级默认输入设备，而不是通过 AudioUnit
-        // 这种方式更可靠，新创建的 AVAudioEngine 会自动使用这个设备
-        var defaultInputAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var mutableDeviceID = targetDeviceID
-        let status = AudioObjectSetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &defaultInputAddress,
-            0,
-            nil,
-            UInt32(MemoryLayout<AudioDeviceID>.size),
-            &mutableDeviceID
-        )
-
-        if status != noErr {
-            LogManager.shared.warning(
-                "设置默认输入设备失败 | 设备ID: \(targetDeviceID), 状态码: \(status)，将使用当前默认设备")
-        } else {
-            LogManager.shared.info("已设置默认输入设备 | 设备ID: \(targetDeviceID)")
-
-            // 【关键】重新创建 AVAudioEngine 实例以使用新设备
-            audioEngine = AVAudioEngine()
-        }
+        deviceActivationSession = nil
+        deviceActivationInput = nil
     }
 
     // MARK: - 系统音频采集启动
@@ -1605,6 +1651,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
         systemAudioQueueLock.lock()
         systemAudioBufferQueue.removeAll()
         systemAudioQueueLock.unlock()
+
+        // 6. 清理设备激活会话（用于 iPhone 连续互通等设备）
+        stopDeviceActivationSession()
 
         print("🧹 音频采集资源已清理并重置引擎")
     }

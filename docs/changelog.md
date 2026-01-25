@@ -1,3 +1,15 @@
+# [2026-01-25 15:55]
+- **用户需求/反馈**: 1) 选择 MacBook Pro 麦克风时无法录音；2) iPhone 连续互通麦克风设备选择后没有反应，需要激活。
+- **技术逻辑变更**: 
+    - **AVCaptureSession 激活机制**：重写 `updateInputDevice()` 方法，使用 `AVCaptureSession` 配合 `AVCaptureDeviceInput` 激活麦克风设备。这种方式会触发 iPhone 连续互通设备进入麦克风模式。
+    - **辅助方法**：新增 `setDefaultInputDevice()` 设置系统默认输入设备，`stopDeviceActivationSession()` 清理激活会话。
+    - **资源清理**：在 `cleanupAudioCapture()` 中添加设备激活会话的清理逻辑。
+    - **成员变量**：新增 `deviceActivationSession` 和 `deviceActivationInput` 用于保持设备激活状态。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 使用 AVCaptureSession 激活设备是 macOS 官方推荐的方式，可以正确激活 iPhone 连续互通麦克风等需要特殊处理的设备。
+
 # [2026-01-25 15:39]
 - **用户需求/反馈**: 选择 MacBook Pro 麦克风设备时无法开启录音。
 - **技术逻辑变更**: 
