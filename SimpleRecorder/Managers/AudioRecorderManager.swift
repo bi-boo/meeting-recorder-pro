@@ -685,27 +685,15 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // MARK: - 仅麦克风录音配置
     private func setupMicrophoneOnlyRecording() throws {
-        // 1. 设置硬件输入设备
+        // 1. 设置硬件输入设备（如果选择了特定设备）
         try updateInputDevice()
 
-        // 2. 【关键】获取输入节点的硬件格式
-        // 必须在连接之前获取，且需要通过 inputNode 来触发格式初始化
+        // 2. 获取输入节点的硬件格式
         let inputNode = audioEngine.inputNode
-
-        // 触发 inputNode 初始化以获取正确的硬件格式
-        // 在某些情况下，reset() 后需要重新访问 inputNode 来刷新格式
         let hwFormat = inputNode.inputFormat(forBus: 0)
-        print("🎤 硬件输入格式: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch")
 
-        // 使用硬件的采样率，确保格式匹配
-        let inputFormat: AVAudioFormat
-        if hwFormat.sampleRate > 0 && hwFormat.channelCount > 0 {
-            // 使用硬件的实际格式
-            inputFormat = hwFormat
-        } else {
-            // 回退到默认格式
-            inputFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
-        }
+        LogManager.shared.info(
+            "硬件输入格式 | 采样率: \(hwFormat.sampleRate)Hz, 声道: \(hwFormat.channelCount)ch")
 
         // 3. 设置录音混音器
         setupRecordingMixer()
@@ -880,21 +868,13 @@ class AudioRecorderManager: NSObject, ObservableObject {
     }
 
     /// 根据 AppSettings 切换硬件输入设备
+    /// 如果切换失败，仅记录警告，系统将使用默认设备
     private func updateInputDevice() throws {
         let selectedID = AppSettings.shared.selectedDeviceID
         guard selectedID != "default" else { return }
 
-        let inputNode = audioEngine.inputNode
-        guard let audioUnit = inputNode.audioUnit else {
-            print("⚠️ 无法获取 inputNode 的 AUAudioUnit")
-            return
-        }
-
-        // 获取 CoreAudio 的 AudioDeviceID
-        // 注意：在 macOS 上，AVCaptureDevice.uniqueID 与 CoreAudio Device UID 是一致的
-        // 需要使用 AudioHardware API 来查找对应的渲染设备 ID
-
-        var deviceID: AudioDeviceID = 0
+        // 获取要切换的 CoreAudio AudioDeviceID
+        var targetDeviceID: AudioDeviceID = 0
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -921,28 +901,42 @@ class AudioRecorderManager: NSObject, ObservableObject {
             AudioObjectGetPropertyData(id, &uidAddress, 0, nil, &uidSize, &uid)
 
             if let uidString = uid as String?, uidString == selectedID {
-                deviceID = id
+                targetDeviceID = id
                 break
             }
         }
 
-        if deviceID != 0 {
-            let status = AudioUnitSetProperty(
-                audioUnit,
-                kAudioOutputUnitProperty_CurrentDevice,
-                kAudioUnitScope_Global,
-                0,
-                &deviceID,
-                UInt32(MemoryLayout<AudioDeviceID>.size)
-            )
+        guard targetDeviceID != 0 else {
+            LogManager.shared.warning("未找到匹配的麦克风设备 | 请求的设备ID: \(selectedID)，将使用默认设备")
+            return
+        }
 
-            if status != noErr {
-                print("❌ 切换输入设备失败 (Status: \(status))")
-            } else {
-                print("✅ 已切换输入设备至 ID: \(deviceID)")
-            }
+        // 【关键修复】设置系统级默认输入设备，而不是通过 AudioUnit
+        // 这种方式更可靠，新创建的 AVAudioEngine 会自动使用这个设备
+        var defaultInputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var mutableDeviceID = targetDeviceID
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultInputAddress,
+            0,
+            nil,
+            UInt32(MemoryLayout<AudioDeviceID>.size),
+            &mutableDeviceID
+        )
+
+        if status != noErr {
+            LogManager.shared.warning(
+                "设置默认输入设备失败 | 设备ID: \(targetDeviceID), 状态码: \(status)，将使用当前默认设备")
         } else {
-            print("⚠️ 未找到匹配的 AudioDeviceID: \(selectedID)")
+            LogManager.shared.info("已设置默认输入设备 | 设备ID: \(targetDeviceID)")
+
+            // 【关键】重新创建 AVAudioEngine 实例以使用新设备
+            audioEngine = AVAudioEngine()
         }
     }
 

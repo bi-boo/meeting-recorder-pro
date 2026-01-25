@@ -1,3 +1,13 @@
+# [2026-01-25 15:39]
+- **用户需求/反馈**: 选择 MacBook Pro 麦克风设备时无法开启录音。
+- **技术逻辑变更**: 
+    - **inputNode 初始化修复**：在 `updateInputDevice()` 中，先调用 `inputNode.inputFormat(forBus: 0)` 触发底层初始化，解决新创建的 `AVAudioEngine` 实例 `audioUnit` 尚未就绪的问题。
+    - **错误处理增强**：将静默失败（仅打印日志）改为抛出明确错误，确保设备切换失败时用户能感知问题。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 修复选择特定麦克风设备后录音无法启动的问题。
+
 # [2026-01-25 15:31]
 - **用户需求/反馈**: 将 `~/会议录音 Pro` 下的日志文件夹设置为隐藏，避免干扰用户。
 - **技术逻辑变更**: 将 `LogManager.swift` 中的 `logDirectory` 路径组件由 `"日志"` 改为 `".日志"`。在 macOS 中，以点开头的文件/文件夹会被系统自动隐藏。
