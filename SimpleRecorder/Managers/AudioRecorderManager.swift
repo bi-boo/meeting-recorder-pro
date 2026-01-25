@@ -12,6 +12,35 @@ import Foundation
 import IOKit.pwr_mgt
 import ScreenCaptureKit
 
+// MARK: - 录音中断原因枚举
+/// 定义所有可能导致录音中断的场景
+enum RecordingInterruptionReason {
+    case deviceRemoved(deviceName: String)  // 当前麦克风设备被移除
+    case deviceChanged  // 音频设备路由发生变更
+    case engineConfigurationChanged  // 音频引擎配置变更
+    case systemAudioStreamError(Error)  // 系统音频采集错误
+    case diskSpaceFull  // 磁盘空间不足
+    case writerFailed(Error?)  // 写入器失败
+
+    /// 返回用户可读的中文描述
+    var localizedDescription: String {
+        switch self {
+        case .deviceRemoved(let deviceName):
+            return "您使用的麦克风「\(deviceName)」已断开"
+        case .deviceChanged:
+            return "您的音频设备发生了变化（例如插拔耳机或连接蓝牙设备）"
+        case .engineConfigurationChanged:
+            return "您的音频设备发生了变化（例如插拔耳机或连接蓝牙设备）"
+        case .systemAudioStreamError:
+            return "系统音频采集被中断（可能是权限被撤销）"
+        case .diskSpaceFull:
+            return "磁盘空间不足"
+        case .writerFailed:
+            return "录音文件保存失败"
+        }
+    }
+}
+
 class AudioRecorderManager: NSObject, ObservableObject {
     static let shared = AudioRecorderManager()
 
@@ -21,7 +50,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
 
     // Core Audio & Asset Writer
-    private let audioEngine = AVAudioEngine()
+    private var audioEngine = AVAudioEngine()  // 【改为 var】允许重建以解决设备切换后的状态问题
     private var assetWriter: AVAssetWriter?
     private var assetWriterInput: AVAssetWriterInput?
     private var writingQueue = DispatchQueue(
@@ -92,9 +121,146 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private let recordingFilePathKey = "recording_file_path"
     private let recordingStartTimeKey = "recording_start_time"
 
+    // 录音中断检测相关
+    private var recordingDeviceID: String?  // 录音开始时使用的设备 ID
+    private var recordingDeviceName: String?  // 录音开始时使用的设备名称
+    private var lastDiskCheckTime: TimeInterval = 0  // 上次磁盘空间检查时间
+    private let diskCheckInterval: TimeInterval = 30  // 磁盘空间检查间隔（秒）
+    private var isHandlingInterruption = false  // 防止中断处理重入
+
     private override init() {
         super.init()
         LogManager.shared.info("AudioRecorderManager 初始化")
+        setupAudioHardwareListeners()
+        setupEngineConfigurationChangeListener()
+    }
+
+    deinit {
+        removeAudioHardwareListeners()
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    // MARK: - 音频设备变更监听
+
+    /// 设置 Core Audio 设备变更监听器
+    private func setupAudioHardwareListeners() {
+        // 监听默认输入设备变更
+        var defaultInputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultInputAddress,
+            DispatchQueue.main
+        ) { [weak self] _, _ in
+            self?.handleAudioDeviceChange()
+        }
+
+        // 监听设备列表变更（设备插拔）
+        var deviceListAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &deviceListAddress,
+            DispatchQueue.main
+        ) { [weak self] _, _ in
+            self?.handleAudioDeviceListChange()
+        }
+
+        LogManager.shared.info("已注册音频设备变更监听器")
+    }
+
+    /// 移除 Core Audio 设备变更监听器
+    private func removeAudioHardwareListeners() {
+        var defaultInputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultInputAddress,
+            DispatchQueue.main,
+            { _, _ in }
+        )
+
+        var deviceListAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &deviceListAddress,
+            DispatchQueue.main,
+            { _, _ in }
+        )
+    }
+
+    /// 设置 AVAudioEngine 配置变更监听
+    private func setupEngineConfigurationChangeListener() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioEngineConfigChange),
+            name: .AVAudioEngineConfigurationChange,
+            object: audioEngine
+        )
+        LogManager.shared.info("已注册 AVAudioEngine 配置变更监听器")
+    }
+
+    /// 处理音频设备变更（如插拔耳机）
+    private func handleAudioDeviceChange() {
+        // 只有在录音中且使用麦克风时才需要检查
+        guard isRecording, !isPaused, currentAudioSource != .systemAudio else { return }
+
+        LogManager.shared.warning("检测到音频设备变更")
+
+        // 给系统一点时间完成设备切换
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self, self.isRecording else { return }
+
+            // 检查音频引擎是否还在正常运行
+            if !self.audioEngine.isRunning {
+                self.handleRecordingInterruption(reason: .deviceChanged)
+            }
+        }
+    }
+
+    /// 处理设备列表变更（设备被移除）
+    private func handleAudioDeviceListChange() {
+        // 只有在录音中且使用麦克风时才需要检查
+        guard isRecording, !isPaused, currentAudioSource != .systemAudio else { return }
+        guard let deviceID = recordingDeviceID, deviceID != "default" else { return }
+
+        // 检查当前使用的设备是否还在列表中
+        let availableDevices = AppSettings.shared.availableInputDevices
+        let deviceStillExists = availableDevices.contains { $0.id == deviceID }
+
+        if !deviceStillExists {
+            let deviceName = recordingDeviceName ?? "未知设备"
+            LogManager.shared.error("录音使用的设备已断开 | 设备: \(deviceName)")
+            handleRecordingInterruption(reason: .deviceRemoved(deviceName: deviceName))
+        }
+    }
+
+    /// 处理 AVAudioEngine 配置变更
+    @objc private func handleAudioEngineConfigChange(_ notification: Notification) {
+        // 只有在录音中时才处理
+        guard isRecording, !isPaused else { return }
+
+        LogManager.shared.warning("检测到 AVAudioEngine 配置变更")
+
+        // 检查引擎是否还在运行
+        if !audioEngine.isRunning {
+            handleRecordingInterruption(reason: .engineConfigurationChanged)
+        }
     }
 
     // MARK: - 中断状态重置
@@ -181,6 +347,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     private func beginRecording() {
         isTransitioning = true
+
+        // 【关键修复】每次开始录音前确保音频引擎完全重置
+        prepareAudioEngineForNewRecording()
+
         let recordingsPath = AppSettings.shared.recordingsPath
 
         // 环境预检
@@ -413,16 +583,44 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 初始缓冲状态：仅在混合模式下默认开启以平滑时钟，仅系统音频模式下将由 setup 逻辑显式关闭
         isSystemAudioBuffering = (currentAudioSource == .both)
         lastWarningTime = 0
+        lastDiskCheckTime = Date().timeIntervalSince1970
+        isHandlingInterruption = false
 
         hasPrintedFirstSample = false
         hasPrintedSystemAudioFormat = false
 
+        // 【录音中断检测】保存当前使用的设备信息
+        recordingDeviceID = AppSettings.shared.selectedDeviceID
+        recordingDeviceName =
+            AppSettings.shared.availableInputDevices.first(where: {
+                $0.id == AppSettings.shared.selectedDeviceID
+            })?.name
+
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self, let startDate = self.currentSegmentStartTime else { return }
             self.recordingDuration = self.accumulatedDuration + Date().timeIntervalSince(startDate)
+
+            // 检查是否达到时长上限
             if self.recordingDuration >= self.maxDuration {
                 self.isAutoStoppedByLimit = true
                 self.stopRecording()
+                return
+            }
+
+            // 【录音中断检测】定期检查磁盘空间（每 30 秒）
+            let currentTime = Date().timeIntervalSince1970
+            if currentTime - self.lastDiskCheckTime >= self.diskCheckInterval {
+                self.lastDiskCheckTime = currentTime
+                if !self.checkDiskSpace(at: AppSettings.shared.recordingsPath) {
+                    self.handleRecordingInterruption(reason: .diskSpaceFull)
+                    return
+                }
+            }
+
+            // 【录音中断检测】检查 AssetWriter 状态
+            if let writer = self.assetWriter, writer.status == .failed {
+                self.handleRecordingInterruption(reason: .writerFailed(writer.error))
+                return
             }
         }
 
@@ -433,10 +631,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         setupSleepPrevention()
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
 
-        let deviceName =
-            AppSettings.shared.availableInputDevices.first(where: {
-                $0.id == AppSettings.shared.selectedDeviceID
-            })?.name ?? "默认设备"
+        let deviceName = recordingDeviceName ?? "默认设备"
         LogManager.shared.info(
             "录音已启动 | 音源: \(currentAudioSource.displayName), 输入设备: \(deviceName), 文件: \(fileURL.lastPathComponent)"
         )
@@ -451,8 +646,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
             audioEngine.stop()
         }
 
-        // 2. 移除所有可能存在的 tap
-        audioEngine.inputNode.removeTap(onBus: 0)
+        // 2. 移除所有可能存在的 tap（使用 try/catch 防止崩溃）
+        do {
+            audioEngine.inputNode.removeTap(onBus: 0)
+        } catch {}
         recordingMixer?.removeTap(onBus: 0)
 
         // 3. 清理之前可能残留的节点
@@ -469,8 +666,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
             mixerNode = nil
         }
 
-        // 4. 重置引擎到初始状态
-        audioEngine.reset()
+        // 4. 【关键修复】创建全新的 AVAudioEngine 实例
+        // 这可以彻底解决设备切换后 inputNode 状态不稳定导致的崩溃问题
+        audioEngine = AVAudioEngine()
 
         // 5. 清空系统音频缓冲队列
         systemAudioQueueLock.lock()
@@ -482,7 +680,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         lastSrcFormat = nil
         lastDstFormat = nil
 
-        print("🔄 音频引擎已重置，准备开始新录音")
+        LogManager.shared.debug("音频引擎已重建，准备开始新录音")
     }
 
     // MARK: - 仅麦克风录音配置
@@ -789,7 +987,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             }
 
             systemAudioStream = SCStream(
-                filter: filter, configuration: configuration, delegate: nil)
+                filter: filter, configuration: configuration, delegate: self)
         } else {
             // macOS 13.0-14.1 回退方案：需要使用 display filter
             let content = try await SCShareableContent.excludingDesktopWindows(
@@ -808,7 +1006,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             }
 
             systemAudioStream = SCStream(
-                filter: filter, configuration: configuration, delegate: nil)
+                filter: filter, configuration: configuration, delegate: self)
         }
 
         if let output = systemAudioOutput {
@@ -1233,30 +1431,52 @@ class AudioRecorderManager: NSObject, ObservableObject {
         recordingTimer?.invalidate()
         recordingTimer = nil
 
+        // 【重要】保存 URL 用于后续重命名
+        let outputURL = currentRecordingURL
+
         // 根据音频源类型清理不同的采集
         cleanupAudioCapture()
 
-        // 3. 在写入队列中同步执行收尾
+        // 在写入队列中同步执行收尾
+        let currentWriter = assetWriter
+        let currentInput = assetWriterInput
         let semaphore = DispatchSemaphore(value: 0)
-        writingQueue.sync { [weak self] in
-            guard let self = self else {
-                semaphore.signal()
-                return
-            }
-            self.assetWriterInput?.markAsFinished()
-            self.assetWriter?.finishWriting {
+
+        writingQueue.async {
+            currentInput?.markAsFinished()
+            currentWriter?.finishWriting {
                 semaphore.signal()
             }
         }
         _ = semaphore.wait(timeout: .now() + 2.0)
 
+        // 【关键修复】完整清理所有状态，确保可以再次录音
         isRecording = false
+        isPaused = false
+        isTransitioning = false
+        isWriterStarted = false
+        isHandlingInterruption = false
+
+        // 清理引用
+        assetWriter = nil
+        assetWriterInput = nil
+        currentRecordingURL = nil
+        recordingDeviceID = nil
+        recordingDeviceName = nil
+
         clearRecordingState()
-
-        // 紧急保存时不进行重命名，保持原样以确保安全
-
         releaseSleepPrevention()
-        print("🚨 录音已紧急保存完毕")
+
+        // 【修复】对保存的文件进行重命名（从 ing 改为带时长格式）
+        if let url = outputURL, FileManager.default.fileExists(atPath: url.path) {
+            let finalURL = renameToFinalFormat(url: url)
+            LogManager.shared.info("录音已紧急保存并重命名 | 文件: \(finalURL.lastPathComponent)")
+        } else {
+            LogManager.shared.info("录音已紧急保存")
+        }
+
+        // 发送状态变更通知
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
     }
 
     // MARK: - 命名格式化与重命名
@@ -1544,6 +1764,67 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - 录音中断处理
+
+    /// 统一的录音中断处理方法
+    /// - Parameter reason: 中断原因
+    private func handleRecordingInterruption(reason: RecordingInterruptionReason) {
+        // 防止重复处理
+        guard !isHandlingInterruption else {
+            LogManager.shared.warning("中断处理正在进行中，忽略重复调用")
+            return
+        }
+        guard isRecording else {
+            LogManager.shared.info("非录音状态，忽略中断处理")
+            return
+        }
+
+        isHandlingInterruption = true
+        LogManager.shared.error("录音中断 | 原因: \(reason.localizedDescription)")
+
+        // 1. 紧急保存当前录音
+        saveRecordingImmediately()
+
+        // 2. 在主线程弹出提醒
+        DispatchQueue.main.async { [weak self] in
+            self?.showRecordingInterruptionAlert(reason: reason)
+            self?.isHandlingInterruption = false
+        }
+    }
+
+    /// 显示录音中断提醒弹窗
+    /// - Parameter reason: 中断原因
+    private func showRecordingInterruptionAlert(reason: RecordingInterruptionReason) {
+        let alert = NSAlert()
+        alert.messageText = "录音已中断"
+        alert.informativeText = "由于\(reason.localizedDescription)，录音已自动保存。\n\n已录制的内容不会丢失。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "再次开始录音")
+        alert.addButton(withTitle: "知道了")
+
+        let response = alert.runModal()
+
+        if response == .alertFirstButtonReturn {
+            // 用户点击"再次开始录音"
+            LogManager.shared.info("用户选择重新开始录音")
+            // 【关键修复】延迟 2 秒，等待系统音频路由完全稳定后再启动
+            // 断开蓝牙设备后，系统需要时间切换回默认音频设备
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self = self else { return }
+                // 再次确认状态已重置
+                if !self.isRecording && !self.isTransitioning {
+                    self.startRecording()
+                } else {
+                    LogManager.shared.warning(
+                        "状态未完全重置，无法重新录音 | isRecording: \(self.isRecording), isTransitioning: \(self.isTransitioning)"
+                    )
+                }
+            }
+        } else {
+            LogManager.shared.info("用户确认录音中断")
+        }
+    }
+
     func formatDuration(_ duration: TimeInterval) -> String {
         let mins = Int(duration) / 60
         let secs = Int(duration) % 60
@@ -1573,6 +1854,28 @@ private class SystemAudioStreamOutput: NSObject, SCStreamOutput {
         guard CMSampleBufferIsValid(sampleBuffer) else { return }
 
         onSampleBuffer(sampleBuffer)
+    }
+}
+
+// MARK: - SCStreamDelegate 实现（系统音频采集错误处理）
+
+@available(macOS 13.0, *)
+extension AudioRecorderManager: SCStreamDelegate {
+    /// 系统音频采集流发生错误时的回调
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        LogManager.shared.error("系统音频采集流停止 | 错误: \(error.localizedDescription)")
+
+        // 只有在录音中且使用系统音频时才处理
+        guard isRecording, !isPaused,
+            currentAudioSource == .systemAudio || currentAudioSource == .both
+        else {
+            return
+        }
+
+        // 触发录音中断处理
+        DispatchQueue.main.async { [weak self] in
+            self?.handleRecordingInterruption(reason: .systemAudioStreamError(error))
+        }
     }
 }
 

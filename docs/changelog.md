@@ -1,3 +1,41 @@
+# [2026-01-25 14:18]
+- **用户需求/反馈**: 1) 录音中断后文件命名仍是 "ing"，未正确重命名为带时长格式；2) 点击"再次开始录音"依然崩溃。
+- **技术逻辑变更**: 
+    - **文件重命名修复**：在 `saveRecordingImmediately()` 中保存前获取 `currentRecordingURL`，保存成功后调用 `renameToFinalFormat()` 进行重命名。
+    - **崩溃修复**：将再次录音前的延迟从 0.5 秒增加到 1 秒，确保 `cleanupAudioCapture()` 中异步释放的系统音频流完全释放；添加启动前状态二次检查。
+    - **状态清理**：在 `saveRecordingImmediately()` 中添加 `isHandlingInterruption = false` 的重置。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 确保录音中断后文件正确保存并命名，以及再次录音功能正常工作。
+
+# [2026-01-25 13:58]
+- **用户需求/反馈**: 1) 录音中断弹窗的原因描述太技术化，用户看不懂；2) 点击"再次开始录音"后应用崩溃。
+- **技术逻辑变更**: 
+    - **文案优化**：将技术性描述改为大白话，如"系统音频配置发生变化"改为"您的音频设备发生了变化（例如插拔耳机或连接蓝牙设备）"。
+    - **崩溃修复**：修复 `saveRecordingImmediately()` 状态清理不完整的问题，添加对 `assetWriter`、`assetWriterInput`、`currentRecordingURL`、`isTransitioning`、`isWriterStarted` 等状态的清理，确保录音中断后可以正常重新开始录音。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 提升用户体验，确保中断提醒信息通俗易懂，并修复再次录音崩溃问题。
+
+# [2026-01-25 13:31]
+- **用户需求/反馈**: 录音过程中插拔耳机等设备变更会导致录音静默中断，但界面仍显示"录音中"状态，用户无法感知录音已停止。
+- **技术逻辑变更**: 
+    - **中断原因枚举**：新增 `RecordingInterruptionReason` 枚举，定义 6 种可能导致录音中断的场景（设备移除、设备变更、引擎配置变更、系统音频错误、磁盘空间不足、写入失败）。
+    - **Core Audio 监听**：在 `init()` 中通过 `AudioObjectAddPropertyListenerBlock` 注册设备变更监听（`kAudioHardwarePropertyDefaultInputDevice` 和 `kAudioHardwarePropertyDevices`）。
+    - **AVAudioEngine 监听**：监听 `.AVAudioEngineConfigurationChange` 通知检测音频配置变更。
+    - **SCStreamDelegate**：实现 `stream(_:didStopWithError:)` 捕获系统音频采集错误。
+    - **定时检查**：在录音定时器中每 30 秒检查磁盘空间，实时检查 AssetWriter 状态。
+    - **统一处理**：新增 `handleRecordingInterruption()` 方法，检测到异常后自动保存录音并弹窗告知用户原因。
+    - **用户交互**：中断弹窗提供「再次开始录音」和「知道了」两个按钮。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/changelog.md`
+- **变更原因**: 解决录音静默中断问题，确保用户始终知悉录音状态，已录制内容不会丢失。
+
 # [2026-01-25 00:38]
 - **用户需求/反馈**: 定时计划循环类型默认为“不循环”，触发方式默认为“自动录音”；“关于我们”页面移除产品 Logo。
 - **技术逻辑变更**: 

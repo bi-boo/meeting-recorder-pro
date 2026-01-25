@@ -56,6 +56,14 @@
 - 录音期间通过 `IOPMAssertionCreateWithDescription` 申请 `kIOPMAssertionTypeNoIdleSleep` 断言
 - 确保 CPU 持续运行而允许屏幕关闭
 
+### H3 录音中断检测机制
+- **设备监听**：通过 Core Audio `AudioObjectAddPropertyListenerBlock` 监听 `kAudioHardwarePropertyDefaultInputDevice` 和 `kAudioHardwarePropertyDevices`
+- **引擎监听**：监听 `.AVAudioEngineConfigurationChange` 通知检测音频配置变更
+- **系统音频监听**：实现 `SCStreamDelegate.stream(_:didStopWithError:)` 捕获 SCStream 错误
+- **定时检查**：每 30 秒检查磁盘空间、实时检查 AssetWriter 状态
+- **中断枚举**：`RecordingInterruptionReason` 定义 6 种场景（设备移除/设备变更/引擎配置/系统音频错误/磁盘不足/写入失败）
+- **统一处理**：`handleRecordingInterruption()` 紧急保存 + 弹窗提醒 + 支持重新录音
+
 ---
 
 # H1 快捷键模块
