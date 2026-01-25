@@ -24,6 +24,11 @@ enum LogLevel: String {
         case .critical: return "🚨"
         }
     }
+
+    /// 是否需要同步写入（确保崩溃前写入磁盘）
+    var requiresSync: Bool {
+        return self == .error || self == .critical
+    }
 }
 
 // MARK: - 日志管理器
@@ -32,6 +37,9 @@ class LogManager {
 
     /// 日志文件保留天数
     private let retentionDays = 7
+
+    /// 当前录音会话 ID（用于追踪同一次录音的所有日志）
+    private(set) var currentSessionID: String?
 
     /// 日志目录
     private lazy var logDirectory: URL = {
@@ -74,12 +82,38 @@ class LogManager {
         // 启动时清理旧日志
         cleanupOldLogs()
 
-        // 记录启动日志
+        // 记录启动日志（包含系统信息）
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        let appVersion =
+            Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
+        let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
+
+        log(.info, "========== 应用启动 ==========")
         log(.info, "日志系统初始化完成 | 日志目录: \(logDirectory.path)")
+        log(.info, "系统信息 | macOS: \(osVersion), 应用版本: \(appVersion) (\(buildNumber))")
     }
 
     deinit {
         fileHandle?.closeFile()
+    }
+
+    // MARK: - 会话管理
+
+    /// 开始新的录音会话（生成唯一会话 ID）
+    func startRecordingSession() -> String {
+        let sessionID = UUID().uuidString.prefix(8).lowercased()
+        currentSessionID = String(sessionID)
+        log(.info, "📍 开始录音会话 | SessionID: \(currentSessionID!)")
+        return currentSessionID!
+    }
+
+    /// 结束当前录音会话
+    func endRecordingSession() {
+        if let sessionID = currentSessionID {
+            log(.info, "📍 结束录音会话 | SessionID: \(sessionID)")
+            flush()  // 确保会话结束时日志全部写入
+        }
+        currentSessionID = nil
     }
 
     // MARK: - 公开接口
@@ -91,21 +125,23 @@ class LogManager {
     ) {
         let now = Date()
         let fileName = (file as NSString).lastPathComponent
+        let sessionPrefix = currentSessionID.map { "[\($0)] " } ?? ""
 
         // 异步处理所有逻辑，避免阻塞调用者线程（特别是音频回调线程）
         writeQueue.async { [weak self] in
             guard let self = self else { return }
             let timestamp = self.timestampFormatter.string(from: now)
 
-            // 格式：[时间戳] [级别] 消息 | 文件:行号
-            let logLine = "[\(timestamp)] [\(level.rawValue)] \(message) | \(fileName):\(line)\n"
+            // 格式：[时间戳] [级别] [会话ID] 消息 | 文件:行号
+            let logLine =
+                "[\(timestamp)] [\(level.rawValue)] \(sessionPrefix)\(message) | \(fileName):\(line)\n"
 
             // 仅在 DEBUG 模式下输出到控制台
             #if DEBUG
                 print("\(level.emoji) \(logLine)", terminator: "")
             #endif
 
-            self.writeToFile(logLine)
+            self.writeToFile(logLine, sync: level.requiresSync)
         }
     }
 
@@ -149,10 +185,20 @@ class LogManager {
         return logDirectory
     }
 
+    /// 强制刷新日志缓冲区到磁盘（用于关键时刻如录音停止）
+    func flush() {
+        writeQueue.sync { [weak self] in
+            try? self?.fileHandle?.synchronize()
+        }
+    }
+
     // MARK: - 私有方法
 
     /// 写入文件
-    private func writeToFile(_ content: String) {
+    /// - Parameters:
+    ///   - content: 日志内容
+    ///   - sync: 是否同步写入（用于 error/critical 级别确保崩溃前写入）
+    private func writeToFile(_ content: String, sync: Bool = false) {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let today = dateFormatter.string(from: Date())
@@ -177,10 +223,14 @@ class LogManager {
             fileHandle?.seekToEndOfFile()
         }
 
-        // 写入（不再调用 synchronizeFile，避免阻塞 IO）
-        // 系统会自动在适当时机刷新缓冲区
+        // 写入日志
         if let data = content.data(using: .utf8) {
             fileHandle?.write(data)
+
+            // 对于错误级别，同步写入确保崩溃前数据已保存
+            if sync {
+                try? fileHandle?.synchronize()
+            }
         }
     }
 

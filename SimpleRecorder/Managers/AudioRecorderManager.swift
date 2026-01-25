@@ -130,6 +130,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var recordingDeviceName: String?  // 录音开始时使用的设备名称
     private var lastDiskCheckTime: TimeInterval = 0  // 上次磁盘空间检查时间
     private let diskCheckInterval: TimeInterval = 30  // 磁盘空间检查间隔（秒）
+    private var lastStatsLogTime: TimeInterval = 0  // 上次统计日志时间
     private var isHandlingInterruption = false  // 防止中断处理重入
 
     private override init() {
@@ -574,6 +575,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // MARK: - 录音启动完成处理
     private func finalizeRecordingStart(fileURL: URL) {
+        // 开始新的录音会话
+        let sessionID = LogManager.shared.startRecordingSession()
+
         isTransitioning = false
         accumulatedDuration = 0
         actualStartTime = Date()
@@ -592,6 +596,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         hasPrintedFirstSample = false
         hasPrintedSystemAudioFormat = false
+        lastStatsLogTime = Date().timeIntervalSince1970
 
         // 【录音中断检测】保存当前使用的设备信息
         recordingDeviceID = AppSettings.shared.selectedDeviceID
@@ -626,6 +631,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 self.handleRecordingInterruption(reason: .writerFailed(writer.error))
                 return
             }
+
+            // 【日志统计】每 30 秒记录一次录音状态
+            if currentTime - self.lastStatsLogTime >= 30.0 {
+                self.lastStatsLogTime = currentTime
+                let framesWritten = self.totalFramesWritten
+                let durationStr = String(format: "%.1f", self.recordingDuration)
+                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten)")
+            }
         }
 
         RunLoop.main.add(timer, forMode: .common)
@@ -637,7 +650,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         let deviceName = recordingDeviceName ?? "默认设备"
         LogManager.shared.info(
-            "录音已启动 | 音源: \(currentAudioSource.displayName), 输入设备: \(deviceName), 文件: \(fileURL.lastPathComponent)"
+            "录音已启动 | 会话ID: \(sessionID), 音源: \(currentAudioSource.displayName), 输入设备: \(deviceName), 文件: \(fileURL.lastPathComponent)"
         )
     }
 
@@ -1141,6 +1154,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             if systemAudioBufferReadOffset > 0 {
                 systemAudioBufferReadOffset = 0
             }
+            LogManager.shared.warning("系统音频缓冲队列已满，丢弃旧数据 | 队列大小: \(systemAudioQueueLimit)")
         }
     }
 
@@ -1293,7 +1307,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
         isTransitioning = true
 
-        LogManager.shared.info("正在结束录音 | 已录制时长: \(String(format: "%.1f", recordingDuration))s")
+        let finalDuration = recordingDuration
+        let finalFrames = totalFramesWritten
+        LogManager.shared.info(
+            "正在结束录音 | 已录制时长: \(String(format: "%.1f", finalDuration))s, 总帧数: \(finalFrames)")
         recordingTimer?.invalidate()
         recordingTimer = nil
 
@@ -1309,7 +1326,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             guard let self = self else { return }
 
             currentInput?.markAsFinished()
-            print("🏁 写入队列已接收停止指令，正在固化文件...")
+            LogManager.shared.debug("写入队列已接收停止指令，正在固化文件...")
 
             currentWriter?.finishWriting { [weak self] in
                 guard let self = self else { return }
@@ -1319,6 +1336,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     self.clearRecordingState()
                     self.isTransitioning = false
 
+                    // 结束录音会话
+                    LogManager.shared.endRecordingSession()
+
                     if let writer = currentWriter, writer.status == .completed, let url = outputURL
                     {
                         let finalURL = self.renameToFinalFormat(url: url)
@@ -1327,12 +1347,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
                                 as? Int64) ?? 0
                         let fileSizeMB = Double(fileSize) / (1024 * 1024)
                         LogManager.shared.info(
-                            "录音已保存 | 时长: \(String(format: "%.1f", self.recordingDuration))s, 文件大小: \(String(format: "%.2f", fileSizeMB))MB, 路径: \(finalURL.path)"
+                            "录音已保存 | 时长: \(String(format: "%.1f", finalDuration))s, 文件大小: \(String(format: "%.2f", fileSizeMB))MB, 路径: \(finalURL.path)"
                         )
 
                         // 如果是因为达到上限停止的，给予弹窗提示
                         if self.isAutoStoppedByLimit {
-                            self.showRecordingLimitReachedAlert(duration: self.recordingDuration)
+                            self.showRecordingLimitReachedAlert(duration: finalDuration)
                             self.isAutoStoppedByLimit = false
                         }
 
@@ -1627,6 +1647,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // MARK: - 音频采集资源清理
     private func cleanupAudioCapture() {
+        LogManager.shared.debug("开始清理音频采集资源...")
+
         // 1. 停止并移除 tap (必须首先执行)
         audioEngine.inputNode.removeTap(onBus: 0)
         recordingMixer?.removeTap(onBus: 0)
@@ -1655,13 +1677,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         // 5. 清空缓冲队列
         systemAudioQueueLock.lock()
+        let queueCount = systemAudioBufferQueue.count
         systemAudioBufferQueue.removeAll()
         systemAudioQueueLock.unlock()
 
         // 6. 清理设备激活会话（用于 iPhone 连续互通等设备）
         stopDeviceActivationSession()
 
-        print("🧹 音频采集资源已清理并重置引擎")
+        LogManager.shared.debug("音频采集资源已清理 | 清空缓冲队列: \(queueCount) 帧")
     }
 
     // MARK: - Power Management (Sleep Prevention)
@@ -1681,9 +1704,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
         )
 
         if result == kIOReturnSuccess {
-            print("⚓️ 已成功开启防休眠断言 (NoIdleSleep)")
+            LogManager.shared.info("已开启录音防休眠断言 | AssertionID: \(sleepAssertionID)")
         } else {
-            print("⚠️ 开启防休眠断言失败，错误码: \(result)")
+            LogManager.shared.warning("开启防休眠断言失败 | 错误码: \(result)")
         }
     }
 
@@ -1692,10 +1715,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
         guard sleepAssertionID != 0 else { return }
         let result = IOPMAssertionRelease(sleepAssertionID)
         if result == kIOReturnSuccess {
-            print("🔓 已释放防休眠断言")
+            LogManager.shared.info("已释放录音防休眠断言")
             sleepAssertionID = 0
         } else {
-            print("⚠️ 释放防休眠断言失败，错误码: \(result)")
+            LogManager.shared.warning("释放防休眠断言失败 | 错误码: \(result)")
         }
     }
 
@@ -1707,9 +1730,18 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 .volumeAvailableCapacityForImportantUsageKey
             ])
             if let space = values.volumeAvailableCapacityForImportantUsage {
-                return space >= minimumDiskSpace
+                let spaceMB = Double(space) / (1024 * 1024)
+                let isEnough = space >= minimumDiskSpace
+                if !isEnough {
+                    LogManager.shared.warning(
+                        "磁盘空间不足 | 可用: \(String(format: "%.1f", spaceMB))MB, 最小要求: 100MB")
+                }
+                return isEnough
             }
-        } catch { return true }
+        } catch {
+            LogManager.shared.warning("磁盘空间检查失败 | 错误: \(error.localizedDescription)")
+            return true
+        }
         return true
     }
 
