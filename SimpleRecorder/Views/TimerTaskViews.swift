@@ -78,7 +78,7 @@ struct TimerTaskListView: View {
                 Text("定时录音计划")
                     .padding(.bottom, 4)
             } footer: {
-                Text("系统唤醒且应用运行时，计划才能启动")
+                Text("系统唤醒，且App开启时，计划才能启动")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -101,7 +101,7 @@ struct TimerTaskListView: View {
             } footer: {
                 let enabledCount = manager.tasks.filter { $0.enabled }.count
                 if enabledCount > 0 && settings.preventSleepWithSchedule {
-                    Text("当前有 \(enabledCount) 个已启用的计划")
+                    Text("当前有 \(enabledCount) 个已启用的计划，建议开启")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
