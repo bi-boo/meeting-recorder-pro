@@ -69,7 +69,7 @@ struct TimerTaskListView: View {
                 Text("定时录音计划")
                     .padding(.bottom, 4)
             } footer: {
-                Text("系统唤醒，且App开启时，计划才能启动")
+                Text("定时计划生效条件：电脑未睡眠 + App 后台运行")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -84,21 +84,8 @@ struct TimerTaskListView: View {
                     .tint(.green)
                     .disabled(true)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("有定时计划时，禁止系统睡眠", isOn: $settings.preventSleepWithSchedule)
-                        .tint(.green)
-
-                    // 始终显示已启用计划数量提示
-                    let enabledCount = manager.tasks.filter { $0.enabled }.count
-                    if enabledCount > 0 {
-                        Text(
-                            "当前有 \(enabledCount) 个已启用的计划\(settings.preventSleepWithSchedule ? "" : "，建议开启")"
-                        )
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.leading, 2)
-                    }
-                }
+                Toggle("有定时计划时，禁止系统睡眠", isOn: $settings.preventSleepWithSchedule)
+                    .tint(.green)
             } header: {
                 Text("系统控制")
                     .padding(.bottom, 4)
@@ -139,41 +126,35 @@ struct TimerTaskRow: View {
     var body: some View {
         HStack(spacing: 12) {
             // 时间显示
-            VStack(alignment: .leading, spacing: 4) {
-                Text(task.timeDisplay)
-                    .font(.system(size: 20, weight: .medium, design: .monospaced))
+            Text(task.timeDisplay)
+                .font(.system(size: 24, weight: .medium, design: .monospaced))
+                .foregroundColor(task.enabled ? .primary : .secondary)
 
-                // 循环方式 + 提醒方式（同一行）
-                HStack(spacing: 6) {
-                    Text(task.fullDescription)
+            Spacer()
+
+            // 右侧信息组
+            VStack(alignment: .trailing, spacing: 3) {
+                // 下次触发时间
+                if task.enabled, task.nextTriggerTime != nil {
+                    Text(task.nextTriggerDisplay)
+                        .font(.subheadline)
+                        .foregroundColor(.orange)
+                }
+
+                // 循环方式 + 触发方式
+                HStack(spacing: 4) {
+                    Text(task.repeatType == .none ? "单次" : task.daysDisplay)
                         .font(.caption)
                         .foregroundColor(.secondary)
 
-                    Text("·")
+                    Text("-")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
                     Text(triggerModeDescription)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Color.secondary.opacity(0.15))
-                        .cornerRadius(3)
                 }
-            }
-
-            Spacer()
-
-            // 下次触发时间
-            if task.enabled, task.nextTriggerTime != nil {
-                Text(task.nextTriggerDisplay)
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.1))
-                    .cornerRadius(6)
             }
 
             // 启用开关
@@ -187,7 +168,7 @@ struct TimerTaskRow: View {
             .labelsHidden()
             .tint(.green)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .opacity(task.enabled ? 1 : 0.6)
     }
 }
