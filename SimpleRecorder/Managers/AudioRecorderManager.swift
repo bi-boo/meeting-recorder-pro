@@ -726,7 +726,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
         let format = recordingMixer.outputFormat(forBus: 0)
         recordingMixer.installTap(onBus: 0, bufferSize: 2048, format: format) {
             [weak self] buffer, time in
-            guard let self = self, self.isRecording, !self.isPaused else { return }
+            // 【关键修复】移除 isPaused 检查
+            // audioEngine.pause() 会暂停引擎本身，tap 回调在暂停期间不会被调用
+            // 这样恢复时 tap 能立即处理数据，不会因 isPaused 设置时机导致丢数据
+            guard let self = self, self.isRecording else { return }
 
             // 【核心加固】：在此刻，即采集发生的瞬间读取当前的 totalFramesWritten
             // 这确保了哪怕之后异步写入队列发生延迟，该 buffer 对应的 PTS 也是绝对准确的。
@@ -1432,7 +1435,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
             return
         }
 
-        // 2. 【核心修复】恢复录音前清空可能在间隙中残留的数据，并重置缓冲状态
+        // 2. 【关键修复】引擎启动成功后立即重置暂停标志
+        //    必须紧跟在 audioEngine.start() 之后，在其他任何操作之前
+        //    这确保 tap 回调能立即开始处理新的音频数据
+        isPaused = false
+
+        // 3. 清空恢复后可能残留的旧数据，并重置缓冲状态
         systemAudioQueueLock.lock()
         for buffer in systemAudioBufferQueue {
             returnBufferToPool(buffer)
@@ -1443,11 +1451,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
         isSystemAudioBuffering = (currentAudioSource == .both)
         systemAudioQueueLock.unlock()
 
-        // 3. 重置转换器内部状态，防止相位残音
+        // 4. 重置转换器内部状态，防止相位残音
         cachedAudioConverter?.reset()
 
-        // 3. 恢复计时器
-
+        // 5. 恢复计时器
         currentSegmentStartTime = Date()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self, let startDate = self.currentSegmentStartTime else { return }
@@ -1460,7 +1467,6 @@ class AudioRecorderManager: NSObject, ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
         recordingTimer = timer
 
-        isPaused = false
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
     }
 

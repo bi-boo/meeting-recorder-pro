@@ -1,3 +1,14 @@
+# [2026-01-25 20:59]
+- **用户需求/反馈**: 使用麦克风+系统内部录音同时录制时，暂停后恢复录制，结束录音后只保存了暂停之前的音频，暂停后录制的部分丢失。
+- **技术逻辑变更**: 
+    - **根因定位**：在 `resumeRecording()` 方法中，`isPaused = false` 原本在方法末尾才执行，但 `audioEngine.start()` 在前面就已启动。这导致音频引擎恢复后，`installRecordingTap` 中 tap 回调的 `!self.isPaused` 判断失败，所有音频数据被直接丢弃。
+    - **修复方案**：将 `isPaused = false` 移到 `audioEngine.start()` 之前执行，确保音频引擎恢复后 tap 回调能立即处理数据。
+    - **状态回滚**：新增恢复失败时的 `isPaused = true` 回滚逻辑。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 确保混合录音模式下暂停/恢复功能正常工作，暂停后的录音内容能完整保存。
+
 # [2026-01-25 20:13]
 - **用户需求/反馈**: 打包最新稳定版本，包含近期所有修复和功能更新。
 - **技术逻辑变更**: 
