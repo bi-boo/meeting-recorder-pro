@@ -102,7 +102,7 @@
 日志管理器，采用单例模式 (`shared`)。
 
 - **5 级日志**：debug / info / warning / error / critical
-- **文件路径**：`~/会议录音 Pro/日志/MeetingRecorderPro_YYYY-MM-DD.log`
+- **文件路径**：`~/会议录音 Pro/.日志/MeetingRecorderPro_YYYY-MM-DD.log`
 - **7 天轮转**：启动时自动清理过期日志
 - **崩溃安全**：使用 `FileHandle.synchronize()` 确保写入
 

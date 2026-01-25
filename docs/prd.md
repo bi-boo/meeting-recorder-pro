@@ -141,5 +141,5 @@
 # H1 辅助系统
 
 ## H2 日志系统
-1. **存储定位**：静默保存在 `~/会议录音 Pro/日志/` 下，文件名为 `MeetingRecorderPro_YYYY-MM-DD.log`。
+1. **存储定位**：静默保存在 `~/会议录音 Pro/.日志/` 下，文件名为 `MeetingRecorderPro_YYYY-MM-DD.log`。
 2. **结构**：包含 5 级日志信息与调用上下文。

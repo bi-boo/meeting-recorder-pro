@@ -245,12 +245,11 @@ class AppSettings: ObservableObject {
 
     // MARK: - Initialization
     private init() {
-        // 默认路径: /Users/用户名/极简录音/录音
+        // 默认路径: /Users/用户名/会议录音 Pro
         let realHomeDirectory = URL(fileURLWithPath: "/Users/\(NSUserName())")
         let defaultRecordingsPath =
             realHomeDirectory
-            .appendingPathComponent("极简录音")
-            .appendingPathComponent("录音")
+            .appendingPathComponent("会议录音 Pro")
 
         // 加载路径设置
         if let data = UserDefaults.standard.data(forKey: "recordingsPath"),

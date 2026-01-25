@@ -1,3 +1,22 @@
+# [2026-01-25 15:31]
+- **用户需求/反馈**: 将 `~/会议录音 Pro` 下的日志文件夹设置为隐藏，避免干扰用户。
+- **技术逻辑变更**: 将 `LogManager.swift` 中的 `logDirectory` 路径组件由 `"日志"` 改为 `".日志"`。在 macOS 中，以点开头的文件/文件夹会被系统自动隐藏。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/LogManager.swift`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/changelog.md`
+- **变更原因**: 提升主存储目录的整洁度，将系统生成的辅助文件（日志）进行隐藏处理。
+
+# [2026-01-25 15:27]
+- **用户需求/反馈**: 将默认音频存储路径从“极简录音/录音”修改为“会议录音 Pro”，保持与应用名称一致，并精简路径层级（不再需要“录音”子目录）。
+- **技术逻辑变更**: 修改 `AppSettings.swift` 中的 `defaultRecordingsPath` 初始值，将路径更新为直接指向用户主目录下的“会议录音 Pro”。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Models/AppSettings.swift`
+    - `docs/prd.md`
+    - `docs/changelog.md`
+- **变更原因**: 增强品牌一致性，简化存储结构，提升用户易用性。
+
 # [2026-01-25 15:02]
 - **用户需求/反馈**: 定时计划页面信息碎片化，希望精简布局、合并脚注。
 - **技术逻辑变更**: 

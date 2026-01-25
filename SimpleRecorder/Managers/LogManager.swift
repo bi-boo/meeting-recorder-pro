@@ -39,7 +39,7 @@ class LogManager {
         let logDir =
             realHomeDirectory
             .appendingPathComponent("会议录音 Pro")
-            .appendingPathComponent("日志")
+            .appendingPathComponent(".日志")
 
         // 确保目录存在
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
