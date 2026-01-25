@@ -21,14 +21,14 @@ struct MainWindowView: View {
 
             AboutView()
                 .tabItem {
-                    Label("关于我们", systemImage: "info.circle")
+                    Label("核心功能", systemImage: "info.circle")
                 }
         }
         .frame(minWidth: 560, minHeight: 620)  // 稍微增大窗口，给内容更多呼吸空间
     }
 }
 
-// MARK: - 关于我们
+// MARK: - 核心功能
 struct AboutView: View {
     var body: some View {
         ScrollView {
@@ -53,19 +53,19 @@ struct AboutView: View {
                     FeatureItem(
                         title: "防止休眠",
                         subtitle:
-                            "录音期间自动阻止系统进入休眠状态。即使合上笔记本，录音也能在后台继续进行，适合需要长时间录音的场景。"
+                            "录音期间系统保持唤醒状态。即使关闭屏幕，录音也能在后台继续进行，适合需要长时间录音的场景。"
                     )
                     FeatureItem(
                         title: "全局快捷键",
                         subtitle: "无论在使用什么应用程序，只需按下预设的快捷键，即可立即开始或结束录音，无需切换窗口。"
                     )
                     FeatureItem(
-                        title: "双向录音",
-                        subtitle: "支持同时录制麦克风输入和系统内部声音。戴着耳机参加线上会议时，也能完整录下对方的发言和你自己的声音。"
+                        title: "内外同时录制",
+                        subtitle: "支持同时录制麦克风输入和系统内部声音。戴耳机参加线上会议时，也能完整录下对方发言和你自己的声音。"
                     )
                     FeatureItem(
                         title: "定时录音",
-                        subtitle: "支持设置周期性定时计划，到点自动录音或提前弹窗提醒。再也不用担心忙碌时忘记开启录音，轻松捕捉每一场重要会议。"
+                        subtitle: "支持设置定时计划，到点自动开始录音。不用担心忙碌时忘记开启录音，轻松捕捉每一场重要会议。"
                     )
                 }
                 .padding(.horizontal, 45)  // 增加水平间距，使行宽适中

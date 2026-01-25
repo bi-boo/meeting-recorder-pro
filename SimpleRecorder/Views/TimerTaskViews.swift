@@ -80,22 +80,28 @@ struct TimerTaskListView: View {
                     .tint(.green)
 
                 // 录音时禁止系统睡眠：始终开启且不可修改（仅作为信息展示）
-                Toggle("录音时禁止系统睡眠", isOn: .constant(true))
+                Toggle("录音时，禁止系统睡眠", isOn: .constant(true))
                     .tint(.green)
                     .disabled(true)
 
-                Toggle("有定时计划时禁止系统睡眠", isOn: $settings.preventSleepWithSchedule)
-                    .tint(.green)
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("有定时计划时，禁止系统睡眠", isOn: $settings.preventSleepWithSchedule)
+                        .tint(.green)
+
+                    // 始终显示已启用计划数量提示
+                    let enabledCount = manager.tasks.filter { $0.enabled }.count
+                    if enabledCount > 0 {
+                        Text(
+                            "当前有 \(enabledCount) 个已启用的计划\(settings.preventSleepWithSchedule ? "" : "，建议开启")"
+                        )
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 2)
+                    }
+                }
             } header: {
                 Text("系统控制")
                     .padding(.bottom, 4)
-            } footer: {
-                let enabledCount = manager.tasks.filter { $0.enabled }.count
-                if enabledCount > 0 && settings.preventSleepWithSchedule {
-                    Text("当前有 \(enabledCount) 个已启用的计划，建议开启")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
             }
         }
         .formStyle(.grouped)
