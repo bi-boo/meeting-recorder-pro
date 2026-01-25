@@ -37,21 +37,12 @@ struct TimerTaskListView: View {
         Form {
             Section {
                 if manager.tasks.isEmpty {
-                    // 空状态
-                    VStack(spacing: 12) {
-                        Image(systemName: "clock.badge.questionmark")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                        Text("暂无定时计划")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        Text("点击下方按钮添加您的第一个定时录音计划")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
+                    // 空状态（简洁提示）
+                    Text("暂无定时计划，点击下方添加")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
                 } else {
                     // 任务列表（按时间早晚排序）
                     ForEach(sortedTasks) { task in
