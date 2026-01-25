@@ -281,6 +281,7 @@ typedef unsigned int swift_uint4  __attribute__((__ext_vector_type__(4)));
 #endif
 @import AppKit;
 @import ObjectiveC;
+@import ScreenCaptureKit;
 #endif
 
 #endif
@@ -319,6 +320,13 @@ SWIFT_CLASS("_TtC14SimpleRecorder20AudioRecorderManager")
 @interface AudioRecorderManager : NSObject
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+@class SCStream;
+SWIFT_AVAILABILITY(macos,introduced=13.0)
+@interface AudioRecorderManager (SWIFT_EXTENSION(SimpleRecorder)) <SCStreamDelegate>
+/// 系统音频采集流发生错误时的回调
+- (void)stream:(SCStream * _Nonnull)stream didStopWithError:(NSError * _Nonnull)error;
 @end
 
 /// 定时录音提醒弹窗控制器

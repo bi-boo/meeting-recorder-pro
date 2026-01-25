@@ -4,26 +4,26 @@
     "Localizable": [
       {
         "comment": "",
-        "key": "暂无定时计划",
+        "key": "暂无定时计划，点击下方添加",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 27
+          "startingColumn": 26,
+          "startingLine": 41
         }
       },
       {
         "comment": "",
-        "key": "点击下方按钮添加您的第一个定时录音计划",
+        "key": "已达上限（最多%lld个）",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 30
+          "startingColumn": 42,
+          "startingLine": 63
         }
       },
       {
         "comment": "",
         "key": "添加定时计划",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 54
+          "startingColumn": 89,
+          "startingLine": 63
         }
       },
       {
@@ -31,15 +31,47 @@
         "key": "定时录音计划",
         "location": {
           "startingColumn": 22,
-          "startingLine": 59
+          "startingLine": 69
         }
       },
       {
         "comment": "",
-        "key": "应用需保持运行状态才能触发",
+        "key": "定时计划生效条件：电脑未睡眠 + App 后台运行",
         "location": {
-          "startingColumn": 23,
-          "startingLine": 62
+          "startingColumn": 22,
+          "startingLine": 72
+        }
+      },
+      {
+        "comment": "",
+        "key": "开机自动启动",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 79
+        }
+      },
+      {
+        "comment": "",
+        "key": "录音时，禁止系统睡眠",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 83
+        }
+      },
+      {
+        "comment": "",
+        "key": "有定时计划时，禁止系统睡眠",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 87
+        }
+      },
+      {
+        "comment": "",
+        "key": "系统控制",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 90
         }
       },
       {
@@ -47,7 +79,23 @@
         "key": "",
         "location": {
           "startingColumn": 17,
-          "startingLine": 117
+          "startingLine": 162
+        }
+      },
+      {
+        "comment": "",
+        "key": "-",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 150
+        }
+      },
+      {
+        "comment": "",
+        "key": "时间冲突",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 343
         }
       },
       {
@@ -55,7 +103,7 @@
         "key": "取消",
         "location": {
           "startingColumn": 24,
-          "startingLine": 179
+          "startingLine": 225
         }
       },
       {
@@ -63,7 +111,7 @@
         "key": "保存",
         "location": {
           "startingColumn": 24,
-          "startingLine": 190
+          "startingLine": 236
         }
       },
       {
@@ -71,7 +119,7 @@
         "key": "时间",
         "location": {
           "startingColumn": 25,
-          "startingLine": 202
+          "startingLine": 248
         }
       },
       {
@@ -79,7 +127,7 @@
         "key": "重复",
         "location": {
           "startingColumn": 25,
-          "startingLine": 228
+          "startingLine": 274
         }
       },
       {
@@ -87,7 +135,7 @@
         "key": "选择星期",
         "location": {
           "startingColumn": 29,
-          "startingLine": 239
+          "startingLine": 285
         }
       },
       {
@@ -95,7 +143,7 @@
         "key": "触发方式",
         "location": {
           "startingColumn": 25,
-          "startingLine": 245
+          "startingLine": 291
         }
       },
       {
@@ -103,7 +151,7 @@
         "key": ":",
         "location": {
           "startingColumn": 30,
-          "startingLine": 212
+          "startingLine": 258
         }
       },
       {
@@ -111,7 +159,7 @@
         "key": "小时",
         "location": {
           "startingColumn": 32,
-          "startingLine": 204
+          "startingLine": 250
         }
       },
       {
@@ -119,7 +167,7 @@
         "key": "分钟",
         "location": {
           "startingColumn": 32,
-          "startingLine": 216
+          "startingLine": 262
         }
       },
       {
@@ -127,7 +175,7 @@
         "key": "循环类型",
         "location": {
           "startingColumn": 28,
-          "startingLine": 229
+          "startingLine": 275
         }
       },
       {
@@ -135,7 +183,7 @@
         "key": "到达时间前弹窗询问是否开始录音",
         "location": {
           "startingColumn": 30,
-          "startingLine": 260
+          "startingLine": 306
         }
       },
       {
@@ -143,7 +191,7 @@
         "key": "到达时间后自动开始录音",
         "location": {
           "startingColumn": 30,
-          "startingLine": 264
+          "startingLine": 310
         }
       },
       {
@@ -151,7 +199,7 @@
         "key": "定时类型",
         "location": {
           "startingColumn": 28,
-          "startingLine": 246
+          "startingLine": 292
         }
       },
       {
@@ -159,7 +207,7 @@
         "key": "提前提醒",
         "location": {
           "startingColumn": 32,
-          "startingLine": 254
+          "startingLine": 300
         }
       },
       {
@@ -167,7 +215,7 @@
         "key": "%lld 分钟",
         "location": {
           "startingColumn": 38,
-          "startingLine": 256
+          "startingLine": 302
         }
       },
       {
@@ -175,7 +223,31 @@
         "key": "启用此计划",
         "location": {
           "startingColumn": 28,
-          "startingLine": 272
+          "startingLine": 318
+        }
+      },
+      {
+        "comment": "",
+        "key": "删除此计划",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 328
+        }
+      },
+      {
+        "comment": "",
+        "key": "知道了",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 344
+        }
+      },
+      {
+        "comment": "",
+        "key": "该时间点已有定时计划，请选择其他时间",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 346
         }
       }
     ]
