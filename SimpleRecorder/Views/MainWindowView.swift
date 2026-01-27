@@ -145,7 +145,7 @@ struct BasicSettingsView: View {
                         }
                     }
                     .disabled(recordingManager.isRecording)
-                    .onChange(of: settings.audioSource) { _, newValue in
+                    .onChange(of: settings.audioSource) { newValue in
                         if newValue != .microphone {
                             AppSettings.requestScreenCapturePermission()
                             if !AppSettings.hasScreenCapturePermission {
@@ -460,7 +460,10 @@ struct ShortcutRecorderView: View {
     }
 }
 
-#Preview {
-    MainWindowView()
-        .frame(width: 560, height: 620)
-}
+// Preview 仅在 macOS 14+ 可用
+#if swift(>=5.9)
+    #Preview {
+        MainWindowView()
+            .frame(width: 560, height: 620)
+    }
+#endif
