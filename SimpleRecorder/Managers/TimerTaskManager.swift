@@ -284,14 +284,32 @@ class TimerTaskManager: ObservableObject {
 
         do {
             let decoder = JSONDecoder()
-            tasks = try decoder.decode([TimerTask].self, from: data)
+            var loadedTasks = try decoder.decode([TimerTask].self, from: data)
 
             // 重新计算所有任务的下次触发时间
-            for index in tasks.indices {
-                tasks[index].calculateNextTriggerTime()
+            // 使用临时数组更新后再赋值，确保触发 @Published 通知
+            for index in loadedTasks.indices {
+                let oldTime = loadedTasks[index].nextTriggerTime
+                loadedTasks[index].calculateNextTriggerTime()
+                let newTime = loadedTasks[index].nextTriggerTime
+
+                // 记录时间变化日志，便于调试
+                if oldTime != newTime {
+                    LogManager.shared.info(
+                        "任务时间更新 | ID: \(loadedTasks[index].id.uuidString.prefix(8)) | "
+                            + "旧时间: \(oldTime?.description ?? "nil") | "
+                            + "新时间: \(newTime?.description ?? "nil")"
+                    )
+                }
             }
 
+            // 重新赋值整个数组，触发 @Published 响应式更新
+            tasks = loadedTasks
+
             LogManager.shared.info("加载定时任务成功 | 数量: \(tasks.count)")
+
+            // 保存更新后的触发时间到持久化存储
+            saveTasks()
         } catch {
             LogManager.shared.error("加载定时任务失败 | 错误: \(error.localizedDescription)")
             tasks = []
@@ -336,9 +354,12 @@ class TimerTaskManager: ObservableObject {
     @objc private func handleTimeChange() {
         LogManager.shared.info("检测到系统时间变化，重新计算所有任务触发时间")
 
-        for index in tasks.indices {
-            tasks[index].calculateNextTriggerTime()
+        // 使用临时数组更新后重新赋值，触发 @Published 通知
+        var updatedTasks = tasks
+        for index in updatedTasks.indices {
+            updatedTasks[index].calculateNextTriggerTime()
         }
+        tasks = updatedTasks
 
         // 清空触发记录，重新检查
         triggeredTaskIDs.removeAll()
@@ -349,10 +370,12 @@ class TimerTaskManager: ObservableObject {
     @objc private func handleWakeFromSleep() {
         LogManager.shared.info("系统从休眠恢复，检查定时任务")
 
-        // 重新计算触发时间
-        for index in tasks.indices {
-            tasks[index].calculateNextTriggerTime()
+        // 使用临时数组更新后重新赋值，触发 @Published 通知
+        var updatedTasks = tasks
+        for index in updatedTasks.indices {
+            updatedTasks[index].calculateNextTriggerTime()
         }
+        tasks = updatedTasks
 
         triggeredTaskIDs.removeAll()
         saveTasks()
