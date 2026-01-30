@@ -23,7 +23,9 @@ class TimerTaskManager: ObservableObject {
 
     // MARK: - 私有属性
 
-    private var schedulerTimer: Timer?
+    private var precisionTimer: DispatchSourceTimer?
+    private let timerQueue = DispatchQueue(
+        label: "com.meetingrecorder.timerqueue", qos: .userInitiated)
     private let storageKey = "timerTasks"
     private var reminderController: ReminderWindowController?
 
@@ -55,6 +57,9 @@ class TimerTaskManager: ObservableObject {
         LogManager.shared.info(
             "添加定时任务 | ID: \(task.id) | 时间: \(task.timeDisplay) | 循环: \(task.repeatType.displayName)"
         )
+
+        // 重新调度定时器
+        scheduleNextTrigger()
     }
 
     /// 更新任务
@@ -80,6 +85,9 @@ class TimerTaskManager: ObservableObject {
         triggeredTaskIDs.remove(task.id)
 
         LogManager.shared.info("更新定时任务 | ID: \(task.id) | 时间: \(task.timeDisplay)")
+
+        // 重新调度定时器
+        scheduleNextTrigger()
     }
 
     /// 删除任务
@@ -89,6 +97,9 @@ class TimerTaskManager: ObservableObject {
         saveTasks()
 
         LogManager.shared.info("删除定时任务 | ID: \(id)")
+
+        // 重新调度定时器
+        scheduleNextTrigger()
     }
 
     /// 切换任务启用状态
@@ -110,42 +121,98 @@ class TimerTaskManager: ObservableObject {
         saveTasks()
 
         LogManager.shared.info("切换任务状态 | ID: \(id) | 启用: \(tasks[index].enabled)")
+
+        // 重新调度定时器
+        scheduleNextTrigger()
     }
 
-    // MARK: - 调度器
+    // MARK: - 调度器（精准时间触发）
 
     /// 启动调度器
     func startScheduler() {
         stopScheduler()
 
-        // 每30秒检查一次（提高响应精度）
-        schedulerTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) {
-            [weak self] _ in
-            self?.checkAndTriggerReminders()
-        }
-
-        // 立即执行一次检查
+        // 立即检查是否有需要触发的任务（处理应用启动时已过期的任务）
         checkAndTriggerReminders()
+
+        // 调度下一个精准触发
+        scheduleNextTrigger()
 
         // 检查并更新睡眠防止状态
         updateSleepPreventionState()
 
-        LogManager.shared.info("定时任务调度器已启动")
+        LogManager.shared.info("定时任务调度器已启动（精准触发模式）")
     }
 
     /// 停止调度器
     func stopScheduler() {
-        schedulerTimer?.invalidate()
-        schedulerTimer = nil
+        precisionTimer?.cancel()
+        precisionTimer = nil
         releaseSleepPrevention()
 
         LogManager.shared.info("定时任务调度器已停止")
     }
 
+    /// 计算下一个最近的任务触发时间，并设置精准定时器
+    private func scheduleNextTrigger() {
+        // 取消现有的定时器
+        precisionTimer?.cancel()
+        precisionTimer = nil
+
+        let now = Date()
+
+        // 找出所有启用且未触发的任务中，最近的下一个触发时间
+        let nextTriggerDate =
+            tasks
+            .filter { $0.enabled && !triggeredTaskIDs.contains($0.id) }
+            .compactMap { $0.nextTriggerTime }
+            .filter { $0 > now }
+            .min()
+
+        guard let targetDate = nextTriggerDate else {
+            LogManager.shared.info("没有待触发的定时任务")
+            return
+        }
+
+        let interval = targetDate.timeIntervalSince(now)
+
+        // 安全检查：如果间隔太小或为负，立即触发
+        if interval <= 0 {
+            LogManager.shared.info("下一个任务已到时间，立即触发")
+            DispatchQueue.main.async { [weak self] in
+                self?.checkAndTriggerReminders()
+                self?.scheduleNextTrigger()
+            }
+            return
+        }
+
+        // 格式化时间用于日志
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        let targetTimeStr = formatter.string(from: targetDate)
+
+        LogManager.shared.info(
+            "设置精准触发 | 目标时间: \(targetTimeStr) | 距离: \(String(format: "%.1f", interval))秒")
+
+        // 创建精准定时器
+        let timer = DispatchSource.makeTimerSource(queue: timerQueue)
+        timer.schedule(deadline: .now() + interval, leeway: .milliseconds(100))
+
+        timer.setEventHandler { [weak self] in
+            DispatchQueue.main.async {
+                self?.checkAndTriggerReminders()
+                // 触发后重新调度下一个任务
+                self?.scheduleNextTrigger()
+            }
+        }
+
+        timer.resume()
+        precisionTimer = timer
+    }
+
     /// 检查并触发提醒或自动录音
     func checkAndTriggerReminders() {
         let now = Date()
-        let settings = AppSettings.shared
 
         for index in tasks.indices {
             let task = tasks[index]
