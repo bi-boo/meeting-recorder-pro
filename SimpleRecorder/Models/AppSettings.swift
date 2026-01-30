@@ -245,21 +245,41 @@ class AppSettings: ObservableObject {
 
     // MARK: - Initialization
     private init() {
-        // 默认路径: /Users/用户名/会议录音 Pro
+        // 默认路径: /Users/用户名/会议录音 Pro（位于用户主目录，不需要特殊权限）
         let realHomeDirectory = URL(fileURLWithPath: "/Users/\(NSUserName())")
         let defaultRecordingsPath =
             realHomeDirectory
             .appendingPathComponent("会议录音 Pro")
 
         // 加载路径设置
-        if let data = UserDefaults.standard.data(forKey: "recordingsPath"),
+        // 方案1: 优先从路径字符串加载（用户主目录内的路径，不需要书签）
+        if let pathString = UserDefaults.standard.string(forKey: "recordingsPath_path") {
+            let url = URL(fileURLWithPath: pathString)
+            self.recordingsPath = url
+            LogManager.shared.debug("从路径字符串恢复 | 路径: \(url.path)")
+        }
+        // 方案2: 尝试从 Security-Scoped Bookmark 恢复（用于用户自定义的特殊目录）
+        else if let data = UserDefaults.standard.data(forKey: "recordingsPath"),
             var isStale = Optional(false),
             let url = try? URL(
                 resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil,
                 bookmarkDataIsStale: &isStale)
         {
-            self.recordingsPath = url
-        } else {
+            // 书签解析成功，尝试获取访问权限
+            let accessGranted = url.startAccessingSecurityScopedResource()
+            if accessGranted || isStale == false {
+                self.recordingsPath = url
+                LogManager.shared.debug("从书签恢复路径成功 | 路径: \(url.path)")
+            } else {
+                // 书签失效（可能因为应用签名变化），回退到默认路径
+                LogManager.shared.info("书签失效，回退到默认路径 | 原路径: \(url.path)")
+                self.recordingsPath = defaultRecordingsPath
+                // 清除失效的书签数据
+                UserDefaults.standard.removeObject(forKey: "recordingsPath")
+            }
+        }
+        // 方案3: 使用默认路径
+        else {
             self.recordingsPath = defaultRecordingsPath
         }
 
@@ -341,10 +361,24 @@ class AppSettings: ObservableObject {
 
     // MARK: - Path Persistence
     private func savePath(_ url: URL, forKey key: String) {
-        if let bookmarkData = try? url.bookmarkData(
-            options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-        {
-            UserDefaults.standard.set(bookmarkData, forKey: key)
+        // 获取用户主目录
+        let homeDirectory = URL(fileURLWithPath: "/Users/\(NSUserName())")
+
+        // 判断路径是否在用户主目录下（这些路径不需要 Security-Scoped Bookmark）
+        if url.path.hasPrefix(homeDirectory.path) {
+            // 用户主目录下的路径，直接保存路径字符串即可
+            UserDefaults.standard.removeObject(forKey: key)  // 清除可能存在的旧书签
+            UserDefaults.standard.set(url.path, forKey: "\(key)_path")
+            LogManager.shared.debug("保存路径（主目录内，无需书签）| 路径: \(url.path)")
+        } else {
+            // 非用户主目录的路径（如外置硬盘），需要保存 Security-Scoped Bookmark
+            if let bookmarkData = try? url.bookmarkData(
+                options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            {
+                UserDefaults.standard.set(bookmarkData, forKey: key)
+                UserDefaults.standard.removeObject(forKey: "\(key)_path")  // 清除可能存在的旧路径
+                LogManager.shared.debug("保存路径（需要书签）| 路径: \(url.path)")
+            }
         }
     }
 
