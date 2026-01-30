@@ -1,3 +1,17 @@
+# [2026-01-30 21:27]
+- **用户需求/反馈**: "录音已开始"的弹窗有时候会一直展示，消不掉。
+- **技术逻辑变更**: 
+    - **问题分析**：发现两个 bug：
+        1. `showAutoStartNotification()` 的 5 秒定时器没有检查窗口实例，可能关闭错误的窗口
+        2. `dismissReminder()` 在动画的 `completionHandler` 中才清除 `reminderWindow` 引用，如果在 0.2 秒动画期间创建新弹窗，旧动画完成后会错误地清空新弹窗的引用，导致新弹窗永远无法被自动关闭
+    - **修复方案**：
+        - 在 `showAutoStartNotification()` 定时器中添加 `[weak window]` 捕获和 `reminderWindow === window` 检查
+        - 将 `dismissReminder()` 中的 `reminderWindow = nil` 移到动画开始前执行
+- **涉及文件清单**: 
+    - `SimpleRecorder/Views/ReminderWindowController.swift`
+    - `docs/changelog.md`
+- **变更原因**: 修复弹窗无法正常消失的问题，确保所有通知弹窗都能按预期自动关闭。
+
 # [2026-01-30 21:06]
 - **用户需求/反馈**: 如果设置了两个定时任务（如 9 点和 10 点），且录音时长设置为 1 小时，那么 10 点的任务会因为"正在录音"而被跳过。
 - **技术逻辑变更**: 

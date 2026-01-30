@@ -5,6 +5,49 @@
 	<key>logFormatVersion</key>
 	<integer>12</integer>
 	<key>logs</key>
-	<dict/>
+	<dict>
+		<key>5EBB8019-59C0-4B3E-812D-912B37593AF5</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>5EBB8019-59C0-4B3E-812D-912B37593AF5.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>38</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>SimpleRecorder project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>SimpleRecorder</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Release</string>
+			<key>timeStartedRecording</key>
+			<real>791472546.74750197</real>
+			<key>timeStoppedRecording</key>
+			<real>791472574.92055297</real>
+			<key>title</key>
+			<string>Building project SimpleRecorder with scheme SimpleRecorder and configuration Release</string>
+			<key>uniqueIdentifier</key>
+			<string>5EBB8019-59C0-4B3E-812D-912B37593AF5</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

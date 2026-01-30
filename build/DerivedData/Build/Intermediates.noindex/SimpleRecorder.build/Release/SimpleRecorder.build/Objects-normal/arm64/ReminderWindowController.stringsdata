@@ -7,7 +7,7 @@
         "key": "是否启动录音",
         "location": {
           "startingColumn": 18,
-          "startingLine": 310
+          "startingLine": 316
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "计划时间 %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 314
+          "startingLine": 320
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "忽略",
         "location": {
           "startingColumn": 26,
-          "startingLine": 321
+          "startingLine": 327
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "开始录音",
         "location": {
           "startingColumn": 26,
-          "startingLine": 328
+          "startingLine": 334
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "录音已开始",
         "location": {
           "startingColumn": 18,
-          "startingLine": 359
+          "startingLine": 365
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "计划时间 %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 363
+          "startingLine": 369
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "录音已结束",
         "location": {
           "startingColumn": 18,
-          "startingLine": 396
+          "startingLine": 402
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "录音时长：%@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 400
+          "startingLine": 406
         }
       },
       {
@@ -71,7 +71,7 @@
         "key": "知道了",
         "location": {
           "startingColumn": 22,
-          "startingLine": 406
+          "startingLine": 412
         }
       },
       {
@@ -79,7 +79,7 @@
         "key": "录音已中断",
         "location": {
           "startingColumn": 18,
-          "startingLine": 437
+          "startingLine": 443
         }
       },
       {
@@ -87,7 +87,7 @@
         "key": "由于%@，录音已自动保存",
         "location": {
           "startingColumn": 18,
-          "startingLine": 441
+          "startingLine": 447
         }
       },
       {
@@ -95,7 +95,7 @@
         "key": "知道了",
         "location": {
           "startingColumn": 26,
-          "startingLine": 450
+          "startingLine": 456
         }
       },
       {
@@ -103,7 +103,7 @@
         "key": "再次录音",
         "location": {
           "startingColumn": 26,
-          "startingLine": 457
+          "startingLine": 463
         }
       }
     ]

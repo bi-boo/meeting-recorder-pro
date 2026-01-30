@@ -88,15 +88,18 @@ class ReminderWindowController: NSObject {
     func dismissReminder() {
         guard let window = reminderWindow else { return }
 
+        // 【关键修复】在动画开始前立即清除引用
+        // 防止动画期间新弹窗创建后，旧动画的 completionHandler 错误地清除新弹窗的引用
+        reminderWindow = nil
+
         NSAnimationContext.runAnimationGroup(
             { context in
                 context.duration = 0.2
                 context.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 window.animator().alphaValue = 0
             },
-            completionHandler: { [weak self] in
+            completionHandler: {
                 window.orderOut(nil)
-                self?.reminderWindow = nil
             })
     }
 
@@ -165,8 +168,11 @@ class ReminderWindowController: NSObject {
         LogManager.shared.info("显示自动录音通知 | 任务: \(task.timeDisplay)")
 
         // 5秒后自动消失
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            self?.dismissReminder()
+        // 【修复】添加窗口实例检查，确保只关闭当前这个窗口，避免被后续弹窗干扰
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self, weak window] in
+            if let self = self, self.reminderWindow === window {
+                self.dismissReminder()
+            }
         }
     }
 
