@@ -192,14 +192,23 @@ class TimerTaskManager: ObservableObject {
 
         // 启动录音
         let recorderManager = AudioRecorderManager.shared
-        if !recorderManager.isRecording {
+
+        // 【关键修复】如果当前正在录音，先停止旧录音再开始新录音
+        // 确保每个定时任务都能正常执行，不会因为上一个录音未结束而被跳过
+        if recorderManager.isRecording {
+            LogManager.shared.info("检测到正在录音，自动停止当前录音以执行新的定时任务 | 新任务: \(task.timeDisplay)")
+            recorderManager.stopRecording()
+
+            // 延迟 1 秒等待录音完全停止后再开始新录音
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                recorderManager.startRecording()
+                LogManager.shared.info("定时任务自动启动录音（接替上一个录音）| ID: \(task.id)")
+                self?.showAutoStartNotification(for: task)
+            }
+        } else {
             recorderManager.startRecording()
             LogManager.shared.info("定时任务自动启动录音 | ID: \(task.id)")
-
-            // 显示自动消失的通知弹窗
             showAutoStartNotification(for: task)
-        } else {
-            LogManager.shared.warning("录音已在进行中，跳过自动启动")
         }
     }
 

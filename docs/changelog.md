@@ -1,3 +1,28 @@
+# [2026-01-30 21:06]
+- **用户需求/反馈**: 如果设置了两个定时任务（如 9 点和 10 点），且录音时长设置为 1 小时，那么 10 点的任务会因为"正在录音"而被跳过。
+- **技术逻辑变更**: 
+    - **问题分析**：原逻辑在 `handleAutoStartRecording()` 中检测到 `isRecording=true` 时直接跳过新任务，导致用户设置的定时任务被永久错过。
+    - **修复方案**：当新的定时任务触发时，如果当前正在录音，先自动停止旧录音（保存文件），等待 1 秒后再启动新录音。这样每个定时任务都能正常执行，每段录音独立保存。
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/TimerTaskManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 确保用户设置的每个定时任务都能按时执行，不会因为前一个录音未结束而被跳过。
+
+# [2026-01-29 23:46]
+- **用户需求/反馈**: 设置了多个定时任务，第一个录音结束后的弹窗不关闭的话，后面的定时任务就无法触发。
+- **技术逻辑变更**: 
+    - **根因分析**：`AudioRecorderManager` 中的 `showRecordingLimitReachedAlert()` 和 `showRecordingInterruptionAlert()` 使用了阻塞式的 `NSAlert.runModal()` 方法，该方法会阻塞主线程，导致定时任务调度器的回调无法执行，后续定时任务被卡住。
+    - **核心修复**：将阻塞式 `NSAlert.runModal()` 弹窗替换为非阻塞式浮动通知窗口：
+        - 在 `ReminderWindowController.swift` 添加 `showRecordingCompletedNotification(duration:)` 方法（10秒自动消失）
+        - 在 `ReminderWindowController.swift` 添加 `showRecordingInterruptedNotification(reason:onRestart:)` 方法（保留再次录音按钮功能）
+        - 添加对应的 SwiftUI 视图组件 `RecordingCompletedView` 和 `RecordingInterruptedView`
+    - **调用方修改**：在 `AudioRecorderManager.swift` 添加 `notificationController` 属性，并将两个弹窗方法改为调用非阻塞通知
+- **涉及文件清单**: 
+    - `SimpleRecorder/Views/ReminderWindowController.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `docs/changelog.md`
+- **变更原因**: 确保录音完成/中断通知不阻塞主线程，让后续定时任务能够正常触发和执行。
+
 # [2026-01-27 11:46]
 - **用户需求/反馈**: 设置了多个定时录音，但只有第一个生效了，后面的都没有生效。部分"每天"类型的任务显示的下次触发时间是1月26日（过期日期），而非当前日期1月27日。
 - **技术逻辑变更**: 

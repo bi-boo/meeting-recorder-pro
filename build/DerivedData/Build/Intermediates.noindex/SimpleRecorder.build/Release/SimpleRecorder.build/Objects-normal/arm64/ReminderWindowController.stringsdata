@@ -7,7 +7,7 @@
         "key": "是否启动录音",
         "location": {
           "startingColumn": 18,
-          "startingLine": 184
+          "startingLine": 310
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "计划时间 %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 188
+          "startingLine": 314
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "忽略",
         "location": {
           "startingColumn": 26,
-          "startingLine": 195
+          "startingLine": 321
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "开始录音",
         "location": {
           "startingColumn": 26,
-          "startingLine": 202
+          "startingLine": 328
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "录音已开始",
         "location": {
           "startingColumn": 18,
-          "startingLine": 233
+          "startingLine": 359
         }
       },
       {
@@ -47,7 +47,63 @@
         "key": "计划时间 %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 237
+          "startingLine": 363
+        }
+      },
+      {
+        "comment": "",
+        "key": "录音已结束",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 396
+        }
+      },
+      {
+        "comment": "",
+        "key": "录音时长：%@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 400
+        }
+      },
+      {
+        "comment": "",
+        "key": "知道了",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 406
+        }
+      },
+      {
+        "comment": "",
+        "key": "录音已中断",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 437
+        }
+      },
+      {
+        "comment": "",
+        "key": "由于%@，录音已自动保存",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 441
+        }
+      },
+      {
+        "comment": "",
+        "key": "知道了",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 450
+        }
+      },
+      {
+        "comment": "",
+        "key": "再次录音",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 457
         }
       }
     ]

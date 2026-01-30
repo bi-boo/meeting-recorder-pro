@@ -133,6 +133,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var lastStatsLogTime: TimeInterval = 0  // 上次统计日志时间
     private var isHandlingInterruption = false  // 防止中断处理重入
 
+    // 非阻塞通知控制器（用于录音完成/中断通知，避免阻塞主线程）
+    private lazy var notificationController = ReminderWindowController()
+
     private override init() {
         super.init()
         LogManager.shared.info("AudioRecorderManager 初始化")
@@ -1760,17 +1763,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
     // MARK: - UI Alerts
 
     private func showRecordingLimitReachedAlert(duration: TimeInterval) {
-        let minutes = Int(duration / 60)
-        let seconds = Int(duration) % 60
-        let timeString = minutes > 0 ? "\(minutes) 分钟 \(seconds) 秒" : "\(seconds) 秒"
-
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "录音已结束"
-            alert.informativeText = "录音已达到您设置的上限时间，文件已自动保存。\n\n录音时长：\(timeString)"
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "知道了")
-            alert.runModal()
+        // 【关键修复】使用非阻塞式通知，避免阻塞主线程，确保后续定时任务能正常触发
+        DispatchQueue.main.async { [weak self] in
+            self?.notificationController.showRecordingCompletedNotification(duration: duration)
         }
     }
 
@@ -1876,22 +1871,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
     /// 显示录音中断提醒弹窗
     /// - Parameter reason: 中断原因
     private func showRecordingInterruptionAlert(reason: RecordingInterruptionReason) {
-        let alert = NSAlert()
-        alert.messageText = "录音已中断"
-        alert.informativeText = "由于\(reason.localizedDescription)，录音已自动保存。\n\n已录制的内容不会丢失。"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "再次开始录音")
-        alert.addButton(withTitle: "知道了")
-
-        let response = alert.runModal()
-
-        if response == .alertFirstButtonReturn {
-            // 用户点击"再次开始录音"
-            LogManager.shared.info("用户选择重新开始录音")
-            // 【关键修复】延迟 2 秒，等待系统音频路由完全稳定后再启动
-            // 断开蓝牙设备后，系统需要时间切换回默认音频设备
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        // 【关键修复】使用非阻塞式通知，避免阻塞主线程，确保后续定时任务能正常触发
+        notificationController.showRecordingInterruptedNotification(
+            reason: reason.localizedDescription,
+            onRestart: { [weak self] in
                 guard let self = self else { return }
+                LogManager.shared.info("用户选择重新开始录音")
                 // 再次确认状态已重置
                 if !self.isRecording && !self.isTransitioning {
                     self.startRecording()
@@ -1901,9 +1886,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     )
                 }
             }
-        } else {
-            LogManager.shared.info("用户确认录音中断")
-        }
+        )
     }
 
     func formatDuration(_ duration: TimeInterval) -> String {
