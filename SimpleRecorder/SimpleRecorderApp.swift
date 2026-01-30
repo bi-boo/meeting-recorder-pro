@@ -104,6 +104,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 仅当用户在录制来源中选择"系统声音"或"同时录制"时才触发权限申请
         // 用户首次启动应用时不再自动弹出权限请求
 
+        // 【新增】启动时检查录音目录权限，尽早发现问题
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let _ = AudioRecorderManager.shared.checkRecordingDirectoryPermission()
+        }
+
         // 启动定时任务调度器
         TimerTaskManager.shared.startScheduler()
 

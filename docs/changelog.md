@@ -1,3 +1,15 @@
+# [2026-01-30 22:07]
+- **用户需求/反馈**: 启动应用后就检查目录权限，而不是等开始录音时才检查。
+- **技术逻辑变更**: 
+    - 在 `AudioRecorderManager` 中将 `checkDirectoryWritable()` 改为公开方法，并添加 `checkRecordingDirectoryPermission()` 方法供外部调用
+    - 在 `SimpleRecorderApp.swift` 的 `applicationDidFinishLaunching` 中，延迟 0.5 秒后调用目录权限检查
+    - 如果目录权限不足，会立即弹出提示让用户去设置中修改
+- **涉及文件清单**: 
+    - `SimpleRecorder/Managers/AudioRecorderManager.swift`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `docs/changelog.md`
+- **变更原因**: 让用户在应用启动时就能发现目录权限问题，而不是等到需要录音时才报错。
+
 # [2026-01-30 21:27]
 - **用户需求/反馈**: "录音已开始"的弹窗有时候会一直展示，消不掉。
 - **技术逻辑变更**: 

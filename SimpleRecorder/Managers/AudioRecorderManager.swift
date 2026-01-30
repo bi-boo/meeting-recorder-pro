@@ -1748,12 +1748,24 @@ class AudioRecorderManager: NSObject, ObservableObject {
         return true
     }
 
-    private func checkDirectoryWritable(at url: URL) -> Bool {
+    /// 检查目录是否可写（公开方法，用于启动时预检）
+    func checkDirectoryWritable(at url: URL) -> Bool {
         let path = url.path
         if FileManager.default.fileExists(atPath: path) {
             return FileManager.default.isWritableFile(atPath: path)
         }
         return FileManager.default.isWritableFile(atPath: url.deletingLastPathComponent().path)
+    }
+
+    /// 检查录音目录权限（供应用启动时调用）
+    /// - Returns: true 如果目录可写，false 如果不可写（会弹出提示）
+    func checkRecordingDirectoryPermission() -> Bool {
+        let recordingsPath = AppSettings.shared.recordingsPath
+        if !checkDirectoryWritable(at: recordingsPath) {
+            showDirectoryPermissionAlert()
+            return false
+        }
+        return true
     }
 
     private func checkTimeWarning() {
