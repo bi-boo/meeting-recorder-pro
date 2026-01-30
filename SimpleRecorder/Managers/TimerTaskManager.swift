@@ -203,12 +203,27 @@ class TimerTaskManager: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 recorderManager.startRecording()
                 LogManager.shared.info("定时任务自动启动录音（接替上一个录音）| ID: \(task.id)")
-                self?.showAutoStartNotification(for: task)
+                // 【修复】延迟检查录音是否真正开始后才显示弹窗
+                self?.showAutoStartNotificationIfRecording(for: task)
             }
         } else {
             recorderManager.startRecording()
             LogManager.shared.info("定时任务自动启动录音 | ID: \(task.id)")
-            showAutoStartNotification(for: task)
+            // 【修复】延迟检查录音是否真正开始后才显示弹窗
+            showAutoStartNotificationIfRecording(for: task)
+        }
+    }
+
+    /// 只有在录音真正开始后才显示通知
+    /// 延迟 0.5 秒检查录音状态，避免录音失败时弹窗一直显示
+    private func showAutoStartNotificationIfRecording(for task: TimerTask) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            let recorderManager = AudioRecorderManager.shared
+            if recorderManager.isRecording {
+                self?.showAutoStartNotification(for: task)
+            } else {
+                LogManager.shared.warning("录音未成功启动，跳过显示通知弹窗 | 任务: \(task.timeDisplay)")
+            }
         }
     }
 
