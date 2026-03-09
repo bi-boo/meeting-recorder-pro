@@ -102,7 +102,7 @@ struct TimerTaskListView: View {
 
     private func deleteTasks(at offsets: IndexSet) {
         for index in offsets {
-            let task = manager.tasks[index]
+            let task = sortedTasks[index]
             manager.deleteTask(id: task.id)
         }
     }

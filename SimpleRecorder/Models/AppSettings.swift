@@ -97,8 +97,18 @@ class AppSettings: ObservableObject {
 
     // MARK: - 存储路径设置
     @Published var recordingsPath: URL {
-        didSet { savePath(recordingsPath, forKey: "recordingsPath") }
+        didSet {
+            // 路径切换时，停止对旧 Security-Scoped URL 的访问
+            if let prev = securityScopedURL, prev != recordingsPath {
+                prev.stopAccessingSecurityScopedResource()
+                securityScopedURL = nil
+            }
+            savePath(recordingsPath, forKey: "recordingsPath")
+        }
     }
+
+    /// 跟踪当前已通过 startAccessingSecurityScopedResource 开启访问的 URL
+    private var securityScopedURL: URL?
 
     // MARK: - 录音设置
     @Published var maxDurationHours: Int {
@@ -197,11 +207,9 @@ class AppSettings: ObservableObject {
         return false
     }
 
-    /// 检测当前是否拥有“屏幕录制”权限
+    /// 检测当前是否拥有”屏幕录制”权限
     static var hasScreenCapturePermission: Bool {
-        if #available(macOS 14.2, *) {
-            return CGPreflightScreenCaptureAccess()
-        } else if #available(macOS 13.0, *) {
+        if #available(macOS 13.0, *) {
             return CGPreflightScreenCaptureAccess()
         }
         return true
@@ -245,11 +253,10 @@ class AppSettings: ObservableObject {
 
     // MARK: - Initialization
     private init() {
-        // 默认路径: /Users/用户名/会议录音 Pro（位于用户主目录，不需要特殊权限）
-        let realHomeDirectory = URL(fileURLWithPath: "/Users/\(NSUserName())")
+        // 默认路径：沙盒 Documents/Recordings（与 App Sandbox 完全兼容）
         let defaultRecordingsPath =
-            realHomeDirectory
-            .appendingPathComponent("会议录音 Pro")
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Recordings")
 
         // 加载路径设置
         // 方案1: 优先从路径字符串加载（用户主目录内的路径，不需要书签）
@@ -269,6 +276,7 @@ class AppSettings: ObservableObject {
             let accessGranted = url.startAccessingSecurityScopedResource()
             if accessGranted || isStale == false {
                 self.recordingsPath = url
+                self.securityScopedURL = url  // 记录当前有效的 Security-Scoped URL
                 LogManager.shared.debug("从书签恢复路径成功 | 路径: \(url.path)")
             } else {
                 // 书签失效（可能因为应用签名变化），回退到默认路径
@@ -361,8 +369,8 @@ class AppSettings: ObservableObject {
 
     // MARK: - Path Persistence
     private func savePath(_ url: URL, forKey key: String) {
-        // 获取用户主目录
-        let homeDirectory = URL(fileURLWithPath: "/Users/\(NSUserName())")
+        // 获取用户主目录（在沙盒中，homeDirectoryForCurrentUser 返回容器内的 home 路径）
+        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser
 
         // 判断路径是否在用户主目录下（这些路径不需要 Security-Scoped Bookmark）
         if url.path.hasPrefix(homeDirectory.path) {

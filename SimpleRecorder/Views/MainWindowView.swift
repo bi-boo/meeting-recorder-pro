@@ -1,6 +1,26 @@
 import Carbon
 import SwiftUI
 
+// MARK: - onChange 兼容封装（macOS 13/14 双版本适配）
+private struct AudioSourceChangeModifier: ViewModifier {
+    let value: AudioSource
+    let action: (AudioSource) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(macOS 14.0, *) {
+            content.onChange(of: value) { _, newValue in action(newValue) }
+        } else {
+            content.onChange(of: value, perform: action)
+        }
+    }
+}
+
+extension View {
+    func onAudioSourceChange(_ value: AudioSource, perform action: @escaping (AudioSource) -> Void) -> some View {
+        modifier(AudioSourceChangeModifier(value: value, action: action))
+    }
+}
+
 struct MainWindowView: View {
     var body: some View {
         TabView {
@@ -145,7 +165,7 @@ struct BasicSettingsView: View {
                         }
                     }
                     .disabled(recordingManager.isRecording)
-                    .onChange(of: settings.audioSource) { newValue in
+                    .onAudioSourceChange(settings.audioSource) { newValue in
                         if newValue != .microphone {
                             AppSettings.requestScreenCapturePermission()
                             if !AppSettings.hasScreenCapturePermission {

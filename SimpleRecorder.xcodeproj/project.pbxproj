@@ -12,14 +12,14 @@
 		003 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103; };
 		004 /* LogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104; };
 		005 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 105; };
-		006 /* LameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120; };
-		007 /* libmp3lame.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 121; };
 		011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 111; };
 		012 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114; };
 		013 /* TimerTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130; };
 		014 /* TimerTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131; };
 		015 /* ReminderWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132; };
 		016 /* TimerTaskViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 133; };
+		017 /* NativeMP3Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124; };
+		018 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 125; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,10 +33,8 @@
 		112 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		113 /* SimpleRecorder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SimpleRecorder.entitlements; sourceTree = "<group>"; };
 		114 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
-		120 /* LameEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LameEncoder.swift; sourceTree = "<group>"; };
-		121 /* libmp3lame.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libmp3lame.a; sourceTree = "<group>"; };
-		122 /* lame.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lame.h; sourceTree = "<group>"; };
-		123 /* module.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; path = module.modulemap; sourceTree = "<group>"; };
+		124 /* NativeMP3Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMP3Encoder.swift; sourceTree = "<group>"; };
+		125 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		130 /* TimerTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTask.swift; sourceTree = "<group>"; };
 		131 /* TimerTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskManager.swift; sourceTree = "<group>"; };
 		132 /* ReminderWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderWindowController.swift; sourceTree = "<group>"; };
@@ -48,7 +46,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				007 /* libmp3lame.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -69,12 +66,13 @@
 				101 /* SimpleRecorderApp.swift */,
 				112 /* Info.plist */,
 				113 /* SimpleRecorder.entitlements */,
+				125 /* PrivacyInfo.xcprivacy */,
+				124 /* NativeMP3Encoder.swift */,
 				303 /* Managers */,
 				304 /* Models */,
 				305 /* Views */,
 				306 /* Services */,
 				307 /* Resources */,
-				308 /* ThirdParty */,
 			);
 			path = SimpleRecorder;
 			sourceTree = "<group>";
@@ -130,25 +128,6 @@
 				111 /* Assets.xcassets */,
 			);
 			path = Resources;
-			sourceTree = "<group>";
-		};
-		308 /* ThirdParty */ = {
-			isa = PBXGroup;
-			children = (
-				120 /* LameEncoder.swift */,
-				309 /* lame */,
-			);
-			path = ThirdParty;
-			sourceTree = "<group>";
-		};
-		309 /* lame */ = {
-			isa = PBXGroup;
-			children = (
-				121 /* libmp3lame.a */,
-				122 /* lame.h */,
-				123 /* module.modulemap */,
-			);
-			path = lame;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -211,6 +190,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				011 /* Assets.xcassets in Resources */,
+				018 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -226,7 +206,7 @@
 				003 /* HotKeyManager.swift in Sources */,
 				004 /* LogManager.swift in Sources */,
 				005 /* AppSettings.swift in Sources */,
-				006 /* LameEncoder.swift in Sources */,
+				017 /* NativeMP3Encoder.swift in Sources */,
 				012 /* MainWindowView.swift in Sources */,
 				013 /* TimerTask.swift in Sources */,
 				014 /* TimerTaskManager.swift in Sources */,
@@ -370,17 +350,14 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "会议录音 Pro需要访问麦克风来录制音频";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.meetingrecorderpro.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -401,17 +378,14 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "会议录音 Pro需要访问麦克风来录制音频";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.meetingrecorderpro.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;

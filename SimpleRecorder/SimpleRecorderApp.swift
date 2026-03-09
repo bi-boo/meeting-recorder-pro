@@ -13,14 +13,11 @@ struct SimpleRecorderApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // 纯菜单栏应用，使用 WindowGroup 但不显示主窗口
-        WindowGroup {
+        // 纯菜单栏应用 (LSUIElement=true)，Settings 场景不会自动创建任何窗口
+        // 设置窗口由 AppDelegate.showMainWindow() 手动管理
+        Settings {
             EmptyView()
-                .frame(width: 0, height: 0)
-                .hidden()
         }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 0, height: 0)
     }
 }
 
@@ -53,15 +50,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusItem()
         setupHotKey()
-
-        // 隐藏默认的空窗口
-        DispatchQueue.main.async {
-            for window in NSApp.windows {
-                if window.title.isEmpty || window.contentView is NSHostingView<EmptyView> {
-                    window.close()
-                }
-            }
-        }
 
         // 监听录音状态变化
         NotificationCenter.default.addObserver(
@@ -140,7 +128,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// 退出前检查是否正在录音，确保保存
+    /// 退出前检查是否正在录音，确保保存（异步，不阻塞主线程）
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // 停止定时任务调度器
         TimerTaskManager.shared.stopScheduler()
@@ -157,12 +145,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
-                // 用户确认退出，先保存录音
-                LogManager.shared.info("应用退出 | 录音已紧急保存")
-                recordingManager.saveRecordingImmediately()
-                return .terminateNow
+                LogManager.shared.info("应用退出 | 正在保存录音...")
+                // 异步保存，保存完成后通知系统继续退出（不阻塞主线程）
+                recordingManager.saveRecordingImmediately {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                }
+                return .terminateLater
             } else {
-                // 用户取消退出
                 return .terminateCancel
             }
         }

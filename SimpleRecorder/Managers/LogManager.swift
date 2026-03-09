@@ -43,11 +43,9 @@ class LogManager {
 
     /// 日志目录
     private lazy var logDirectory: URL = {
-        let realHomeDirectory = URL(fileURLWithPath: "/Users/\(NSUserName())")
         let logDir =
-            realHomeDirectory
-            .appendingPathComponent("会议录音 Pro")
-            .appendingPathComponent(".日志")
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Logs")
 
         // 确保目录存在
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
@@ -101,10 +99,10 @@ class LogManager {
 
     /// 开始新的录音会话（生成唯一会话 ID）
     func startRecordingSession() -> String {
-        let sessionID = UUID().uuidString.prefix(8).lowercased()
-        currentSessionID = String(sessionID)
-        log(.info, "📍 开始录音会话 | SessionID: \(currentSessionID!)")
-        return currentSessionID!
+        let sessionID = String(UUID().uuidString.prefix(8).lowercased())
+        currentSessionID = sessionID
+        log(.info, "📍 开始录音会话 | SessionID: \(sessionID)")
+        return sessionID
     }
 
     /// 结束当前录音会话
