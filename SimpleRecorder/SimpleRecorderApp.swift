@@ -212,8 +212,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // 录制来源标题
-        let sourceHeader = NSMenuItem(title: "录制来源", action: nil, keyEquivalent: "")
+        // 录音来源标题
+        let sourceHeader = NSMenuItem(title: "录音来源", action: nil, keyEquivalent: "")
         sourceHeader.isEnabled = false
         menu.addItem(sourceHeader)
 
@@ -455,13 +455,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.alphaValue = 1.0  // 录音状态下恢复完全不透明
             button.image = getStatusImage()  // 统一图标样式
+            button.imagePosition = .imageLeading
 
             if AppSettings.shared.showDurationWhenRecording {
                 button.title = " 已暂停"
-                button.imagePosition = .imageLeading
             } else {
-                button.title = ""
-                button.imagePosition = .imageOnly
+                // 即使不显示时长，也需标注暂停状态，避免与空闲状态混淆
+                button.title = " ‖"
             }
         }
     }

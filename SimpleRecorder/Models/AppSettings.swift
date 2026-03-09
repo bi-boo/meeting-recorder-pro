@@ -79,7 +79,7 @@ enum TimerActionType: String, CaseIterable, Codable {
 
     var displayName: String {
         switch self {
-        case .remind: return "提前提醒"
+        case .remind: return "到时提醒我"
         case .autoStart: return "自动录音"
         }
     }

@@ -38,7 +38,7 @@ struct TimerTaskListView: View {
             Section {
                 if manager.tasks.isEmpty {
                     // 空状态（简洁提示）
-                    Text("暂无定时计划，点击下方添加")
+                    Text("还没有定时计划，点击「添加」自动在固定时间开始录音")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
@@ -56,39 +56,52 @@ struct TimerTaskListView: View {
                 }
 
                 // 添加按钮（达到上限时禁用）
-                Button(action: { showingAddSheet = true }) {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundColor(isAtLimit ? .secondary : .green)
-                        Text(isAtLimit ? "已达上限（最多\(maxTaskCount)个）" : "添加定时计划")
+                VStack(alignment: .leading, spacing: 4) {
+                    Button(action: { showingAddSheet = true }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundColor(isAtLimit ? .secondary : .green)
+                            Text("添加定时计划")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isAtLimit)
+
+                    if isAtLimit {
+                        Text("最多添加 \(maxTaskCount) 个计划")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 4)
                     }
                 }
-                .buttonStyle(.plain)
-                .disabled(isAtLimit)
             } header: {
                 Text("定时录音计划")
                     .padding(.bottom, 4)
             } footer: {
-                Text("定时计划生效条件：电脑未睡眠 + App 后台运行")
+                Text("定时计划需要电脑处于唤醒状态且应用在后台运行时触发")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
-            // 系统控制开关
+            // 开机与唤醒开关
             Section {
                 Toggle("开机自动启动", isOn: $settings.launchAtLogin)
                     .tint(.green)
 
-                // 录音时禁止系统睡眠：始终开启且不可修改（仅作为信息展示）
-                Toggle("录音时，禁止系统睡眠", isOn: .constant(true))
+                // 录音期间保持唤醒：始终开启且不可修改（仅作为信息展示）
+                Toggle("录音期间，保持电脑唤醒", isOn: .constant(true))
                     .tint(.green)
                     .disabled(true)
 
-                Toggle("有定时计划时，禁止系统睡眠", isOn: $settings.preventSleepWithSchedule)
+                Toggle("有启用的定时计划时，保持电脑唤醒", isOn: $settings.preventSleepWithSchedule)
                     .tint(.green)
             } header: {
-                Text("系统控制")
+                Text("开机与唤醒")
                     .padding(.bottom, 4)
+            } footer: {
+                Text("「录音期间保持唤醒」为强制设置，确保录音完整性，无法关闭")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -119,7 +132,7 @@ struct TimerTaskRow: View {
         if task.actionType == .autoStart {
             return "自动录音"
         } else {
-            return "提前\(task.reminderMinutes)分钟"
+            return "提前 \(task.reminderMinutes) 分钟提醒"
         }
     }
 
@@ -157,9 +170,14 @@ struct TimerTaskRow: View {
                 }
             }
 
+            // 编辑入口指示
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
             // 启用开关
             Toggle(
-                "",
+                "启用",
                 isOn: Binding(
                     get: { task.enabled },
                     set: { _ in manager.toggleTaskEnabled(id: task.id) }
@@ -167,6 +185,7 @@ struct TimerTaskRow: View {
             )
             .labelsHidden()
             .tint(.green)
+            .accessibilityLabel("启用 \(task.timeDisplay)")
         }
         .padding(.vertical, 6)
         .opacity(task.enabled ? 1 : 0.6)
@@ -287,8 +306,8 @@ struct TimerTaskEditView: View {
                     }
                 }
 
-                // 定时类型
-                Section("触发方式") {
+                // 录音方式
+                Section("录音方式") {
                     Picker("定时类型", selection: $actionType) {
                         ForEach(TimerActionType.allCases, id: \.self) { type in
                             Text(type.displayName).tag(type)
@@ -297,13 +316,13 @@ struct TimerTaskEditView: View {
                     .pickerStyle(.segmented)
 
                     if actionType == .remind {
-                        Picker("提前提醒", selection: $reminderMinutes) {
+                        Picker("提醒时间", selection: $reminderMinutes) {
                             ForEach(1...10, id: \.self) { min in
                                 Text("\(min) 分钟").tag(min)
                             }
                         }
 
-                        Text("到达时间前弹窗询问是否开始录音")
+                        Text("到达时间前，弹出提示询问是否开始录音")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     } else {
@@ -343,7 +362,7 @@ struct TimerTaskEditView: View {
         .alert("时间冲突", isPresented: $showConflictAlert) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("该时间点已有定时计划，请选择其他时间")
+            Text(String(format: "%02d:%02d 已有定时计划，请换一个时间。", hour, minute))
         }
     }
 
@@ -454,6 +473,14 @@ struct DayButton: View {
     let isSelected: Bool
     let action: () -> Void
 
+    private var accessibilityName: String {
+        let mapping: [String: String] = [
+            "一": "星期一", "二": "星期二", "三": "星期三",
+            "四": "星期四", "五": "星期五", "六": "星期六", "日": "星期日"
+        ]
+        return mapping[name] ?? name
+    }
+
     var body: some View {
         Button(action: action) {
             Text(name)
@@ -466,6 +493,7 @@ struct DayButton: View {
                 .foregroundColor(isSelected ? .white : .primary)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(isSelected ? "\(accessibilityName)，已选" : accessibilityName)
     }
 }
 

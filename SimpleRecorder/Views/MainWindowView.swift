@@ -41,7 +41,7 @@ struct MainWindowView: View {
 
             AboutView()
                 .tabItem {
-                    Label("核心功能", systemImage: "info.circle")
+                    Label("关于", systemImage: "info.circle")
                 }
         }
         .frame(minWidth: 560, minHeight: 620)  // 稍微增大窗口，给内容更多呼吸空间
@@ -71,7 +71,7 @@ struct AboutView: View {
                             "录音过程中，文件循环保存。即使电脑突然断电、应用意外崩溃或被强制退出，已录制的内容都不会丢失。"
                     )
                     FeatureItem(
-                        title: "防止休眠",
+                        title: "屏幕关闭也能录",
                         subtitle:
                             "录音期间系统保持唤醒状态。即使关闭屏幕，录音也能在后台继续进行，适合需要长时间录音的场景。"
                     )
@@ -80,8 +80,8 @@ struct AboutView: View {
                         subtitle: "无论在使用什么应用程序，只需按下预设的快捷键，即可立即开始或结束录音，无需切换窗口。"
                     )
                     FeatureItem(
-                        title: "内外同时录制",
-                        subtitle: "支持同时录制麦克风输入和系统内部声音。戴耳机参加线上会议时，也能完整录下对方发言和你自己的声音。"
+                        title: "双声道同时录制",
+                        subtitle: "支持同时录制麦克风和系统声音。戴耳机参加线上会议时，也能完整录下对方发言和你自己的声音。"
                     )
                     FeatureItem(
                         title: "定时录音",
@@ -133,6 +133,7 @@ struct BasicSettingsView: View {
                             isRecording: $isRecordingShortcut,
                             currentHotKey: hotKeyManager.recordHotKey,
                             conflictKey: hotKeyManager.pauseHotKey,
+                            conflictKeyName: "暂停/继续录音",
                             onHotKeyRecorded: { config in
                                 hotKeyManager.saveRecordHotKey(config)
                             }
@@ -146,6 +147,7 @@ struct BasicSettingsView: View {
                             isRecording: $isRecordingPauseShortcut,
                             currentHotKey: hotKeyManager.pauseHotKey,
                             conflictKey: hotKeyManager.recordHotKey,
+                            conflictKeyName: "开始/结束录音",
                             onHotKeyRecorded: { config in
                                 hotKeyManager.savePauseHotKey(config)
                             }
@@ -159,11 +161,12 @@ struct BasicSettingsView: View {
 
             Section {
                 VStack(spacing: 14) {
-                    Picker("录制来源", selection: $settings.audioSource) {
+                    Picker("录音来源", selection: $settings.audioSource) {
                         ForEach(AudioSource.allCases, id: \.self) { source in
                             Text(source.displayName).tag(source)
                         }
                     }
+                    .labelsHidden()
                     .disabled(recordingManager.isRecording)
                     .onAudioSourceChange(settings.audioSource) { newValue in
                         if newValue != .microphone {
@@ -196,7 +199,7 @@ struct BasicSettingsView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "info.circle")
                                 .foregroundColor(.blue)
-                            Text("录音中，设置将在下次录音时生效")
+                            Text("正在录音中，设置将在下次录音时生效")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -208,7 +211,7 @@ struct BasicSettingsView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "info.circle")
                                 .foregroundColor(.orange)
-                            Text("系统声音录制需要 macOS 13.0 或更高版本")
+                            Text("录音系统声音需要 macOS 13 或更新版本")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -219,7 +222,7 @@ struct BasicSettingsView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "lock.shield")
                                 .foregroundColor(.orange)
-                            Text("录制系统声音需要授予「屏幕录制」权限")
+                            Text("录音系统声音需要「屏幕录制」权限")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -233,7 +236,7 @@ struct BasicSettingsView: View {
                 }
                 .padding(.vertical, 4)
             } header: {
-                Text("录制来源").padding(.bottom, 4)
+                Text("录音来源").padding(.bottom, 4)
             }
 
             Section {
@@ -245,7 +248,7 @@ struct BasicSettingsView: View {
                             Button("在 Finder 中打开") {
                                 NSWorkspace.shared.open(settings.recordingsPath)
                             }
-                            Button("更改...") {
+                            Button("更改位置...") {
                                 selectFolder(for: \.recordingsPath)
                             }
                         }
@@ -253,7 +256,7 @@ struct BasicSettingsView: View {
 
                     Text(settings.recordingsPath.path)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.secondary.opacity(0.8))
+                        .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .padding(.horizontal, 8)
@@ -296,7 +299,7 @@ struct AdvancedSettingsView: View {
             Section {
                 VStack(spacing: 16) {
                     HStack {
-                        Text("单次录音时长上限")
+                        Text("单次录音最长时长")
                         Spacer()
                         HStack(spacing: 10) {
                             Picker("", selection: $settings.maxDurationHours) {
@@ -332,7 +335,7 @@ struct AdvancedSettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         Text("M4A")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                             .padding(.horizontal, 3)
                             .padding(.vertical, 0.5)
                             .background(Color.secondary.opacity(0.12))
@@ -341,7 +344,7 @@ struct AdvancedSettingsView: View {
                     }
                     HStack(spacing: 6) {
                         Text("MP3")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                             .padding(.horizontal, 3)
                             .padding(.vertical, 0.5)
                             .background(Color.secondary.opacity(0.12))
@@ -350,7 +353,7 @@ struct AdvancedSettingsView: View {
                     }
                 }
                 .font(.system(size: 11))
-                .foregroundColor(.secondary.opacity(0.8))
+                .foregroundColor(.secondary)
                 .padding(.top, 6)
             }
 
@@ -363,10 +366,10 @@ struct AdvancedSettingsView: View {
                         }
                     }
 
-                    Toggle("录制时显示时长", isOn: $settings.showDurationWhenRecording)
+                    Toggle("录音时显示已录时长", isOn: $settings.showDurationWhenRecording)
                         .tint(.green)
 
-                    Toggle("空闲时图标变暗", isOn: $settings.dimIconWhenIdle)
+                    Toggle("未录音时图标变暗", isOn: $settings.dimIconWhenIdle)
                         .tint(.green)
                 }
                 .padding(.vertical, 4)
@@ -375,17 +378,13 @@ struct AdvancedSettingsView: View {
             }
 
             Section {
-                HStack {
-                    Text("运行日志")
-                    Spacer()
-                    Button("打开日志文件夹") {
-                        let logDir = LogManager.shared.getLogDirectory()
-                        NSWorkspace.shared.open(logDir)
-                    }
+                Button("打开日志文件夹") {
+                    let logDir = LogManager.shared.getLogDirectory()
+                    NSWorkspace.shared.open(logDir)
                 }
                 .padding(.vertical, 4)
             } header: {
-                Text("日志").padding(.bottom, 4)
+                Text("诊断日志").padding(.bottom, 4)
             }
         }
         .formStyle(.grouped)
@@ -398,6 +397,7 @@ struct ShortcutRecorderView: View {
     @Binding var isRecording: Bool
     let currentHotKey: HotKeyManager.HotKeyConfiguration?
     var conflictKey: HotKeyManager.HotKeyConfiguration? = nil
+    var conflictKeyName: String = "其他功能"
     let onHotKeyRecorded: (HotKeyManager.HotKeyConfiguration) -> Void
     @State private var eventMonitor: Any?
     @State private var showConflictAlert = false
@@ -419,7 +419,7 @@ struct ShortcutRecorderView: View {
                 Text(hotKey.displayString)
                     .frame(minWidth: 120)
             } else {
-                Text("点击设置")
+                Text("未设置")
                     .foregroundColor(.secondary)
                     .frame(minWidth: 120)
             }
@@ -429,9 +429,9 @@ struct ShortcutRecorderView: View {
             stopMonitoring()
         }
         .alert("快捷键冲突", isPresented: $showConflictAlert) {
-            Button("确定", role: .cancel) {}
+            Button("重新设置", role: .cancel) {}
         } message: {
-            Text("该快捷键已被其他功能使用，请选择不同的快捷键。")
+            Text("此快捷键已用于「\(conflictKeyName)」，请换一个组合键。")
         }
     }
 

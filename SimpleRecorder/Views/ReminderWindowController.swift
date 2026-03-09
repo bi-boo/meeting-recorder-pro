@@ -41,7 +41,7 @@ class ReminderWindowController: NSObject {
 
         // 创建 NSWindow
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 260, height: 130),
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 165),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -136,7 +136,7 @@ class ReminderWindowController: NSObject {
 
         // 创建 NSWindow
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 260, height: 80),
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 110),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -191,7 +191,7 @@ class ReminderWindowController: NSObject {
 
         // 创建 NSWindow
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 100),
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 150),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -262,7 +262,7 @@ class ReminderWindowController: NSObject {
 
         // 创建 NSWindow
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 140),
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 170),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -310,21 +310,30 @@ struct ReminderView: View {
     let onIgnore: () -> Void
     let onStartRecording: () -> Void
 
+    private var ignoreButtonTitle: String {
+        task.repeatType == .none ? "取消" : "跳过这次"
+    }
+
     var body: some View {
         VStack(spacing: 10) {
+            // 图标
+            Image(systemName: "clock.badge.questionmark")
+                .font(.system(size: 24))
+                .foregroundColor(.secondary)
+
             // 主标题
-            Text("是否启动录音")
+            Text("开始录音了吗？")
                 .font(.system(size: 14, weight: .semibold))
 
             // 副标题 - 计划时间
-            Text("计划时间 \(task.timeDisplay)")
+            Text("定时计划：\(task.timeDisplay)")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
 
             // 按钮区域
             HStack(spacing: 12) {
                 Button(action: onIgnore) {
-                    Text("忽略")
+                    Text(ignoreButtonTitle)
                         .frame(width: 80)
                 }
                 .buttonStyle(.bordered)
@@ -336,13 +345,12 @@ struct ReminderView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .tint(.red)
             }
             .padding(.top, 4)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
-        .frame(width: 260)
+        .frame(width: 280)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(NSColor.windowBackgroundColor))
@@ -361,18 +369,23 @@ struct AutoStartNotificationView: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            // 图标
+            Image(systemName: "record.circle.fill")
+                .font(.system(size: 24))
+                .foregroundColor(.green)
+
             // 主标题
             Text("录音已开始")
                 .font(.system(size: 14, weight: .semibold))
 
             // 副标题 - 计划时间
-            Text("计划时间 \(task.timeDisplay)")
+            Text("定时计划 \(task.timeDisplay) 已触发")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
-        .frame(width: 260)
+        .frame(width: 280)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(NSColor.windowBackgroundColor))
@@ -398,8 +411,13 @@ struct RecordingCompletedView: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            // 图标
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 24))
+                .foregroundColor(.green)
+
             // 主标题
-            Text("录音已结束")
+            Text("录音完成")
                 .font(.system(size: 14, weight: .semibold))
 
             // 副标题 - 录音时长
@@ -407,13 +425,25 @@ struct RecordingCompletedView: View {
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
 
-            // 确认按钮
-            Button(action: onDismiss) {
-                Text("知道了")
-                    .frame(width: 80)
+            // 按钮区域
+            HStack(spacing: 12) {
+                Button(action: onDismiss) {
+                    Text("知道了")
+                        .frame(width: 80)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+
+                Button(action: {
+                    NSWorkspace.shared.open(AppSettings.shared.recordingsPath)
+                    onDismiss()
+                }) {
+                    Text("在 Finder 中显示")
+                        .frame(width: 100)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
             .padding(.top, 2)
         }
         .padding(.horizontal, 24)
@@ -439,12 +469,17 @@ struct RecordingInterruptedView: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            // 图标
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 24))
+                .foregroundColor(.orange)
+
             // 主标题
             Text("录音已中断")
                 .font(.system(size: 14, weight: .semibold))
 
             // 副标题 - 中断原因
-            Text("由于\(reason)，录音已自动保存")
+            Text("已自动保存录音。原因：\(reason)")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -465,7 +500,6 @@ struct RecordingInterruptedView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .tint(.red)
             }
             .padding(.top, 2)
         }
