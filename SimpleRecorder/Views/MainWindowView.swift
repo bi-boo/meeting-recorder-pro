@@ -51,7 +51,7 @@ struct MainWindowView: View {
 // MARK: - 核心功能
 struct AboutView: View {
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
                 // 应用名称
                 Text("会议录音 Pro")
@@ -166,7 +166,6 @@ struct BasicSettingsView: View {
                             Text(source.displayName).tag(source)
                         }
                     }
-                    .labelsHidden()
                     .disabled(recordingManager.isRecording)
                     .onAudioSourceChange(settings.audioSource) { newValue in
                         if newValue != .microphone {
