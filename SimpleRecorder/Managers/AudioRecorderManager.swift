@@ -147,6 +147,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var lastStatsLogTime: TimeInterval = 0  // 上次统计日志时间
     private var isHandlingInterruption = false  // 防止中断处理重入
 
+    // 丢帧诊断计数（步骤 1：定量分析写入繁忙频率）
+    private var droppedFrameCount: Int = 0
+    private var totalFrameCount: Int = 0
+
     // 非阻塞通知控制器（用于录音完成/中断通知，避免阻塞主线程）
     private lazy var notificationController = ReminderWindowController()
 
@@ -610,6 +614,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
         lastWarningTime = 0
         lastDiskCheckTime = Date().timeIntervalSince1970
         isHandlingInterruption = false
+        droppedFrameCount = 0
+        totalFrameCount = 0
 
         hasPrintedFirstSample = false
         hasPrintedSystemAudioFormat = false
@@ -654,7 +660,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 self.lastStatsLogTime = currentTime
                 let framesWritten = self.framesCounter.withLock { $0 }
                 let durationStr = String(format: "%.1f", self.recordingDuration)
-                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten)")
+                let dropRate = self.totalFrameCount > 0 ? String(format: "%.2f%%", Double(self.droppedFrameCount) / Double(self.totalFrameCount) * 100) : "N/A"
+                let hwFormat = self.audioEngine.inputNode.inputFormat(forBus: 0)
+                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 丢帧: \(self.droppedFrameCount)/\(self.totalFrameCount) (\(dropRate)), 硬件格式: \(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
             }
         }
 
@@ -729,13 +737,27 @@ class AudioRecorderManager: NSObject, ObservableObject {
         LogManager.shared.info(
             "硬件输入格式 | 采样率: \(hwFormat.sampleRate)Hz, 声道: \(hwFormat.channelCount)ch")
 
-        // 3. 设置录音混音器
-        setupRecordingMixer()
+        // 3. 纯麦克风模式优化：跳过 recordingMixer，直接在 inputNode 上安装 tap
+        // installTap 的 format 参数会让 AVAudioEngine 内部自动处理格式转换（重采样+声道映射），
+        // 省去 AVAudioMixerNode 额外的混音处理层，减少一个潜在的缓冲抖动源
+        audioEngine.mainMixerNode.outputVolume = 0  // 静音输出（仅录制，不播放）
 
-        // 4. 连接麦克风到录音混音器 (AVAudioEngine 自动处理麦克风到 48k 的重采样)
-        audioEngine.connect(inputNode, to: recordingMixer, format: recordingFormat)
+        let format = recordingFormat
+        inputNode.installTap(onBus: 0, bufferSize: 2048, format: format) {
+            [weak self] buffer, time in
+            guard let self = self, self.isRecording else { return }
 
-        installRecordingTap()
+            let pts = self.framesCounter.withLock { frames -> CMTime in
+                let current = frames
+                frames += Int64(buffer.frameLength)
+                return CMTime(value: current, timescale: Int32(format.sampleRate))
+            }
+
+            if buffer.frameLength > 0 {
+                self.totalFrameCount += 1
+                self.processAudioBufferWithPTS(buffer, pts: pts)
+            }
+        }
     }
 
     private func setupRecordingMixer() {
@@ -769,6 +791,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             }
 
             if buffer.frameLength > 0 {
+                self.totalFrameCount += 1
                 self.processAudioBufferWithPTS(buffer, pts: pts)
             }
         }
@@ -825,9 +848,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
             }
         }
 
-        // 如果输出态队列耗尽，立即进入缓冲态重积攒 3 个包，消除所有模式下的断续感
+        // 队列耗尽时输出静音（已 memset 0），但不重新进入缓冲态
+        // isSystemAudioBuffering = true 仅在首次启动和暂停恢复时设置，
+        // 避免运行中因瞬时耗尽反复触发"缓冲→等 3 包→恢复"循环导致断续
         if systemAudioBufferQueue.isEmpty {
-            isSystemAudioBuffering = true
             return noErr
         }
 
@@ -1148,7 +1172,13 @@ class AudioRecorderManager: NSObject, ObservableObject {
             // 这样能够彻底消除由于采样率转换耗时导致的渲染线程（fillSystemAudioBuffer）阻塞，
             // 进而消除了由于锁竞争产生的“断续感”。
             var error: NSError?
+            var hasProvided = false
             activeConverter.convert(to: finalBuffer, error: &error) { inNumPackets, outStatus in
+                if hasProvided {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                hasProvided = true
                 outStatus.pointee = .haveData
                 return tempBuffer
             }
@@ -1248,10 +1278,18 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     }
                 }
             } else {
-                // 如果写入繁忙，跳过本帧，由于 pts 已锁定，不会缩短时长
-                if Date().timeIntervalSince1970 - self.lastWarningTime > 2.0 {
-                    LogManager.shared.warning("写入队列繁忙，临时丢弃采样")
-                    self.lastWarningTime = Date().timeIntervalSince1970
+                // 写入繁忙：短暂等待后重试一次，而不是直接丢弃
+                usleep(2000)  // 2ms，远小于 43ms 的 buffer 间隔
+                if currentInput.isReadyForMoreMediaData {
+                    if let sampleBuffer = self.createSampleBuffer(from: bufferCopy, pts: pts) {
+                        if !currentInput.append(sampleBuffer) {
+                            LogManager.shared.error("追加采样数据失败（重试后）")
+                        }
+                    }
+                } else {
+                    // 重试后仍写不进去，记录并丢弃
+                    self.droppedFrameCount += 1
+                    LogManager.shared.warning("写入队列繁忙，丢弃采样 | 累计丢帧: \(self.droppedFrameCount)")
                 }
             }
         }
@@ -1325,8 +1363,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         let finalDuration = recordingDuration
         let finalFrames = framesCounter.withLock { $0 }
+        let dropRate = totalFrameCount > 0 ? String(format: "%.2f%%", Double(droppedFrameCount) / Double(totalFrameCount) * 100) : "N/A"
         LogManager.shared.info(
-            "正在结束录音 | 已录制时长: \(String(format: "%.1f", finalDuration))s, 总帧数: \(finalFrames)")
+            "正在结束录音 | 已录制时长: \(String(format: "%.1f", finalDuration))s, 总帧数: \(finalFrames), 丢帧: \(droppedFrameCount)/\(totalFrameCount) (\(dropRate))")
         recordingTimer?.invalidate()
         recordingTimer = nil
 
