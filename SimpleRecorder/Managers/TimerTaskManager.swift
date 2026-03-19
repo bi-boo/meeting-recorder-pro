@@ -257,28 +257,17 @@ class TimerTaskManager: ObservableObject {
             saveTasks()
         }
 
-        // 启动录音
         let recorderManager = AudioRecorderManager.shared
 
-        // 【关键修复】如果当前正在录音，先停止旧录音再开始新录音
-        // 确保每个定时任务都能正常执行，不会因为上一个录音未结束而被跳过
+        // 如果已经在录音（用户手动提前开始），跳过本次定时启动，继续当前录音
         if recorderManager.isRecording {
-            LogManager.shared.info("检测到正在录音，自动停止当前录音以执行新的定时任务 | 新任务: \(task.timeDisplay)")
-            recorderManager.stopRecording()
-
-            // 延迟 1 秒等待录音完全停止后再开始新录音
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                recorderManager.startRecording()
-                LogManager.shared.info("定时任务自动启动录音（接替上一个录音）| ID: \(task.id)")
-                // 【修复】延迟检查录音是否真正开始后才显示弹窗
-                self?.showAutoStartNotificationIfRecording(for: task)
-            }
-        } else {
-            recorderManager.startRecording()
-            LogManager.shared.info("定时任务自动启动录音 | ID: \(task.id)")
-            // 【修复】延迟检查录音是否真正开始后才显示弹窗
-            showAutoStartNotificationIfRecording(for: task)
+            LogManager.shared.info("已在录音中，跳过定时自动启动 | 任务: \(task.timeDisplay)")
+            return
         }
+
+        recorderManager.startRecording()
+        LogManager.shared.info("定时任务自动启动录音 | ID: \(task.id)")
+        showAutoStartNotificationIfRecording(for: task)
     }
 
     /// 只有在录音真正开始后才显示通知
