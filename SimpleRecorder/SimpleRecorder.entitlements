@@ -2,8 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!--
+        ⚠️ 临时配置：sandbox 禁用以让 PermissionFlow 的拖拽授权动画能工作。
+        PermissionFlow 内部用 AX API 跨进程访问 com.apple.systempreferences,
+        受 App Sandbox 限制无法工作。
+        上架 Mac App Store 前必须改回 true,并对 PermissionFlow 调用做 sandbox 兜底。
+    -->
     <key>com.apple.security.app-sandbox</key>
-    <true/>
+    <false/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
     <key>com.apple.security.files.user-selected.read-write</key>
