@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import PermissionFlow
 import SwiftUI
 
 @main
@@ -276,13 +277,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let source = AudioSource(rawValue: rawValue)
         else { return }
 
-        // 如果选择需要系统音频权限的选项，先检查权限
-        if source != .microphone {
-            if !AppSettings.hasScreenCapturePermission {
-                AppSettings.requestScreenCapturePermission()
-                AppSettings.openScreenCaptureSettings()
-                return
+        // 选择需要屏幕录制权限的音源时,如果未授权,触发 PermissionFlow 拖拽授权动画
+        if source != .microphone && !AppSettings.hasScreenCapturePermission {
+            LogManager.shared.info("从菜单栏触发屏幕录制权限引导 | 目标音源: \(source.displayName)")
+
+            // 计算菜单栏图标在屏幕坐标系下的位置,作为动画飞行起点
+            let sourceFrame: CGRect = {
+                guard let button = statusItem.button,
+                    let buttonWindow = button.window
+                else {
+                    return CGRect(
+                        x: NSEvent.mouseLocation.x - 16,
+                        y: NSEvent.mouseLocation.y - 16,
+                        width: 32, height: 32)
+                }
+                let buttonFrameInWindow = button.convert(button.bounds, to: nil)
+                return buttonWindow.convertToScreen(buttonFrameInWindow)
+            }()
+
+            // PermissionFlow API 是 @MainActor isolated,而 @objc selector 默认不是,
+            // 用 Task { @MainActor in ... } 切到 MainActor 上调用。
+            // 使用默认 configuration——不请求 Accessibility 权限。
+            // PermissionFlow 内部在无 AX 时会回退到 Window Server polling,
+            // 悬浮窗仍能跟踪系统设置窗口,只是响应速度略慢——录音 app 没必要为此让用户授权「控制电脑」。
+            Task { @MainActor in
+                PermissionFlow.makeController().authorize(
+                    pane: .screenRecording,
+                    suggestedAppURLs: [Bundle.main.bundleURL],
+                    sourceFrameInScreen: sourceFrame
+                )
             }
+            return
         }
 
         AppSettings.shared.audioSource = source
