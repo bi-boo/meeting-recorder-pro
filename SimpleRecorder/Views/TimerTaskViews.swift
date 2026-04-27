@@ -233,6 +233,7 @@ struct TimerTaskEditView: View {
     @State private var actionType: TimerActionType = .autoStart
     @State private var reminderMinutes: Int = 2
     @State private var showConflictAlert: Bool = false
+    @State private var showMissingDaysAlert: Bool = false
 
     // 1分钟粒度的分钟选项（方便测试）
     private let minuteOptions = stride(from: 0, to: 60, by: 1).map { $0 }
@@ -364,6 +365,11 @@ struct TimerTaskEditView: View {
         } message: {
             Text(String(format: "%02d:%02d 已有定时计划，请换一个时间。", hour, minute))
         }
+        .alert("请选择星期", isPresented: $showMissingDaysAlert) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("每周重复至少需要选择一天。")
+        }
     }
 
     private func loadExistingTask() {
@@ -379,6 +385,11 @@ struct TimerTaskEditView: View {
     }
 
     private func saveTask() {
+        if repeatType == .weekly && selectedDays.isEmpty {
+            showMissingDaysAlert = true
+            return
+        }
+
         // 检查时间冲突（相同时间点不允许重复）
         let existingTaskID = mode.existingTask?.id
         let hasConflict = manager.tasks.contains { task in

@@ -161,11 +161,26 @@ class TimerTaskManager: ObservableObject {
 
         let now = Date()
 
-        // 找出所有启用且未触发的任务中，最近的下一个触发时间
+        // 如果某个任务已经进入触发窗口，立即检查，避免因为睡眠/启动延迟漏触发。
+        let hasDueTask = tasks.contains { task in
+            task.enabled && !triggeredTaskIDs.contains(task.id) && task.shouldTriggerReminder(at: now)
+        }
+
+        if hasDueTask {
+            LogManager.shared.info("检测到已到触发窗口的定时任务，立即检查")
+            DispatchQueue.main.async { [weak self] in
+                self?.checkAndTriggerReminders()
+                self?.scheduleNextTrigger()
+            }
+            return
+        }
+
+        // 找出所有启用且未触发的任务中，最近的下一个实际检查时间。
+        // 提醒模式需要提前 reminderMinutes 分钟触发，自动录音则在计划时间触发。
         let nextTriggerDate =
             tasks
             .filter { $0.enabled && !triggeredTaskIDs.contains($0.id) }
-            .compactMap { $0.nextTriggerTime }
+            .compactMap { scheduledCheckTime(for: $0) }
             .filter { $0 > now }
             .min()
 
@@ -208,6 +223,14 @@ class TimerTaskManager: ObservableObject {
 
         timer.resume()
         precisionTimer = timer
+    }
+
+    /// 返回任务应该被调度器唤醒检查的时间。
+    private func scheduledCheckTime(for task: TimerTask) -> Date? {
+        guard let next = task.nextTriggerTime else { return nil }
+
+        let leadTimeMinutes = task.actionType == .remind ? task.reminderMinutes : 0
+        return next.addingTimeInterval(-Double(leadTimeMinutes) * 60)
     }
 
     /// 检查并触发提醒或自动录音
@@ -254,20 +277,33 @@ class TimerTaskManager: ObservableObject {
         // 标记任务为已触发
         if let index = tasks.firstIndex(where: { $0.id == task.id }) {
             tasks[index].markAsTriggered()
+            triggeredTaskIDs.remove(task.id)
             saveTasks()
         }
 
+        startRecordingForTimerTask(taskID: task.id, taskDisplay: task.timeDisplay) { [weak self] in
+            self?.showAutoStartNotificationIfRecording(for: task)
+        }
+    }
+
+    /// 定时任务触发时启动录音；若当前正在录音，本次任务直接跳过。
+    private func startRecordingForTimerTask(
+        taskID: UUID,
+        taskDisplay: String,
+        onStartRequested: (() -> Void)? = nil
+    ) {
         let recorderManager = AudioRecorderManager.shared
 
-        // 如果已经在录音（用户手动提前开始），跳过本次定时启动，继续当前录音
         if recorderManager.isRecording {
-            LogManager.shared.info("已在录音中，跳过定时自动启动 | 任务: \(task.timeDisplay)")
+            LogManager.shared.info("已在录音中，跳过本次定时启动 | 任务: \(taskDisplay)")
+            scheduleNextTrigger()
             return
         }
 
         recorderManager.startRecording()
-        LogManager.shared.info("定时任务自动启动录音 | ID: \(task.id)")
-        showAutoStartNotificationIfRecording(for: task)
+        LogManager.shared.info("定时任务启动录音 | ID: \(taskID)")
+        onStartRequested?()
+        scheduleNextTrigger()
     }
 
     /// 只有在录音真正开始后才显示通知
@@ -315,27 +351,24 @@ class TimerTaskManager: ObservableObject {
 
         // 标记为已触发，更新下次时间
         tasks[index].markAsTriggered()
+        triggeredTaskIDs.remove(taskID)
         saveTasks()
 
         LogManager.shared.info("用户忽略定时提醒 | ID: \(taskID)")
+        scheduleNextTrigger()
     }
 
     /// 处理开始录音
     private func handleStartRecording(taskID: UUID) {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        let taskDisplay = tasks[index].timeDisplay
 
         // 标记为已触发
         tasks[index].markAsTriggered()
+        triggeredTaskIDs.remove(taskID)
         saveTasks()
 
-        // 启动录音
-        let recorderManager = AudioRecorderManager.shared
-        if !recorderManager.isRecording {
-            recorderManager.startRecording()
-            LogManager.shared.info("定时任务启动录音 | ID: \(taskID)")
-        } else {
-            LogManager.shared.warning("录音已在进行中，跳过定时启动")
-        }
+        startRecordingForTimerTask(taskID: taskID, taskDisplay: taskDisplay)
     }
 
     /// 清理过期的触发记录
@@ -366,22 +399,7 @@ class TimerTaskManager: ObservableObject {
             let decoder = JSONDecoder()
             var loadedTasks = try decoder.decode([TimerTask].self, from: data)
 
-            // 重新计算所有任务的下次触发时间
-            // 使用临时数组更新后再赋值，确保触发 @Published 通知
-            for index in loadedTasks.indices {
-                let oldTime = loadedTasks[index].nextTriggerTime
-                loadedTasks[index].calculateNextTriggerTime()
-                let newTime = loadedTasks[index].nextTriggerTime
-
-                // 记录时间变化日志，便于调试
-                if oldTime != newTime {
-                    LogManager.shared.info(
-                        "任务时间更新 | ID: \(loadedTasks[index].id.uuidString.prefix(8)) | "
-                            + "旧时间: \(oldTime?.description ?? "nil") | "
-                            + "新时间: \(newTime?.description ?? "nil")"
-                    )
-                }
-            }
+            refreshTaskSchedules(&loadedTasks, preservingDueTriggersAt: Date())
 
             // 重新赋值整个数组，触发 @Published 响应式更新
             tasks = loadedTasks
@@ -407,6 +425,35 @@ class TimerTaskManager: ObservableObject {
             updateSleepPreventionState()
         } catch {
             LogManager.shared.error("保存定时任务失败 | 错误: \(error.localizedDescription)")
+        }
+    }
+
+    /// 刷新任务时间，但保留当前仍处于触发窗口内的任务，避免启动/唤醒时漏掉刚到点的计划。
+    private func refreshTaskSchedules(
+        _ taskList: inout [TimerTask],
+        preservingDueTriggersAt date: Date
+    ) {
+        for index in taskList.indices {
+            let oldTime = taskList[index].nextTriggerTime
+
+            if taskList[index].enabled, taskList[index].shouldTriggerReminder(at: date) {
+                LogManager.shared.info(
+                    "保留待触发任务时间 | ID: \(taskList[index].id.uuidString.prefix(8)) | "
+                        + "时间: \(oldTime?.description ?? "nil")"
+                )
+                continue
+            }
+
+            taskList[index].calculateNextTriggerTime()
+            let newTime = taskList[index].nextTriggerTime
+
+            if oldTime != newTime {
+                LogManager.shared.info(
+                    "任务时间更新 | ID: \(taskList[index].id.uuidString.prefix(8)) | "
+                        + "旧时间: \(oldTime?.description ?? "nil") | "
+                        + "新时间: \(newTime?.description ?? "nil")"
+                )
+            }
         }
     }
 
@@ -436,15 +483,14 @@ class TimerTaskManager: ObservableObject {
 
         // 使用临时数组更新后重新赋值，触发 @Published 通知
         var updatedTasks = tasks
-        for index in updatedTasks.indices {
-            updatedTasks[index].calculateNextTriggerTime()
-        }
+        refreshTaskSchedules(&updatedTasks, preservingDueTriggersAt: Date())
         tasks = updatedTasks
 
         // 清空触发记录，重新检查
         triggeredTaskIDs.removeAll()
         saveTasks()
         checkAndTriggerReminders()
+        scheduleNextTrigger()
     }
 
     @objc private func handleWakeFromSleep() {
@@ -452,14 +498,13 @@ class TimerTaskManager: ObservableObject {
 
         // 使用临时数组更新后重新赋值，触发 @Published 通知
         var updatedTasks = tasks
-        for index in updatedTasks.indices {
-            updatedTasks[index].calculateNextTriggerTime()
-        }
+        refreshTaskSchedules(&updatedTasks, preservingDueTriggersAt: Date())
         tasks = updatedTasks
 
         triggeredTaskIDs.removeAll()
         saveTasks()
         checkAndTriggerReminders()
+        scheduleNextTrigger()
     }
 
     deinit {

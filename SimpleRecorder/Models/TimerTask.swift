@@ -239,6 +239,7 @@ struct TimerTask: Identifiable, Codable, Equatable {
 
     /// 触发后更新（调用此方法表示任务已触发）
     mutating func markAsTriggered() {
+        let completedTriggerTime = nextTriggerTime
         lastTriggerTime = Date()
 
         // 重新计算下一次触发时间
@@ -248,8 +249,19 @@ struct TimerTask: Identifiable, Codable, Equatable {
             enabled = false
             nextTriggerTime = nil
         case .daily, .weekly:
-            // 循环任务：计算下一次
-            calculateNextTriggerTime()
+            // 循环任务：基于本次计划时间之后计算下一轮。
+            // 提前提醒会在计划时间前触发，不能用当前时间重新计算，否则会再次指向本次计划时间。
+            let calendar = Calendar.current
+            let referenceDate = completedTriggerTime?.addingTimeInterval(1) ?? Date()
+            switch repeatType {
+            case .daily:
+                nextTriggerTime = calculateNextOccurrence(from: referenceDate, calendar: calendar)
+            case .weekly:
+                nextTriggerTime = calculateNextWeeklyOccurrence(
+                    from: referenceDate, calendar: calendar)
+            case .none:
+                break
+            }
         }
 
         updatedAt = Date()

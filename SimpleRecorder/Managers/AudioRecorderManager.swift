@@ -52,6 +52,10 @@ enum RecordingInterruptionReason {
     }
 }
 
+private final class NotificationObserverBox {
+    var token: NSObjectProtocol?
+}
+
 class AudioRecorderManager: NSObject, ObservableObject {
     static let shared = AudioRecorderManager()
 
@@ -564,19 +568,15 @@ class AudioRecorderManager: NSObject, ObservableObject {
             }
 
             // 【关键】必须停止 SCStream 以释放屏幕录制权限
-            if #available(macOS 13.0, *) {
-                let stream = systemAudioStream
-                systemAudioStream = nil
-                systemAudioOutput = nil
-                Task {
-                    try? await stream?.stopCapture()
-                }
+            let stream = systemAudioStream
+            systemAudioStream = nil
+            systemAudioOutput = nil
+            Task {
+                try? await stream?.stopCapture()
             }
 
             // 清空缓冲队列
-            systemAudioQueueLock.lock()
-            systemAudioBufferQueue.removeAll()
-            systemAudioQueueLock.unlock()
+            clearSystemAudioBufferQueue()
 
             // 清理已创建但未完成的 AssetWriter
             if let writer = assetWriter {
@@ -688,10 +688,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
             audioEngine.stop()
         }
 
-        // 2. 移除所有可能存在的 tap（使用 try/catch 防止崩溃）
-        do {
-            audioEngine.inputNode.removeTap(onBus: 0)
-        } catch {}
+        // 2. 移除所有可能存在的 tap
+        audioEngine.inputNode.removeTap(onBus: 0)
         recordingMixer?.removeTap(onBus: 0)
 
         // 3. 清理之前可能残留的节点
@@ -1006,11 +1004,20 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            var uid: CFString? = nil
-            var uidSize = UInt32(MemoryLayout<CFString?>.size)
-            AudioObjectGetPropertyData(id, &uidAddress, 0, nil, &uidSize, &uid)
+            let uidPointer = UnsafeMutablePointer<CFString?>.allocate(capacity: 1)
+            uidPointer.initialize(to: nil)
+            defer {
+                uidPointer.deinitialize(count: 1)
+                uidPointer.deallocate()
+            }
 
-            if let uidString = uid as String?, uidString == deviceUID {
+            var uidSize = UInt32(MemoryLayout<CFString?>.size)
+            let uidStatus = AudioObjectGetPropertyData(
+                id, &uidAddress, 0, nil, &uidSize, uidPointer)
+
+            if uidStatus == noErr, let uidString = uidPointer.pointee as String?,
+                uidString == deviceUID
+            {
                 var defaultInputAddress = AudioObjectPropertyAddress(
                     mSelector: kAudioHardwarePropertyDefaultInputDevice,
                     mScope: kAudioObjectPropertyScopeGlobal,
@@ -1203,6 +1210,13 @@ class AudioRecorderManager: NSObject, ObservableObject {
             }
             LogManager.shared.warning("系统音频缓冲队列已满，丢弃旧数据 | 队列大小: \(systemAudioQueueLimit)")
         }
+    }
+
+    private func clearSystemAudioBufferQueue() {
+        systemAudioQueueLock.lock()
+        systemAudioBufferQueue.removeAll()
+        systemAudioBufferReadOffset = 0
+        systemAudioQueueLock.unlock()
     }
 
     // MARK: - 直接处理系统音频并写入 AssetWriter
@@ -1548,11 +1562,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 若已进入 stopping 状态（finishWriting 正在异步执行），
         // 不重复调用 finishWriting（会导致 crash），而是等待现有流程完成后触发 completion
         if recordingState == .stopping {
-            var token: NSObjectProtocol?
-            token = NotificationCenter.default.addObserver(
+            let observerBox = NotificationObserverBox()
+            observerBox.token = NotificationCenter.default.addObserver(
                 forName: .recordingStateChanged, object: nil, queue: .main
             ) { _ in
-                if let t = token { NotificationCenter.default.removeObserver(t) }
+                if let token = observerBox.token {
+                    NotificationCenter.default.removeObserver(token)
+                    observerBox.token = nil
+                }
                 completion?()
             }
             return

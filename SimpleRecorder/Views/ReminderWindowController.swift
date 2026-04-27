@@ -15,6 +15,7 @@ class ReminderWindowController: NSObject {
     private var reminderWindow: NSWindow?
     private var onIgnoreCallback: (() -> Void)?
     private var onStartRecordingCallback: (() -> Void)?
+    private var isTimerReminderActive = false
 
     /// 显示提醒弹窗
     func showReminder(
@@ -22,11 +23,12 @@ class ReminderWindowController: NSObject {
         onIgnore: @escaping () -> Void,
         onStartRecording: @escaping () -> Void
     ) {
+        finishActiveTimerReminderAsIgnored(reason: "被新的定时提醒替换")
+        dismissReminder()
+
         self.onIgnoreCallback = onIgnore
         self.onStartRecordingCallback = onStartRecording
-
-        // 如果已有弹窗，先关闭
-        dismissReminder()
+        self.isTimerReminderActive = true
 
         // 创建弹窗视图
         let reminderView = ReminderView(
@@ -77,6 +79,8 @@ class ReminderWindowController: NSObject {
             // 只有当窗口仍然是当前显示的那个窗口时才关闭
             if let self = self, self.reminderWindow === window {
                 LogManager.shared.info("定时提醒弹窗到达预设提醒时间（\(task.reminderMinutes)min），自动失效")
+                let callback = self.consumeTimerReminderIgnoreCallback()
+                callback?()
                 self.dismissReminder()
             }
         }
@@ -117,18 +121,20 @@ class ReminderWindowController: NSObject {
     }
 
     private func handleIgnore() {
-        onIgnoreCallback?()
+        let callback = consumeTimerReminderIgnoreCallback()
+        callback?()
         dismissReminder()
     }
 
     private func handleStartRecording() {
-        onStartRecordingCallback?()
+        let callback = consumeTimerReminderStartCallback()
+        callback?()
         dismissReminder()
     }
 
     /// 显示自动录音通知（5秒后自动消失）
     func showAutoStartNotification(for task: TimerTask) {
-        // 如果已有弹窗，先关闭
+        finishActiveTimerReminderAsIgnored(reason: "被自动录音通知替换")
         dismissReminder()
 
         // 创建通知视图
@@ -179,7 +185,7 @@ class ReminderWindowController: NSObject {
     /// 显示录音完成通知（非阻塞，10秒后自动消失）
     /// - Parameter duration: 录音时长（秒）
     func showRecordingCompletedNotification(duration: TimeInterval) {
-        // 如果已有弹窗，先关闭
+        finishActiveTimerReminderAsIgnored(reason: "被录音完成通知替换")
         dismissReminder()
 
         // 创建通知视图
@@ -237,8 +243,11 @@ class ReminderWindowController: NSObject {
     ///   - reason: 中断原因描述
     ///   - onRestart: 用户点击"再次开始录音"时的回调
     func showRecordingInterruptedNotification(reason: String, onRestart: @escaping () -> Void) {
+        finishActiveTimerReminderAsIgnored(reason: "被录音中断通知替换")
+
         // 记录回调
         self.onStartRecordingCallback = onRestart
+        self.isTimerReminderActive = false
 
         // 如果已有弹窗，先关闭
         dismissReminder()
@@ -300,6 +309,34 @@ class ReminderWindowController: NSObject {
                 self.onStartRecordingCallback = nil
             }
         }
+    }
+
+    private func finishActiveTimerReminderAsIgnored(reason: String) {
+        guard isTimerReminderActive else { return }
+
+        LogManager.shared.info("定时提醒弹窗\(reason)，按忽略处理")
+        let callback = consumeTimerReminderIgnoreCallback()
+        callback?()
+    }
+
+    private func consumeTimerReminderIgnoreCallback() -> (() -> Void)? {
+        guard isTimerReminderActive else { return nil }
+
+        let callback = onIgnoreCallback
+        onIgnoreCallback = nil
+        onStartRecordingCallback = nil
+        isTimerReminderActive = false
+        return callback
+    }
+
+    private func consumeTimerReminderStartCallback() -> (() -> Void)? {
+        guard isTimerReminderActive else { return nil }
+
+        let callback = onStartRecordingCallback
+        onIgnoreCallback = nil
+        onStartRecordingCallback = nil
+        isTimerReminderActive = false
+        return callback
     }
 }
 
