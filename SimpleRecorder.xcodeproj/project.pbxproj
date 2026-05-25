@@ -20,6 +20,12 @@
 		016 /* TimerTaskViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 133; };
 		017 /* NativeMP3Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124; };
 		018 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 125; };
+		020 /* AudioRecorderManager+Engine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140; };
+		021 /* AudioRecorderManager+SystemAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 141; };
+		022 /* AudioRecorderManager+Writer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142; };
+		023 /* AudioRecorderManager+Device.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143; };
+		024 /* AudioRecorderManager+UI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144; };
+		030 /* PermissionFlow in Frameworks */ = {isa = PBXBuildFile; productRef = 060 /* PermissionFlow */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +45,11 @@
 		131 /* TimerTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskManager.swift; sourceTree = "<group>"; };
 		132 /* ReminderWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderWindowController.swift; sourceTree = "<group>"; };
 		133 /* TimerTaskViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskViews.swift; sourceTree = "<group>"; };
+		140 /* AudioRecorderManager+Engine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+Engine.swift"; sourceTree = "<group>"; };
+		141 /* AudioRecorderManager+SystemAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+SystemAudio.swift"; sourceTree = "<group>"; };
+		142 /* AudioRecorderManager+Writer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+Writer.swift"; sourceTree = "<group>"; };
+		143 /* AudioRecorderManager+Device.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+Device.swift"; sourceTree = "<group>"; };
+		144 /* AudioRecorderManager+UI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+UI.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -46,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				030 /* PermissionFlow in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -89,6 +101,11 @@
 			isa = PBXGroup;
 			children = (
 				102 /* AudioRecorderManager.swift */,
+				140 /* AudioRecorderManager+Engine.swift */,
+				141 /* AudioRecorderManager+SystemAudio.swift */,
+				142 /* AudioRecorderManager+Writer.swift */,
+				143 /* AudioRecorderManager+Device.swift */,
+				144 /* AudioRecorderManager+UI.swift */,
 				103 /* HotKeyManager.swift */,
 				104 /* LogManager.swift */,
 				131 /* TimerTaskManager.swift */,
@@ -146,6 +163,9 @@
 			dependencies = (
 			);
 			name = SimpleRecorder;
+			packageProductDependencies = (
+				060 /* PermissionFlow */,
+			);
 			productName = SimpleRecorder;
 			productReference = 100 /* SimpleRecorder.app */;
 			productType = "com.apple.product-type.application";
@@ -175,6 +195,9 @@
 				"zh-Hans",
 			);
 			mainGroup = 300;
+			packageReferences = (
+				800 /* XCRemoteSwiftPackageReference "PermissionFlow" */,
+			);
 			productRefGroup = 302 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -203,6 +226,11 @@
 			files = (
 				001 /* SimpleRecorderApp.swift in Sources */,
 				002 /* AudioRecorderManager.swift in Sources */,
+				020 /* AudioRecorderManager+Engine.swift in Sources */,
+				021 /* AudioRecorderManager+SystemAudio.swift in Sources */,
+				022 /* AudioRecorderManager+Writer.swift in Sources */,
+				023 /* AudioRecorderManager+Device.swift in Sources */,
+				024 /* AudioRecorderManager+UI.swift in Sources */,
 				003 /* HotKeyManager.swift in Sources */,
 				004 /* LogManager.swift in Sources */,
 				005 /* AppSettings.swift in Sources */,
@@ -412,6 +440,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		800 /* XCRemoteSwiftPackageReference "PermissionFlow" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/bi-boo/PermissionFlow.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		060 /* PermissionFlow */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800 /* XCRemoteSwiftPackageReference "PermissionFlow" */;
+			productName = PermissionFlow;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 600 /* Project object */;
 }

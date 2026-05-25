@@ -1,4 +1,5 @@
 import Carbon
+import PermissionFlow
 import SwiftUI
 
 // MARK: - onChange 兼容封装（macOS 13/14 双版本适配）
@@ -168,15 +169,22 @@ struct BasicSettingsView: View {
                     }
                     .disabled(recordingManager.isRecording)
                     .onAudioSourceChange(settings.audioSource) { newValue in
-                        if newValue != .microphone {
-                            AppSettings.requestScreenCapturePermission()
-                            if !AppSettings.hasScreenCapturePermission {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    AppSettings.openScreenCaptureSettings()
-                                }
-                                DispatchQueue.main.async {
-                                    settings.audioSource = .microphone
-                                }
+                        if newValue != .microphone && !AppSettings.hasScreenCapturePermission {
+                            LogManager.shared.info(
+                                "从主窗口触发屏幕录制权限引导 | 目标音源: \(newValue.displayName)")
+                            // 命令式触发 PermissionFlow：自动打开系统设置 + 飞行动画 + 拖拽授权悬浮窗
+                            // 用默认 configuration——不主动请求 Accessibility 权限,
+                            // PermissionFlow 内部在无 AX 时会回退到 Window Server polling,悬浮窗仍可跟踪。
+                            let mouse = NSEvent.mouseLocation
+                            let sourceFrame = CGRect(
+                                x: mouse.x - 16, y: mouse.y - 16, width: 32, height: 32)
+                            PermissionFlow.makeController().authorize(
+                                pane: .screenRecording,
+                                suggestedAppURLs: [Bundle.main.bundleURL],
+                                sourceFrameInScreen: sourceFrame
+                            )
+                            DispatchQueue.main.async {
+                                settings.audioSource = .microphone
                             }
                         }
                     }
@@ -214,22 +222,6 @@ struct BasicSettingsView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Spacer()
-                        }
-                    } else if !AppSettings.hasScreenCapturePermission
-                        && settings.audioSource != .microphone
-                    {
-                        HStack(spacing: 6) {
-                            Image(systemName: "lock.shield")
-                                .foregroundColor(.orange)
-                            Text("录音系统声音需要「屏幕录制」权限")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Button("前往设置") {
-                                AppSettings.openScreenCaptureSettings()
-                            }
-                            .font(.caption)
-                            .buttonStyle(.borderless)
                         }
                     }
                 }
