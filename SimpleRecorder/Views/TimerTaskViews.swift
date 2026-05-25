@@ -93,13 +93,17 @@ struct TimerTaskListView: View {
                     .tint(.green)
                     .disabled(true)
 
+                Toggle("录制系统音频时，禁止屏幕关闭", isOn: .constant(true))
+                    .tint(.green)
+                    .disabled(true)
+
                 Toggle("有启用的定时计划时，保持电脑唤醒", isOn: $settings.preventSleepWithSchedule)
                     .tint(.green)
             } header: {
                 Text("开机与唤醒")
                     .padding(.bottom, 4)
             } footer: {
-                Text("「录音期间保持唤醒」为强制设置，确保录音完整性，无法关闭")
+                Text("「录音期间保持唤醒」和「系统音频禁止屏幕关闭」为强制设置，确保录音完整性，无法关闭")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

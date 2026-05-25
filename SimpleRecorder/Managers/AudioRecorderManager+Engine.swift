@@ -44,6 +44,9 @@ extension AudioRecorderManager {
             print("⚠️ 系统版本不支持系统音频采集，已降级为麦克风模式")
         }
 
+        // 系统音频采集依赖 ScreenCaptureKit 的显示器捕获对象，需在启动采集前阻止显示器睡眠。
+        setupDisplaySleepPreventionForSystemAudio()
+
         // 根据音频源类型选择不同的启动方式
         switch currentAudioSource {
         case .microphone:
@@ -132,6 +135,7 @@ extension AudioRecorderManager {
                 currentRecordingURL = nil
             }
 
+            releaseDisplaySleepPrevention()
             recordingState = .idle
         }
     }
@@ -229,6 +233,7 @@ extension AudioRecorderManager {
                 currentRecordingURL = nil
             }
 
+            releaseDisplaySleepPrevention()
             recordingState = .idle
         }
     }
@@ -479,34 +484,78 @@ extension AudioRecorderManager {
 
     /// 开启防止休眠断言
     func setupSleepPrevention() {
-        let reason = "正在录音中，确保进程不被系统休眠中断。" as CFString
+        if sleepAssertionID == 0 {
+            let reason = "正在录音中，确保进程不被系统休眠中断。" as CFString
+            let result = IOPMAssertionCreateWithDescription(
+                kIOPMAssertionTypeNoIdleSleep as CFString,
+                "SimpleRecorderAudioRecording" as CFString,
+                reason,
+                nil,
+                nil,
+                0,
+                nil,
+                &sleepAssertionID
+            )
+
+            if result == kIOReturnSuccess {
+                LogManager.shared.info("已开启录音防休眠断言 | AssertionID: \(sleepAssertionID)")
+            } else {
+                LogManager.shared.warning("开启防休眠断言失败 | 错误码: \(result)")
+            }
+        }
+
+        setupDisplaySleepPreventionForSystemAudio()
+    }
+
+    /// 录制系统音频时阻止显示器睡眠，避免 ScreenCaptureKit 捕获对象失效导致录音中断
+    func setupDisplaySleepPreventionForSystemAudio() {
+        guard currentAudioSource == .systemAudio || currentAudioSource == .both else { return }
+        guard displaySleepAssertionID == 0 else { return }
+
+        let reason = "正在录制系统音频，保持显示器唤醒以避免系统音频采集中断。" as CFString
         let result = IOPMAssertionCreateWithDescription(
-            kIOPMAssertionTypeNoIdleSleep as CFString,
-            "SimpleRecorderAudioRecording" as CFString,
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+            "MeetingRecorderProSystemAudioDisplay" as CFString,
             reason,
             nil,
             nil,
             0,
             nil,
-            &sleepAssertionID
+            &displaySleepAssertionID
         )
 
         if result == kIOReturnSuccess {
-            LogManager.shared.info("已开启录音防休眠断言 | AssertionID: \(sleepAssertionID)")
+            LogManager.shared.info("已开启系统音频防显示器睡眠断言 | AssertionID: \(displaySleepAssertionID)")
         } else {
-            LogManager.shared.warning("开启防休眠断言失败 | 错误码: \(result)")
+            LogManager.shared.warning("开启系统音频防显示器睡眠断言失败 | 错误码: \(result)")
         }
     }
 
     /// 释放防止休眠断言
     func releaseSleepPrevention() {
-        guard sleepAssertionID != 0 else { return }
-        let result = IOPMAssertionRelease(sleepAssertionID)
+        if sleepAssertionID != 0 {
+            let result = IOPMAssertionRelease(sleepAssertionID)
+            if result == kIOReturnSuccess {
+                LogManager.shared.info("已释放录音防休眠断言")
+                sleepAssertionID = 0
+            } else {
+                LogManager.shared.warning("释放防休眠断言失败 | 错误码: \(result)")
+            }
+        }
+
+        releaseDisplaySleepPrevention()
+    }
+
+    /// 释放系统音频防显示器睡眠断言
+    func releaseDisplaySleepPrevention() {
+        guard displaySleepAssertionID != 0 else { return }
+
+        let result = IOPMAssertionRelease(displaySleepAssertionID)
         if result == kIOReturnSuccess {
-            LogManager.shared.info("已释放录音防休眠断言")
-            sleepAssertionID = 0
+            LogManager.shared.info("已释放系统音频防显示器睡眠断言")
+            displaySleepAssertionID = 0
         } else {
-            LogManager.shared.warning("释放防休眠断言失败 | 错误码: \(result)")
+            LogManager.shared.warning("释放系统音频防显示器睡眠断言失败 | 错误码: \(result)")
         }
     }
 }

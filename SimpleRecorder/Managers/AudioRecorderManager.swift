@@ -91,6 +91,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         label: "com.simplerecorder.writingQueue", qos: .userInitiated)
     var recordingTimer: Timer?
     var sleepAssertionID: IOPMAssertionID = 0
+    var displaySleepAssertionID: IOPMAssertionID = 0
     var accumulatedDuration: TimeInterval = 0
     var currentSegmentStartTime: Date?
     var actualStartTime: Date?
