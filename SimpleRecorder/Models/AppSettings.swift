@@ -398,7 +398,7 @@ class AppSettings: ObservableObject {
             position: .unspecified)
 
         let devices = session.devices
-        var newDevices = [AudioInputDevice.defaultDevice]
+        var physicalDevices = [AudioInputDevice]()
 
         for device in devices {
             let deviceName = device.localizedName
@@ -408,9 +408,23 @@ class AppSettings: ObservableObject {
             let isPhysical = isPhysicalAudioDevice(uid: deviceUID)
 
             if isPhysical {
-                newDevices.append(AudioInputDevice(id: deviceUID, name: deviceName))
+                physicalDevices.append(AudioInputDevice(id: deviceUID, name: deviceName))
             }
         }
+
+        let defaultDeviceName: String
+        if let defaultDevice = currentDefaultInputDeviceInfo() {
+            let defaultIsCapturable = physicalDevices.contains { $0.id == defaultDevice.id }
+            defaultDeviceName =
+                defaultIsCapturable
+                ? "系统默认（\(defaultDevice.name)）"
+                : "系统默认（\(defaultDevice.name)，不可用）"
+        } else {
+            defaultDeviceName = "系统默认"
+        }
+
+        var newDevices = [AudioInputDevice(id: "default", name: defaultDeviceName)]
+        newDevices.append(contentsOf: physicalDevices)
 
         // 同步更新设备列表（确保菜单栏可以立即获取）
         self.availableInputDevices = newDevices
@@ -420,6 +434,61 @@ class AppSettings: ObservableObject {
         {
             self.selectedDeviceID = "default"
         }
+    }
+
+    private func currentDefaultInputDeviceInfo() -> AudioInputDevice? {
+        var defaultInputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultInputAddress,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+
+        guard status == noErr, deviceID != 0 else {
+            return nil
+        }
+
+        var nameAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var name: CFString?
+        size = UInt32(MemoryLayout<CFString?>.size)
+        let nameStatus = withUnsafeMutablePointer(to: &name) { pointer in
+            AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &size, pointer)
+        }
+
+        guard nameStatus == noErr else {
+            return nil
+        }
+
+        var uidAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var uid: CFString?
+        size = UInt32(MemoryLayout<CFString?>.size)
+        let uidStatus = withUnsafeMutablePointer(to: &uid) { pointer in
+            AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &size, pointer)
+        }
+
+        guard uidStatus == noErr, let uidString = uid as String? else {
+            return nil
+        }
+
+        return AudioInputDevice(id: uidString, name: (name as String?) ?? uidString)
     }
 
     /// 使用 Core Audio 检测设备是否为物理设备

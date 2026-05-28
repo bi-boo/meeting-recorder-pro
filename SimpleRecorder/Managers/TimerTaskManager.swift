@@ -294,8 +294,8 @@ class TimerTaskManager: ObservableObject {
     ) {
         let recorderManager = AudioRecorderManager.shared
 
-        if recorderManager.isRecording {
-            LogManager.shared.info("已在录音中，跳过本次定时启动 | 任务: \(taskDisplay)")
+        if recorderManager.isRecordingOrStarting {
+            LogManager.shared.info("录音已在进行或启动中，跳过本次定时启动 | 任务: \(taskDisplay)")
             scheduleNextTrigger()
             return
         }

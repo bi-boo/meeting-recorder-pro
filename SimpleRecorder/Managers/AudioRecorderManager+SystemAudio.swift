@@ -51,11 +51,19 @@ extension AudioRecorderManager {
         // 2. 混合录制：开启弹性缓冲以对齐异构时钟
         isSystemAudioBuffering = true
 
-        // 3. 麦克风 -> Bus 0 (使用 0.7 增益)
+        // 3. 麦克风 -> Bus 0。麦克风保持 1.0，避免系统音存在时人声过轻。
         let inputNode = audioEngine.inputNode
+        let micFormat = inputNode.outputFormat(forBus: 0)
+        guard micFormat.sampleRate > 0, micFormat.channelCount > 0 else {
+            throw NSError(
+                domain: "AudioRecorder", code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "当前麦克风输出格式不可用"])
+        }
+        LogManager.shared.info(
+            "混合录音麦克风输出格式 | 采样率: \(micFormat.sampleRate)Hz, 声道: \(micFormat.channelCount)ch")
         audioEngine.connect(
-            inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: recordingFormat)
-        inputNode.volume = 0.7
+            inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: micFormat)
+        inputNode.volume = 1.0
 
         // 4. 启动系统音频采集
         try await startSystemAudioCapture()
@@ -73,7 +81,7 @@ extension AudioRecorderManager {
                 sourceNode, to: recordingMixer, fromBus: 0, toBus: 1, format: recordingFormat)
             // 6. 系统音也设为 0.7 增益，在轻量缓冲策略下 0.7 已足够安全
             sourceNode.volume = 0.7
-            print("🎸 混合链路定向加固：Mic(v0.7), Sys(v0.7), 轻量弹性缓冲已开启")
+            print("🎸 混合链路定向加固：Mic(v1.0), Sys(v0.7), 轻量弹性缓冲已开启")
         }
 
         installRecordingTap()
@@ -304,11 +312,18 @@ extension AudioRecorderManager {
         systemAudioBufferQueue.append(buffer)
         if systemAudioBufferQueue.count > systemAudioQueueLimit {
             systemAudioBufferQueue.removeFirst()
+            systemAudioOverflowDropCount += 1
             // 如果删掉的是当前正在读的帧（理论不应发生），重置偏移
             if systemAudioBufferReadOffset > 0 {
                 systemAudioBufferReadOffset = 0
             }
-            LogManager.shared.warning("系统音频缓冲队列已满，丢弃旧数据 | 队列大小: \(systemAudioQueueLimit)")
+            let now = Date().timeIntervalSince1970
+            if now - lastSystemAudioOverflowLogTime >= systemAudioOverflowLogInterval {
+                lastSystemAudioOverflowLogTime = now
+                LogManager.shared.warning(
+                    "系统音频缓冲队列已满，丢弃旧数据 | 队列大小: \(systemAudioQueueLimit), 本轮丢弃: \(systemAudioOverflowDropCount)")
+                systemAudioOverflowDropCount = 0
+            }
         }
     }
 
@@ -369,14 +384,14 @@ class SystemAudioStreamOutput: NSObject, SCStreamOutput {
 extension AudioRecorderManager: SCStreamDelegate {
     /// 系统音频采集流发生错误时的回调
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        LogManager.shared.error("系统音频采集流停止 | 错误: \(error.localizedDescription)")
-
         // 只有在录音中且使用系统音频时才处理
-        guard isRecording, !isPaused,
+        guard recordingState == .recording,
             currentAudioSource == .systemAudio || currentAudioSource == .both
         else {
             return
         }
+
+        LogManager.shared.error("系统音频采集流停止 | 错误: \(error.localizedDescription)")
 
         // 触发录音中断处理
         DispatchQueue.main.async { [weak self] in

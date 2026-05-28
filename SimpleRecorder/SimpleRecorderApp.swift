@@ -30,6 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var animationTimer: Timer?
     private var lastToggleTime: Date = .distantPast  // 用于防抖
     private var lastTimeString: String = ""
+    private var startingIndicatorStep: Int = 0
 
     // 动态获取当前配置的图标
     private func getStatusImage() -> NSImage? {
@@ -176,11 +177,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.autoenablesItems = false  // 必须禁用，否则手动设置的 isEnabled 会被覆盖
 
         // 录音控制
+        let recordingState = recordingManager.recordingState
         let isRecording = recordingManager.isRecording
+        let isStarting = recordingManager.isStarting
+        let isStopping = recordingState == .stopping
+        let isSessionBusy = recordingManager.isRecordingOrStarting
         let isPaused = recordingManager.isPaused
+        let recordTitle: String
+        if isStarting {
+            recordTitle = "正在启动录音..."
+        } else if isStopping {
+            recordTitle = "正在保存录音..."
+        } else {
+            recordTitle = isRecording ? "结束录音" : "开始录音"
+        }
 
         let recordItem = NSMenuItem(
-            title: isRecording ? "结束录音" : "开始录音",
+            title: recordTitle,
             action: #selector(toggleRecording),
             keyEquivalent: ""
         )
@@ -192,6 +205,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             recordItem.keyEquivalentModifierMask = [.command, .option, .control]
         }
         recordItem.target = self
+        recordItem.isEnabled = !isStarting && !isStopping
         menu.addItem(recordItem)
 
         // 暂停/继续控制
@@ -208,7 +222,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             pauseItem.keyEquivalentModifierMask = [.command, .option, .control]
         }
         pauseItem.target = self
-        pauseItem.isEnabled = isRecording  // 录音时启用
+        pauseItem.isEnabled = recordingState == .recording || recordingState == .paused
         menu.addItem(pauseItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -219,7 +233,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(sourceHeader)
 
         // 录制来源选项
-        let isCurrentlyRecording = recordingManager.isRecording
         for source in AudioSource.allCases {
             let item = NSMenuItem(
                 title: source.displayName, action: #selector(selectAudioSource(_:)),
@@ -228,7 +241,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.representedObject = source.rawValue
             item.state = AppSettings.shared.audioSource == source ? .on : .off
             // 【边界逻辑】录音时禁用录制来源切换，避免用户困惑
-            item.isEnabled = !isCurrentlyRecording
+            item.isEnabled = !isSessionBusy
             menu.addItem(item)
         }
 
@@ -249,7 +262,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.representedObject = device.id
             item.state = device.id == settings.selectedDeviceID ? .on : .off
             // 【边界逻辑】录音时禁用麦克风切换；仅系统声音模式下也禁用
-            item.isEnabled = !isCurrentlyRecording && settings.audioSource != .systemAudio
+            item.isEnabled = !isSessionBusy && settings.audioSource != .systemAudio
             menu.addItem(item)
         }
 
@@ -340,6 +353,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         lastToggleTime = now
 
+        if recordingManager.isStarting {
+            LogManager.shared.info("录音正在启动中，忽略重复操作")
+            setupMenu()
+            return
+        }
+
+        if recordingManager.recordingState == .stopping {
+            LogManager.shared.info("录音正在保存中，忽略重复操作")
+            setupMenu()
+            return
+        }
+
         if recordingManager.isRecording {
             LogManager.shared.info("用户点击结束录音")
             recordingManager.stopRecording()
@@ -397,27 +422,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            if self.recordingManager.isRecording {
-                if self.recordingManager.isPaused {
-                    // 暂停状态
-                    self.animationTimer?.invalidate()
-                    self.animationTimer = nil
-                    self.updateStatusBarPaused()
-                    self.updateMenuRecordingState(isRecording: true, isPaused: true)
-                } else {
-                    // 录音中
-                    self.startRecordingTimer()
-                    self.updateMenuRecordingState(isRecording: true, isPaused: false)
-                }
-            } else {
+            switch self.recordingManager.recordingState {
+            case .starting:
+                self.startStartingIndicator()
+                self.updateMenuRecordingState(isRecording: true, isPaused: false)
+            case .recording:
+                self.startRecordingTimer()
+                self.updateMenuRecordingState(isRecording: true, isPaused: false)
+            case .paused:
+                self.animationTimer?.invalidate()
+                self.animationTimer = nil
+                self.updateStatusBarPaused()
+                self.updateMenuRecordingState(isRecording: true, isPaused: true)
+            case .stopping:
+                self.animationTimer?.invalidate()
+                self.animationTimer = nil
+                self.updateStatusBarStopping()
+                self.updateMenuRecordingState(isRecording: true, isPaused: false)
+            case .idle:
                 self.stopRecordingTimer()
                 self.updateMenuRecordingState(isRecording: false, isPaused: false)
             }
         }
     }
 
+    private func startStartingIndicator() {
+        animationTimer?.invalidate()
+        lastTimeString = ""
+        startingIndicatorStep = 0
+
+        updateStatusBarStarting()
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
+            [weak self] _ in
+            self?.updateStatusBarStarting()
+        }
+    }
+
     private func startRecordingTimer() {
         animationTimer?.invalidate()
+        lastTimeString = ""
 
         // 每秒更新一次计时器
         updateStatusBarTimer()
@@ -457,8 +500,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopRecordingTimer() {
         animationTimer?.invalidate()
         animationTimer = nil
+        lastTimeString = ""
 
         updateIdleIcon()
+    }
+
+    private func updateStatusBarStarting() {
+        if let button = statusItem.button {
+            button.alphaValue = 1.0
+            button.image = getStatusImage()
+            button.imagePosition = .imageLeading
+
+            let dotCount = (startingIndicatorStep % 3) + 1
+            let dots = String(repeating: ".", count: dotCount)
+            if AppSettings.shared.showDurationWhenRecording {
+                button.title = " 启动中\(dots)"
+            } else {
+                button.title = " \(dots)"
+            }
+            startingIndicatorStep += 1
+        }
     }
 
     private func updateIdleIcon() {
@@ -472,6 +533,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 button.alphaValue = 0.35  // 更淡的透明度
             } else {
                 button.alphaValue = 1.0
+            }
+        }
+    }
+
+    private func updateStatusBarStopping() {
+        if let button = statusItem.button {
+            button.alphaValue = 1.0
+            button.image = getStatusImage()
+            button.imagePosition = .imageLeading
+
+            if AppSettings.shared.showDurationWhenRecording {
+                button.title = " 保存中..."
+            } else {
+                button.title = " ..."
             }
         }
     }
@@ -495,13 +570,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.lastTimeString = ""  // 强制刷新计时器，以更新图标
-            if self.recordingManager.isRecording {
-                if self.recordingManager.isPaused {
-                    self.updateStatusBarPaused()
-                } else {
-                    self.updateStatusBarTimer()
-                }
-            } else {
+            switch self.recordingManager.recordingState {
+            case .starting:
+                self.updateStatusBarStarting()
+            case .recording:
+                self.updateStatusBarTimer()
+            case .paused:
+                self.updateStatusBarPaused()
+            case .stopping:
+                self.updateStatusBarStopping()
+            case .idle:
                 self.updateIdleIcon()
             }
         }

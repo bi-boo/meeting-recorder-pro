@@ -81,6 +81,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     /// 对外兼容属性，外部代码（AppDelegate、Views）无需改动
     var isRecording: Bool { recordingState == .recording || recordingState == .paused || recordingState == .stopping }
+    var isStarting: Bool { recordingState == .starting }
+    var isRecordingOrStarting: Bool { isStarting || isRecording }
     var isPaused: Bool { recordingState == .paused }
 
     // Core Audio & Asset Writer
@@ -163,14 +165,23 @@ class AudioRecorderManager: NSObject, ObservableObject {
     // 录音中断检测相关
     var recordingDeviceID: String?  // 录音开始时使用的设备 ID
     var recordingDeviceName: String?  // 录音开始时使用的设备名称
+    var activeInputDeviceID: String?
+    var activeInputDeviceName: String?
     var lastDiskCheckTime: TimeInterval = 0  // 上次磁盘空间检查时间
     let diskCheckInterval: TimeInterval = 30  // 磁盘空间检查间隔（秒）
     var lastStatsLogTime: TimeInterval = 0  // 上次统计日志时间
     var isHandlingInterruption = false  // 防止中断处理重入
+    var lastObservedFrameCount: Int64 = 0
+    var audioStallBeganAt: TimeInterval?
+    let audioStallGracePeriod: TimeInterval = 6
+    let audioStallTimeout: TimeInterval = 8
 
     // 丢帧诊断计数（步骤 1：定量分析写入繁忙频率）
     var droppedFrameCount: Int = 0
     var totalFrameCount: Int = 0
+    var systemAudioOverflowDropCount: Int = 0
+    var lastSystemAudioOverflowLogTime: TimeInterval = 0
+    let systemAudioOverflowLogInterval: TimeInterval = 5
 
     // 非阻塞通知控制器（用于录音完成/中断通知，避免阻塞主线程）
     lazy var notificationController = ReminderWindowController()
@@ -265,6 +276,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         // 提前进入 starting 状态，防止并发调用
         recordingState = .starting
+        recordingDuration = 0
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
 
         // 检查权限
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -272,7 +285,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         switch status {
         case .authorized:
-            beginRecording()
+            DispatchQueue.main.async { [weak self] in
+                self?.beginRecording()
+            }
         case .notDetermined:
             LogManager.shared.info("权限状态未确定，正在请求访问...")
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
@@ -280,16 +295,21 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 if granted {
                     DispatchQueue.main.async { self?.beginRecording() }
                 } else {
-                    DispatchQueue.main.async { self?.recordingState = .idle }
+                    DispatchQueue.main.async {
+                        self?.recordingState = .idle
+                        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+                    }
                 }
             }
         case .denied, .restricted:
             LogManager.shared.warning("权限被拒绝或受限，无法开始录音 | 状态: \(status.rawValue)")
             recordingState = .idle
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
             showMicrophonePermissionAlert()
         @unknown default:
             LogManager.shared.error("未知的权限状态: \(status.rawValue)")
             recordingState = .idle
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
         }
     }
 
@@ -301,6 +321,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             return
         }
         recordingState = .stopping
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
 
         let finalDuration = recordingDuration
         let finalFrames = framesCounter.withLock { $0 }
@@ -378,6 +399,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     if self.assetWriter === currentWriter { self.assetWriter = nil }
                     if self.assetWriterInput === currentInput { self.assetWriterInput = nil }
                     self.currentRecordingURL = nil
+                    self.audioStallBeganAt = nil
+                    self.activeInputDeviceID = nil
+                    self.activeInputDeviceName = nil
 
                     self.releaseSleepPrevention()
                     NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
@@ -407,6 +431,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 1. 暂停计时器
         recordingTimer?.invalidate()
         recordingTimer = nil
+        audioStallBeganAt = nil
 
         // 2. 统计当前已录制时间段并更新累计时长
         if let startDate = currentSegmentStartTime {
@@ -454,6 +479,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
         //    必须紧跟在 audioEngine.start() 之后，在其他任何操作之前
         //    这确保 tap 回调能立即开始处理新的音频数据
         recordingState = .recording
+        lastObservedFrameCount = framesCounter.withLock { $0 }
+        audioStallBeganAt = nil
 
         // 3. 清空恢复后可能残留的旧数据，并重置缓冲状态
         systemAudioQueueLock.lock()
@@ -477,6 +504,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
             if self.recordingDuration >= self.maxDuration {
                 self.isAutoStoppedByLimit = true
                 self.stopRecording()
+                return
+            }
+
+            let currentTime = Date().timeIntervalSince1970
+            if self.checkAudioCaptureProgress(currentTime: currentTime) {
+                return
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -509,6 +542,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
             completion?(); return
         }
 
+        recordingState = .stopping
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+
         recordingTimer?.invalidate()
         recordingTimer = nil
 
@@ -528,12 +564,15 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     self.recordingState = .idle
                     self.isWriterStarted = false
                     self.isHandlingInterruption = false
+                    self.audioStallBeganAt = nil
 
                     self.assetWriter = nil
                     self.assetWriterInput = nil
                     self.currentRecordingURL = nil
                     self.recordingDeviceID = nil
                     self.recordingDeviceName = nil
+                    self.activeInputDeviceID = nil
+                    self.activeInputDeviceName = nil
 
                     self.clearRecordingState()
                     self.releaseSleepPrevention()
@@ -545,6 +584,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
                         LogManager.shared.info("录音已紧急保存")
                     }
 
+                    LogManager.shared.endRecordingSession()
                     NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
                     completion?()
                 }

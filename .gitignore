@@ -54,6 +54,7 @@ config/secrets.json
 # =====================================
 *.log
 Thumbs.db
+test-results/
 
 # 临时备份文件（手动创建的快照，例如 *.bak-20260427-230538）
 *.bak-*

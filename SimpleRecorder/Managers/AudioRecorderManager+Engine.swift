@@ -26,11 +26,13 @@ extension AudioRecorderManager {
         // 环境预检
         guard checkDiskSpace(at: recordingsPath) else {
             recordingState = .idle
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
             showDiskSpaceAlert()
             return
         }
         guard checkDirectoryWritable(at: recordingsPath) else {
             recordingState = .idle
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
             showDirectoryPermissionAlert()
             return
         }
@@ -137,6 +139,7 @@ extension AudioRecorderManager {
 
             releaseDisplaySleepPrevention()
             recordingState = .idle
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
         }
     }
 
@@ -235,6 +238,7 @@ extension AudioRecorderManager {
 
             releaseDisplaySleepPrevention()
             recordingState = .idle
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
         }
     }
 
@@ -257,17 +261,23 @@ extension AudioRecorderManager {
         lastWarningTime = 0
         lastDiskCheckTime = Date().timeIntervalSince1970
         isHandlingInterruption = false
+        lastObservedFrameCount = 0
+        audioStallBeganAt = nil
         droppedFrameCount = 0
         totalFrameCount = 0
+        systemAudioOverflowDropCount = 0
+        lastSystemAudioOverflowLogTime = 0
 
         hasPrintedFirstSample = false
         hasPrintedSystemAudioFormat = false
         lastStatsLogTime = Date().timeIntervalSince1970
 
-        // 【录音中断检测】保存当前使用的设备信息
-        recordingDeviceID = AppSettings.shared.selectedDeviceID
+        // 【录音中断检测】保存当前实际使用的设备信息。
+        // 当用户选择“系统默认”时，也记录解析后的真实设备，避免日志和重启逻辑误判。
+        recordingDeviceID = activeInputDeviceID ?? AppSettings.shared.selectedDeviceID
         recordingDeviceName =
-            AppSettings.shared.availableInputDevices.first(where: {
+            activeInputDeviceName
+            ?? AppSettings.shared.availableInputDevices.first(where: {
                 $0.id == AppSettings.shared.selectedDeviceID
             })?.name
 
@@ -298,6 +308,12 @@ extension AudioRecorderManager {
                 return
             }
 
+            // 【录音中断检测】设备切换后 AVAudioEngine 可能仍显示 running，
+            // 但录制 tap 已经不再产出音频帧。用帧数增长检测这种“假运行”。
+            if self.checkAudioCaptureProgress(currentTime: currentTime) {
+                return
+            }
+
             // 【日志统计】每 30 秒记录一次录音状态
             if currentTime - self.lastStatsLogTime >= 30.0 {
                 self.lastStatsLogTime = currentTime
@@ -320,6 +336,43 @@ extension AudioRecorderManager {
         LogManager.shared.info(
             "录音已启动 | 会话ID: \(sessionID), 音源: \(currentAudioSource.displayName), 输入设备: \(deviceName), 文件: \(fileURL.lastPathComponent)"
         )
+    }
+
+    /// 检查录音 tap 是否还在持续产出帧。
+    /// 返回 true 表示已触发中断处理，调用方应停止后续计时器逻辑。
+    func checkAudioCaptureProgress(currentTime: TimeInterval) -> Bool {
+        guard recordingState == .recording else {
+            return false
+        }
+
+        let framesWritten = framesCounter.withLock { $0 }
+        if framesWritten > lastObservedFrameCount {
+            lastObservedFrameCount = framesWritten
+            audioStallBeganAt = nil
+            return false
+        }
+
+        guard recordingDuration >= audioStallGracePeriod else {
+            return false
+        }
+
+        if audioStallBeganAt == nil {
+            audioStallBeganAt = currentTime
+            LogManager.shared.warning(
+                "录音采集暂无新增帧，开始观察 | 已写入帧数: \(framesWritten)")
+            return false
+        }
+
+        guard let stallBeganAt = audioStallBeganAt,
+            currentTime - stallBeganAt >= audioStallTimeout
+        else {
+            return false
+        }
+
+        LogManager.shared.error(
+            "录音采集疑似卡死 | \(String(format: "%.1f", audioStallTimeout))s 内无新增音频帧, 已写入帧数: \(framesWritten)")
+        handleRecordingInterruption(reason: .engineConfigurationChanged)
+        return true
     }
 
     // MARK: - 音频引擎预备（确保干净状态）
@@ -371,34 +424,22 @@ extension AudioRecorderManager {
         // 1. 设置硬件输入设备（如果选择了特定设备）
         try updateInputDevice()
 
-        // 2. 获取输入节点的硬件格式
+        // 2. 获取输入节点的输出格式。对 2 声道 USB/蓝牙麦克风，后续交给 mixer 转为统一录制格式。
         let inputNode = audioEngine.inputNode
-        let hwFormat = inputNode.inputFormat(forBus: 0)
-
-        LogManager.shared.info(
-            "硬件输入格式 | 采样率: \(hwFormat.sampleRate)Hz, 声道: \(hwFormat.channelCount)ch")
-
-        // 3. 纯麦克风模式优化：跳过 recordingMixer，直接在 inputNode 上安装 tap
-        // installTap 的 format 参数会让 AVAudioEngine 内部自动处理格式转换（重采样+声道映射），
-        // 省去 AVAudioMixerNode 额外的混音处理层，减少一个潜在的缓冲抖动源
-        audioEngine.mainMixerNode.outputVolume = 0  // 静音输出（仅录制，不播放）
-
-        let format = recordingFormat
-        inputNode.installTap(onBus: 0, bufferSize: 2048, format: format) {
-            [weak self] buffer, time in
-            guard let self = self, self.isRecording else { return }
-
-            let pts = self.framesCounter.withLock { frames -> CMTime in
-                let current = frames
-                frames += Int64(buffer.frameLength)
-                return CMTime(value: current, timescale: Int32(format.sampleRate))
-            }
-
-            if buffer.frameLength > 0 {
-                self.totalFrameCount += 1
-                self.processAudioBufferWithPTS(buffer, pts: pts)
-            }
+        let micFormat = inputNode.outputFormat(forBus: 0)
+        guard micFormat.sampleRate > 0, micFormat.channelCount > 0 else {
+            throw NSError(
+                domain: "AudioRecorder", code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "当前麦克风输出格式不可用"])
         }
+        LogManager.shared.info(
+            "麦克风录音输入格式 | 采样率: \(micFormat.sampleRate)Hz, 声道: \(micFormat.channelCount)ch")
+
+        // 3. 纯麦克风也走 mixer，统一做重采样/声道折叠，避免 2 声道输入被直接 tap 成静音。
+        setupRecordingMixer()
+        audioEngine.connect(inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: micFormat)
+        inputNode.volume = 1.0
+        installRecordingTap()
     }
 
     func setupRecordingMixer() {

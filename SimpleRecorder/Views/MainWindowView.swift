@@ -123,6 +123,21 @@ struct BasicSettingsView: View {
     @State private var isRecordingShortcut = false
     @State private var isRecordingPauseShortcut = false
 
+    private var isRecordingBusy: Bool {
+        recordingManager.recordingState != .idle
+    }
+
+    private var recordingBusyMessage: String {
+        switch recordingManager.recordingState {
+        case .starting:
+            return "录音正在启动，设置将在下次录音时生效"
+        case .stopping:
+            return "录音正在保存，设置将在下次录音时生效"
+        default:
+            return "正在录音中，设置将在下次录音时生效"
+        }
+    }
+
     var body: some View {
         Form {
             Section {
@@ -167,7 +182,7 @@ struct BasicSettingsView: View {
                             Text(source.displayName).tag(source)
                         }
                     }
-                    .disabled(recordingManager.isRecording)
+                    .disabled(isRecordingBusy)
                     .onAudioSourceChange(settings.audioSource) { newValue in
                         if newValue != .microphone && !AppSettings.hasScreenCapturePermission {
                             LogManager.shared.info(
@@ -195,18 +210,18 @@ struct BasicSettingsView: View {
                                 Text(device.name).tag(device.id)
                             }
                         }
-                        .disabled(recordingManager.isRecording)
+                        .disabled(isRecordingBusy)
                         .onAppear {
                             settings.refreshInputDevices()
                         }
                     }
 
                     // 【边界逻辑】录音中提示
-                    if recordingManager.isRecording {
+                    if isRecordingBusy {
                         HStack(spacing: 6) {
                             Image(systemName: "info.circle")
                                 .foregroundColor(.blue)
-                            Text("正在录音中，设置将在下次录音时生效")
+                            Text(recordingBusyMessage)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Spacer()

@@ -74,7 +74,7 @@ extension AudioRecorderManager {
             self,
             selector: #selector(handleAudioEngineConfigChange),
             name: .AVAudioEngineConfigurationChange,
-            object: audioEngine
+            object: nil
         )
         LogManager.shared.info("已注册 AVAudioEngine 配置变更监听器")
     }
@@ -84,26 +84,20 @@ extension AudioRecorderManager {
     /// 处理音频设备变更（如插拔耳机）
     func handleAudioDeviceChange() {
         // 只有在录音中且使用麦克风时才需要检查
-        guard isRecording, !isPaused, currentAudioSource != .systemAudio else { return }
+        guard recordingState == .recording, currentAudioSource != .systemAudio else { return }
 
-        LogManager.shared.warning("检测到音频设备变更")
-
-        // 给系统一点时间完成设备切换
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self, self.isRecording else { return }
-
-            // 检查音频引擎是否还在正常运行
-            if !self.audioEngine.isRunning {
-                self.handleRecordingInterruption(reason: .deviceChanged)
-            }
-        }
+        LogManager.shared.warning("检测到音频设备变更，结束当前录音以避免静音续录")
+        AppSettings.shared.refreshInputDevices()
+        handleRecordingInterruption(reason: .deviceChanged)
     }
 
     /// 处理设备列表变更（设备被移除）
     func handleAudioDeviceListChange() {
         // 只有在录音中且使用麦克风时才需要检查
-        guard isRecording, !isPaused, currentAudioSource != .systemAudio else { return }
+        guard recordingState == .recording, currentAudioSource != .systemAudio else { return }
         guard let deviceID = recordingDeviceID, deviceID != "default" else { return }
+
+        AppSettings.shared.refreshInputDevices()
 
         // 检查当前使用的设备是否还在列表中
         let availableDevices = AppSettings.shared.availableInputDevices
@@ -119,27 +113,77 @@ extension AudioRecorderManager {
     /// 处理 AVAudioEngine 配置变更
     @objc func handleAudioEngineConfigChange(_ notification: Notification) {
         // 只有在录音中时才处理
-        guard isRecording, !isPaused else { return }
+        guard recordingState == .recording else { return }
 
-        LogManager.shared.warning("检测到 AVAudioEngine 配置变更")
-
-        // 检查引擎是否还在运行
-        if !audioEngine.isRunning {
-            handleRecordingInterruption(reason: .engineConfigurationChanged)
-        }
+        LogManager.shared.warning("检测到 AVAudioEngine 配置变更，结束当前录音以避免静音续录")
+        handleRecordingInterruption(reason: .engineConfigurationChanged)
     }
 
     // MARK: - 设备激活
 
-    /// 根据 AppSettings 切换硬件输入设备
-    /// 使用 AVCaptureSession 激活设备，支持 iPhone 连续互通麦克风
+    /// 根据 AppSettings 切换硬件输入设备。
+    /// 普通 USB/蓝牙/内置麦克风只切 Core Audio 默认输入；仅连续互通麦克风需要 AVCaptureSession 预激活。
     func updateInputDevice() throws {
-        let selectedID = AppSettings.shared.selectedDeviceID
-
         // 先清理之前的激活会话
         stopDeviceActivationSession()
 
-        guard selectedID != "default" else { return }
+        AppSettings.shared.refreshInputDevices()
+
+        let selectedID = AppSettings.shared.selectedDeviceID
+        let targetID: String
+        let targetName: String
+
+        if selectedID == "default" {
+            guard let defaultDevice = currentDefaultInputDeviceInfo() else {
+                activeInputDeviceID = "default"
+                activeInputDeviceName = "系统默认"
+                LogManager.shared.warning("无法解析系统默认输入设备，将直接使用 AVAudioEngine 默认输入")
+                return
+            }
+
+            let defaultIsCapturable = AppSettings.shared.availableInputDevices.contains {
+                $0.id == defaultDevice.id
+            }
+
+            if defaultIsCapturable {
+                targetID = defaultDevice.id
+                targetName = "\(defaultDevice.name)（系统默认）"
+                LogManager.shared.info("系统默认输入设备已解析 | 名称: \(targetName), ID: \(targetID)")
+
+                activeInputDeviceID = targetID
+                activeInputDeviceName = targetName
+                LogManager.shared.info("使用系统当前默认输入设备，不额外创建设备激活会话")
+                return
+            }
+
+            guard let fallbackDevice = preferredFallbackInputDevice() else {
+                activeInputDeviceID = defaultDevice.id
+                activeInputDeviceName = "\(defaultDevice.name)（系统默认，不可用）"
+                LogManager.shared.warning("系统默认输入设备不可采集且没有可用备用麦克风 | 默认设备: \(defaultDevice.name), ID: \(defaultDevice.id)")
+                return
+            }
+
+            targetID = fallbackDevice.id
+            targetName = "\(fallbackDevice.name)（自动替代不可用的系统默认：\(defaultDevice.name)）"
+            LogManager.shared.warning(
+                "系统默认输入设备不可采集，自动改用可用麦克风 | 默认设备: \(defaultDevice.name), 默认ID: \(defaultDevice.id), 替代设备: \(fallbackDevice.name), 替代ID: \(fallbackDevice.id)")
+        } else {
+            targetID = selectedID
+            targetName =
+                AppSettings.shared.availableInputDevices.first(where: { $0.id == selectedID })?.name
+                ?? selectedID
+        }
+
+        activeInputDeviceID = targetID
+        activeInputDeviceName = targetName
+
+        setDefaultInputDevice(deviceUID: targetID)
+
+        guard shouldUseCaptureSessionActivation(deviceUID: targetID) else {
+            LogManager.shared.info("已切换 Core Audio 默认输入设备 | 名称: \(targetName), ID: \(targetID)")
+            audioEngine = AVAudioEngine()
+            return
+        }
 
         // 通过 AVCaptureDevice 查找目标设备
         let discoverySession = AVCaptureDevice.DiscoverySession(
@@ -149,13 +193,13 @@ extension AudioRecorderManager {
         )
 
         guard
-            let targetDevice = discoverySession.devices.first(where: { $0.uniqueID == selectedID })
+            let targetDevice = discoverySession.devices.first(where: { $0.uniqueID == targetID })
         else {
-            LogManager.shared.warning("未找到匹配的麦克风设备 | 请求的设备ID: \(selectedID)，将使用默认设备")
+            LogManager.shared.warning("未找到可激活的麦克风设备 | 请求的设备: \(targetName), ID: \(targetID)，将使用系统当前默认输入")
             return
         }
 
-        LogManager.shared.info("正在激活麦克风设备 | 名称: \(targetDevice.localizedName), ID: \(selectedID)")
+        LogManager.shared.info("正在激活麦克风设备 | 名称: \(targetDevice.localizedName), ID: \(targetID)")
 
         // 创建 AVCaptureSession 来激活设备
         // 这对于 iPhone 连续互通设备特别重要，会触发 iPhone 进入麦克风模式
@@ -173,9 +217,6 @@ extension AudioRecorderManager {
 
                 LogManager.shared.info("设备激活成功 | 名称: \(targetDevice.localizedName)")
 
-                // 【关键】设置系统默认输入设备
-                setDefaultInputDevice(deviceUID: selectedID)
-
                 // 重新创建 AVAudioEngine 以使用新设备
                 audioEngine = AVAudioEngine()
             } else {
@@ -184,6 +225,133 @@ extension AudioRecorderManager {
         } catch {
             LogManager.shared.warning("激活设备失败 | 错误: \(error.localizedDescription)，将使用默认设备")
         }
+    }
+
+    private func preferredFallbackInputDevice() -> AudioInputDevice? {
+        let devices = AppSettings.shared.availableInputDevices.filter { $0.id != "default" }
+
+        if let builtIn = devices.first(where: {
+            $0.id == "BuiltInMicrophoneDevice" || $0.name.contains("MacBook")
+        }) {
+            return builtIn
+        }
+
+        return devices.first
+    }
+
+    private func shouldUseCaptureSessionActivation(deviceUID: String) -> Bool {
+        guard let transportType = audioDeviceTransportType(for: deviceUID) else {
+            return false
+        }
+
+        return transportType == kAudioDeviceTransportTypeContinuityCaptureWired
+            || transportType == kAudioDeviceTransportTypeContinuityCaptureWireless
+    }
+
+    private func audioDeviceTransportType(for uid: String) -> UInt32? {
+        var deviceID: AudioDeviceID = 0
+        var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDeviceForUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var cfUID: CFString = uid as CFString
+        var translation = AudioValueTranslation(
+            mInputData: &cfUID,
+            mInputDataSize: UInt32(MemoryLayout<CFString>.size),
+            mOutputData: &deviceID,
+            mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+
+        var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
+        let translationStatus = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &translationSize,
+            &translation
+        )
+
+        guard translationStatus == noErr, deviceID != 0 else {
+            return nil
+        }
+
+        address.mSelector = kAudioDevicePropertyTransportType
+        var transportType: UInt32 = 0
+        propertySize = UInt32(MemoryLayout<UInt32>.size)
+        let transportStatus = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &propertySize,
+            &transportType
+        )
+
+        guard transportStatus == noErr else {
+            return nil
+        }
+        return transportType
+    }
+
+    func currentDefaultInputDeviceInfo() -> AudioInputDevice? {
+        var defaultInputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultInputAddress,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+
+        guard status == noErr, deviceID != 0,
+            let uid = stringProperty(
+                for: deviceID,
+                selector: kAudioDevicePropertyDeviceUID
+            )
+        else {
+            return nil
+        }
+
+        let name =
+            stringProperty(
+                for: deviceID,
+                selector: kAudioObjectPropertyName
+            ) ?? uid
+
+        return AudioInputDevice(id: uid, name: name)
+    }
+
+    private func stringProperty(
+        for deviceID: AudioDeviceID,
+        selector: AudioObjectPropertySelector
+    ) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var value: CFString?
+        var size = UInt32(MemoryLayout<CFString?>.size)
+        let status = withUnsafeMutablePointer(to: &value) { pointer in
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, pointer)
+        }
+
+        guard status == noErr else { return nil }
+        return value as String?
     }
 
     /// 设置系统默认输入设备
