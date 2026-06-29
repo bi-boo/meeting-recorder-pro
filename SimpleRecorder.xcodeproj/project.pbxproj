@@ -25,6 +25,7 @@
 		022 /* AudioRecorderManagerWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142; };
 		023 /* AudioRecorderManagerDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143; };
 		024 /* AudioRecorderManagerUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144; };
+		025 /* QAAutomationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145; };
 		030 /* PermissionFlow in Frameworks */ = {isa = PBXBuildFile; productRef = 060 /* PermissionFlow */; };
 /* End PBXBuildFile section */
 
@@ -50,6 +51,7 @@
 		142 /* AudioRecorderManagerWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerWriter.swift; sourceTree = "<group>"; };
 		143 /* AudioRecorderManagerDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerDevice.swift; sourceTree = "<group>"; };
 		144 /* AudioRecorderManagerUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerUI.swift; sourceTree = "<group>"; };
+		145 /* QAAutomationRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QAAutomationRunner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,6 +137,7 @@
 		306 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				145 /* QAAutomationRunner.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -240,6 +243,7 @@
 				014 /* TimerTaskManagerCore.swift in Sources */,
 				015 /* ReminderWindowController.swift in Sources */,
 				016 /* TimerTaskViews.swift in Sources */,
+				025 /* QAAutomationRunner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

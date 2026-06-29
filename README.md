@@ -30,6 +30,16 @@
 open SimpleRecorder.xcodeproj
 ```
 
+### 回归测试
+
+任何改动提交或打包前，都必须按 [回归测试流程](docs/qa-regression.md) 跑完整功能验证。优先执行一键自动化：
+
+```bash
+scripts/run_full_qa.sh
+```
+
+自动化会打包 Release 产物，覆盖设置回读、麦克风录音、暂停继续、连续录音、系统声音、混合音源和定时自动录音，并输出 `qa-runs/*/report.md`。剩余强交互或系统授权场景按回归测试流程人工补测。
+
 ### 敏感配置
 
 项目不包含任何 API Key、凭证或敏感配置文件。如需扩展相关功能，请在本地创建 `config/secrets.json`（已加入 `.gitignore`，不会被提交）。

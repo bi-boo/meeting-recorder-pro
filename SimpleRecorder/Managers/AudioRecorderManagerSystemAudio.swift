@@ -94,7 +94,8 @@ extension AudioRecorderManager {
         configuration.capturesAudio = true
         configuration.sampleRate = 48000
         configuration.channelCount = 1
-        configuration.excludesCurrentProcessAudio = true  // 排除自己的音频，避免回声
+        // 正常录音排除自己的音频，避免回声。QA 模式下需要捕获 runner 播放的测试音。
+        configuration.excludesCurrentProcessAudio = !QAAutomationRunner.isActive
 
         // 使用 macOS 14.2+ 的仅音频采集方式
         if #available(macOS 14.2, *) {
@@ -108,12 +109,18 @@ extension AudioRecorderManager {
                     userInfo: [NSLocalizedDescriptionKey: "无法获取显示器信息"])
             }
 
-            // 排除当前应用程序（SimpleRecorder）的音频，避免回声
+            // 排除当前应用程序（SimpleRecorder）的音频，避免回声；QA 模式需要捕获内置测试音。
+            let excludedApplications =
+                QAAutomationRunner.isActive
+                ? []
+                : content.applications.filter {
+                    $0.bundleIdentifier == Bundle.main.bundleIdentifier
+                }
+
             let filter = SCContentFilter(
                 display: display,
-                excludingApplications: content.applications.filter {
-                    $0.bundleIdentifier == Bundle.main.bundleIdentifier
-                }, exceptingWindows: [])
+                excludingApplications: excludedApplications,
+                exceptingWindows: [])
 
             systemAudioOutput = SystemAudioStreamOutput { [weak self] sampleBuffer in
                 self?.handleSystemAudioSampleBuffer(sampleBuffer)

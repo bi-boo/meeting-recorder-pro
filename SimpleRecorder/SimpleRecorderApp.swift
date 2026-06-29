@@ -30,6 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var animationTimer: Timer?
     private var lastToggleTime: Date = .distantPast  // 用于防抖
     private var lastTimeString: String = ""
+    private var qaAutomationRunner: QAAutomationRunner?
 
     // 动态获取当前配置的图标
     private func getStatusImage() -> NSImage? {
@@ -92,6 +93,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 【注意】系统音频权限采用按需请求策略
         // 仅当用户在录制来源中选择"系统声音"或"同时录制"时才触发权限申请
         // 用户首次启动应用时不再自动弹出权限请求
+
+        if let runner = QAAutomationRunner.fromCommandLine() {
+            qaAutomationRunner = runner
+            LogManager.shared.info("检测到 QA 自动化参数，跳过真实定时任务调度")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                runner.start()
+            }
+            return
+        }
 
         // 【新增】启动时检查录音目录权限，尽早发现问题
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
