@@ -41,6 +41,10 @@ enum OutputFormat: String, CaseIterable, Codable {
     case m4a = "m4a"
     case mp3 = "mp3"
 
+    static var availableCases: [OutputFormat] {
+        NativeMP3Encoder.isEncodingAvailable ? allCases : [.m4a]
+    }
+
     var displayName: String {
         switch self {
         case .m4a: return "M4A"
@@ -130,7 +134,14 @@ class AppSettings: ObservableObject {
 
     // MARK: - 输出格式设置
     @Published var outputFormat: OutputFormat {
-        didSet { UserDefaults.standard.set(outputFormat.rawValue, forKey: "outputFormat") }
+        didSet {
+            if outputFormat == .mp3 && !NativeMP3Encoder.isEncodingAvailable {
+                LogManager.shared.warning("MP3 编码不可用，保存格式已回落为 M4A")
+                outputFormat = .m4a
+                return
+            }
+            UserDefaults.standard.set(outputFormat.rawValue, forKey: "outputFormat")
+        }
     }
 
     // MARK: - 行为设置
@@ -318,7 +329,13 @@ class AppSettings: ObservableObject {
         if let savedFormat = UserDefaults.standard.string(forKey: "outputFormat"),
             let format = OutputFormat(rawValue: savedFormat)
         {
-            self.outputFormat = format
+            if format == .mp3 && !NativeMP3Encoder.isEncodingAvailable {
+                self.outputFormat = .m4a
+                UserDefaults.standard.set(OutputFormat.m4a.rawValue, forKey: "outputFormat")
+                LogManager.shared.warning("已保存的 MP3 格式不可用，启动时回落为 M4A")
+            } else {
+                self.outputFormat = format
+            }
         } else {
             self.outputFormat = .m4a  // 默认 M4A
         }
@@ -434,23 +451,27 @@ class AppSettings: ObservableObject {
             mElement: kAudioObjectPropertyElementMain
         )
 
-        var cfUID: CFString = uid as CFString
-        var translation = AudioValueTranslation(
-            mInputData: &cfUID,
-            mInputDataSize: UInt32(MemoryLayout<CFString>.size),
-            mOutputData: &deviceID,
-            mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
+        var uidPointerValue = Unmanaged.passUnretained(uid as CFString).toOpaque()
+        let status = withUnsafeMutablePointer(to: &uidPointerValue) { uidPointer in
+            withUnsafeMutablePointer(to: &deviceID) { deviceIDPointer in
+                var translation = AudioValueTranslation(
+                    mInputData: UnsafeMutableRawPointer(uidPointer),
+                    mInputDataSize: UInt32(MemoryLayout<UnsafeRawPointer>.size),
+                    mOutputData: UnsafeMutableRawPointer(deviceIDPointer),
+                    mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
+                )
 
-        var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &translationSize,
-            &translation
-        )
+                var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
+                return AudioObjectGetPropertyData(
+                    AudioObjectID(kAudioObjectSystemObject),
+                    &address,
+                    0,
+                    nil,
+                    &translationSize,
+                    &translation
+                )
+            }
+        }
 
         guard status == noErr, deviceID != 0 else {
             return false
@@ -469,6 +490,10 @@ class AppSettings: ObservableObject {
             &propertySize,
             &transportType
         )
+
+        guard transportStatus == noErr else {
+            return false
+        }
 
         // 获取传输类型字符串用于调试
         let transportTypeStr = String(

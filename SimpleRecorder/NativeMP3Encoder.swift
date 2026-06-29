@@ -9,6 +9,29 @@
 import AVFoundation
 
 class NativeMP3Encoder {
+    static let isEncodingAvailable: Bool = {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeetingRecorderProMP3Probe-\(UUID().uuidString)", isDirectory: true)
+        let outputURL = tempDirectory.appendingPathComponent("probe.mp3")
+
+        do {
+            try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+            let settings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEGLayer3,
+                AVSampleRateKey: 48000.0,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 128000,
+            ]
+
+            _ = try AVAudioFile(forWriting: outputURL, settings: settings)
+            return true
+        } catch {
+            LogManager.shared.warning("NativeMP3Encoder: 系统原生 MP3 编码不可用 - \(error.localizedDescription)")
+            return false
+        }
+    }()
 
     /// 流式将 M4A/AAC 文件转换为 MP3
     /// - Parameters:
@@ -17,6 +40,11 @@ class NativeMP3Encoder {
     ///   - bitrate: 码率（kbps），默认 128
     /// - Returns: 是否转换成功
     static func convertToMP3(from sourceURL: URL, to destinationURL: URL, bitrate: Int32 = 128) -> Bool {
+        guard isEncodingAvailable else {
+            LogManager.shared.warning("NativeMP3Encoder: 当前系统不支持原生 MP3 编码，跳过转换")
+            return false
+        }
+
         // 步骤 1：打开源文件
         guard let sourceFile = try? AVAudioFile(forReading: sourceURL) else {
             LogManager.shared.error("NativeMP3Encoder: 无法打开源文件 \(sourceURL.lastPathComponent)")

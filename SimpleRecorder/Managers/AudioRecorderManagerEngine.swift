@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager+Engine.swift
-//  极简录音 - 音频引擎配置
+//  AudioRecorderManagerEngine.swift
+//  会议录音 Pro - 音频引擎配置
 //
 //  职责范围：
 //  - 录音启动流程编排（环境预检 → 选择音源 → 配置引擎）
@@ -18,7 +18,8 @@ extension AudioRecorderManager {
 
     // MARK: - 录音启动入口
 
-    func beginRecording() {
+    @discardableResult
+    func beginRecording() -> Bool {
         // recordingState 已在 startRecording() 设为 .starting，此处无需再设
 
         let recordingsPath = AppSettings.shared.recordingsPath
@@ -27,12 +28,12 @@ extension AudioRecorderManager {
         guard checkDiskSpace(at: recordingsPath) else {
             recordingState = .idle
             showDiskSpaceAlert()
-            return
+            return false
         }
         guard checkDirectoryWritable(at: recordingsPath) else {
             recordingState = .idle
             showDirectoryPermissionAlert()
-            return
+            return false
         }
 
         // 锁定当前录音使用的音频源
@@ -48,22 +49,24 @@ extension AudioRecorderManager {
         switch currentAudioSource {
         case .microphone:
             // 麦克风模式：同步启动
-            startMicrophoneRecording(at: recordingsPath)
+            return startMicrophoneRecording(at: recordingsPath)
         case .systemAudio, .both:
             // 系统音频模式：需要 async，使用 Task 启动
             if #available(macOS 13.0, *) {
                 Task { @MainActor in
                     await self.startSystemAudioRecording(at: recordingsPath)
                 }
+                return true
             } else {
                 // 降级到麦克风
-                startMicrophoneRecording(at: recordingsPath)
+                return startMicrophoneRecording(at: recordingsPath)
             }
         }
     }
 
     // MARK: - 麦克风录音启动（同步）
-    func startMicrophoneRecording(at recordingsPath: URL) {
+    @discardableResult
+    func startMicrophoneRecording(at recordingsPath: URL) -> Bool {
         do {
             try FileManager.default.createDirectory(
                 at: recordingsPath, withIntermediateDirectories: true)
@@ -103,6 +106,7 @@ extension AudioRecorderManager {
 
             try audioEngine.start()
             finalizeRecordingStart(fileURL: finalFileURL)
+            return true
 
         } catch {
             LogManager.shared.error("麦克风录音启动失败 | 错误: \(error.localizedDescription)")
@@ -133,6 +137,7 @@ extension AudioRecorderManager {
             }
 
             recordingState = .idle
+            return false
         }
     }
 
@@ -246,6 +251,7 @@ extension AudioRecorderManager {
         recordingState = .recording
         recordingDuration = 0
         framesCounter.withLock { $0 = 0 }
+        systemAudioBufferHeadIndex = 0
         systemAudioBufferReadOffset = 0
         // 初始缓冲状态：仅在混合模式下默认开启以平滑时钟，仅系统音频模式下将由 setup 逻辑显式关闭
         isSystemAudioBuffering = (currentAudioSource == .both)
@@ -351,6 +357,8 @@ extension AudioRecorderManager {
         // 5. 清空系统音频缓冲队列
         systemAudioQueueLock.lock()
         systemAudioBufferQueue.removeAll()
+        systemAudioBufferHeadIndex = 0
+        systemAudioBufferReadOffset = 0
         systemAudioQueueLock.unlock()
 
         // 6. 清理音频转换器缓存
@@ -467,6 +475,8 @@ extension AudioRecorderManager {
         systemAudioQueueLock.lock()
         let queueCount = systemAudioBufferQueue.count
         systemAudioBufferQueue.removeAll()
+        systemAudioBufferHeadIndex = 0
+        systemAudioBufferReadOffset = 0
         systemAudioQueueLock.unlock()
 
         // 6. 清理设备激活会话（用于 iPhone 连续互通等设备）

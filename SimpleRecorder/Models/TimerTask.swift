@@ -1,6 +1,6 @@
 //
 //  TimerTask.swift
-//  极简录音 - 定时任务数据模型
+//  会议录音 Pro - 定时任务数据模型
 //
 //  Created by AI Assistant
 //

@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager+Writer.swift
-//  极简录音 - 音频写入与文件管理
+//  AudioRecorderManagerWriter.swift
+//  会议录音 Pro - 音频写入与文件管理
 //
 //  职责范围：
 //  - 音频 Buffer 池化（避免高频内存分配）

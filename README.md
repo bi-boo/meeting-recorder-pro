@@ -9,7 +9,7 @@
 - **全局快捷键**：任意界面下一键开始/结束/暂停录音
 - **双声道同时录制**：同时捕获麦克风和系统声音，线上会议两端声音一次录齐
 - **定时录音**：支持每天/每周定时计划，到点自动开始，不再手动开录
-- **轻量常驻**：纯菜单栏应用，不占 Dock，支持 M4A / MP3 输出格式
+- **轻量常驻**：纯菜单栏应用，不占 Dock，支持 M4A 输出；系统原生编码可用时显示 MP3 选项
 
 ## 系统要求
 
@@ -40,15 +40,20 @@ open SimpleRecorder.xcodeproj
 SimpleRecorder/
 ├── SimpleRecorderApp.swift          # 入口 + 菜单栏
 ├── Models/
-│   ├── AppSettings.swift            # 全局设置（UserDefaults）
+│   ├── AppSettingsCore.swift        # 全局设置（UserDefaults）
 │   └── TimerTask.swift              # 定时任务数据模型
 ├── Managers/
-│   ├── AudioRecorderManager.swift   # 录音核心逻辑
+│   ├── AudioRecorderManagerCore.swift       # 录音状态机 + 生命周期 API
+│   ├── AudioRecorderManagerEngine.swift     # 音频引擎配置
+│   ├── AudioRecorderManagerSystemAudio.swift # 系统音频采集
+│   ├── AudioRecorderManagerWriter.swift     # 音频写入与文件管理
+│   ├── AudioRecorderManagerDevice.swift     # 设备监听与激活
+│   ├── AudioRecorderManagerUI.swift         # 弹窗与交互
 │   ├── HotKeyManager.swift          # 全局快捷键
-│   ├── TimerTaskManager.swift       # 定时任务调度
+│   ├── TimerTaskManagerCore.swift   # 定时任务调度
 │   └── LogManager.swift             # 运行日志
 ├── Views/
-│   ├── MainWindowView.swift         # 设置窗口（TabView）
+│   ├── MainWindowSettingsView.swift # 设置窗口（TabView）
 │   ├── TimerTaskViews.swift         # 定时计划列表 & 编辑 Sheet
 │   └── ReminderWindowController.swift  # 浮动通知弹窗
 └── Resources/

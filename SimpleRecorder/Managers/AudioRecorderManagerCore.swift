@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager.swift
-//  极简录音 - 录音管理器（主文件）
+//  AudioRecorderManagerCore.swift
+//  会议录音 Pro - 录音管理器（主文件）
 //
 //  这是 AudioRecorderManager 类的主文件，作为"总指挥"，包含：
 //  - 状态机定义（RecordingState、RecordingInterruptionReason）
@@ -11,11 +11,11 @@
 //  - 录音状态持久化（崩溃恢复用 UserDefaults）
 //
 //  具体功能模块拆分到以下 extension 文件：
-//  - AudioRecorderManager+Engine.swift       音频引擎配置 / 麦克风采集 / 防休眠
-//  - AudioRecorderManager+SystemAudio.swift  系统音频采集 / 弹性缓冲 / SCStream
-//  - AudioRecorderManager+Writer.swift       Buffer 池 / AssetWriter 写入 / 文件命名 / MP3 转换
-//  - AudioRecorderManager+Device.swift       设备监听 / 设备激活
-//  - AudioRecorderManager+UI.swift           弹窗 / 磁盘+权限检查 / 中断处理
+//  - AudioRecorderManagerEngine.swift        音频引擎配置 / 麦克风采集 / 防休眠
+//  - AudioRecorderManagerSystemAudio.swift   系统音频采集 / 弹性缓冲 / SCStream
+//  - AudioRecorderManagerWriter.swift        Buffer 池 / AssetWriter 写入 / 文件命名 / MP3 转换
+//  - AudioRecorderManagerDevice.swift        设备监听 / 设备激活
+//  - AudioRecorderManagerUI.swift            弹窗 / 磁盘+权限检查 / 中断处理
 //
 
 import AVFoundation
@@ -88,7 +88,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     var assetWriter: AVAssetWriter?
     var assetWriterInput: AVAssetWriterInput?
     let writingQueue = DispatchQueue(
-        label: "com.simplerecorder.writingQueue", qos: .userInitiated)
+        label: "com.meetingrecorderpro.writingQueue", qos: .userInitiated)
     var recordingTimer: Timer?
     var sleepAssertionID: IOPMAssertionID = 0
     var accumulatedDuration: TimeInterval = 0
@@ -107,6 +107,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
     // 系统音频采集相关（macOS 13.0+）
     var systemAudioStream: SCStream?
     var systemAudioOutput: SystemAudioStreamOutput?
+    let systemAudioSampleQueue = DispatchQueue(
+        label: "com.meetingrecorderpro.systemAudioSampleQueue", qos: .userInitiated)
 
     // 【新增】麦克风设备激活相关（用于激活 iPhone 连续互通设备）
     var deviceActivationSession: AVCaptureSession?
@@ -119,6 +121,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // 系统音频缓冲队列
     var systemAudioBufferQueue = [AVAudioPCMBuffer]()
+    var systemAudioBufferHeadIndex = 0
     var systemAudioBufferReadOffset: AVAudioFrameCount = 0  // 追踪第一帧缓冲区的读取进度
     var isSystemAudioBuffering = true  // 缓冲状态机
     let systemAudioPreRollHighWaterMark = 3  // 降低到 3 个包（约 60ms），减少断续感
@@ -254,11 +257,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // MARK: - 公开 API：启动录音
 
-    func startRecording() {
+    @discardableResult
+    func startRecording() -> Bool {
         // 防止在非空闲状态下重复启动
         guard recordingState == .idle else {
             LogManager.shared.warning("忽略启动请求 | 当前状态: \(recordingState)")
-            return
+            return false
         }
         LogManager.shared.info("收到录音启动请求")
 
@@ -271,7 +275,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         switch status {
         case .authorized:
-            beginRecording()
+            return beginRecording()
         case .notDetermined:
             LogManager.shared.info("权限状态未确定，正在请求访问...")
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
@@ -282,13 +286,16 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     DispatchQueue.main.async { self?.recordingState = .idle }
                 }
             }
+            return true
         case .denied, .restricted:
             LogManager.shared.warning("权限被拒绝或受限，无法开始录音 | 状态: \(status.rawValue)")
             recordingState = .idle
             showMicrophonePermissionAlert()
+            return false
         @unknown default:
             LogManager.shared.error("未知的权限状态: \(status.rawValue)")
             recordingState = .idle
+            return false
         }
     }
 
@@ -351,7 +358,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
                         }
 
                         // 检查是否需要转换为 MP3
-                        if AppSettings.shared.outputFormat == .mp3 {
+                        if AppSettings.shared.outputFormat == .mp3 && NativeMP3Encoder.isEncodingAvailable {
                             self.convertToMP3(from: finalURL) { mp3URL in
                                 if AppSettings.shared.openFolderAfterRecording {
                                     if let mp3URL = mp3URL {
@@ -423,6 +430,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             returnBufferToPool(buffer)
         }
         systemAudioBufferQueue.removeAll()
+        systemAudioBufferHeadIndex = 0
         systemAudioBufferReadOffset = 0
         systemAudioQueueLock.unlock()
 
@@ -460,6 +468,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             returnBufferToPool(buffer)
         }
         systemAudioBufferQueue.removeAll()
+        systemAudioBufferHeadIndex = 0
         systemAudioBufferReadOffset = 0
         // 混合模式恢复时重新开启预缓冲建立储备，单系统音频模式保持实时
         isSystemAudioBuffering = (currentAudioSource == .both)

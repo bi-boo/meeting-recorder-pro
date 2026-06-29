@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager+Device.swift
-//  极简录音 - 设备监听与激活
+//  AudioRecorderManagerDevice.swift
+//  会议录音 Pro - 设备监听与激活
 //
 //  职责范围：
 //  - CoreAudio 设备变更监听（耳机插拔、设备列表变化）

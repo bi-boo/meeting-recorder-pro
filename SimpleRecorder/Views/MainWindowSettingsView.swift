@@ -313,7 +313,7 @@ struct AdvancedSettingsView: View {
                     }
 
                     Picker("保存格式", selection: $settings.outputFormat) {
-                        ForEach(OutputFormat.allCases, id: \.self) { format in
+                        ForEach(OutputFormat.availableCases, id: \.self) { format in
                             Text(format.displayName).tag(format)
                         }
                     }
@@ -334,13 +334,23 @@ struct AdvancedSettingsView: View {
                         Text("体积小、音质优，Apple 设备首选")
                     }
                     HStack(spacing: 6) {
-                        Text("MP3")
-                            .font(.system(size: 10, weight: .bold))
-                            .padding(.horizontal, 3)
-                            .padding(.vertical, 0.5)
-                            .background(Color.secondary.opacity(0.12))
-                            .cornerRadius(2)
-                        Text("兼容性极佳，适合跨平台自由分享")
+                        if NativeMP3Encoder.isEncodingAvailable {
+                            Text("MP3")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 0.5)
+                                .background(Color.secondary.opacity(0.12))
+                                .cornerRadius(2)
+                            Text("兼容性极佳，适合跨平台自由分享")
+                        } else {
+                            Text("MP3")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 0.5)
+                                .background(Color.secondary.opacity(0.12))
+                                .cornerRadius(2)
+                            Text("当前系统不支持原生 MP3 编码，暂以 M4A 保存")
+                        }
                     }
                 }
                 .font(.system(size: 11))

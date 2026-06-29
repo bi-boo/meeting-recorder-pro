@@ -8,48 +8,48 @@
 
 /* Begin PBXBuildFile section */
 		001 /* SimpleRecorderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101; };
-		002 /* AudioRecorderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 102; };
+		002 /* AudioRecorderManagerCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 102; };
 		003 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103; };
 		004 /* LogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104; };
-		005 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 105; };
+		005 /* AppSettingsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 105; };
 		011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 111; };
-		012 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114; };
+		012 /* MainWindowSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114; };
 		013 /* TimerTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130; };
-		014 /* TimerTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131; };
+		014 /* TimerTaskManagerCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131; };
 		015 /* ReminderWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132; };
 		016 /* TimerTaskViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 133; };
 		017 /* NativeMP3Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124; };
 		018 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 125; };
-		020 /* AudioRecorderManager+Engine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140; };
-		021 /* AudioRecorderManager+SystemAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 141; };
-		022 /* AudioRecorderManager+Writer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142; };
-		023 /* AudioRecorderManager+Device.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143; };
-		024 /* AudioRecorderManager+UI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144; };
+		020 /* AudioRecorderManagerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140; };
+		021 /* AudioRecorderManagerSystemAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 141; };
+		022 /* AudioRecorderManagerWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142; };
+		023 /* AudioRecorderManagerDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143; };
+		024 /* AudioRecorderManagerUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144; };
 		030 /* PermissionFlow in Frameworks */ = {isa = PBXBuildFile; productRef = 060 /* PermissionFlow */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		100 /* SimpleRecorder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SimpleRecorder.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		101 /* SimpleRecorderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleRecorderApp.swift; sourceTree = "<group>"; };
-		102 /* AudioRecorderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManager.swift; sourceTree = "<group>"; };
+		102 /* AudioRecorderManagerCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerCore.swift; sourceTree = "<group>"; };
 		103 /* HotKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyManager.swift; sourceTree = "<group>"; };
 		104 /* LogManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogManager.swift; sourceTree = "<group>"; };
-		105 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		105 /* AppSettingsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsCore.swift; sourceTree = "<group>"; };
 		111 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		112 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		113 /* SimpleRecorder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SimpleRecorder.entitlements; sourceTree = "<group>"; };
-		114 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		114 /* MainWindowSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowSettingsView.swift; sourceTree = "<group>"; };
 		124 /* NativeMP3Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMP3Encoder.swift; sourceTree = "<group>"; };
 		125 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		130 /* TimerTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTask.swift; sourceTree = "<group>"; };
-		131 /* TimerTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskManager.swift; sourceTree = "<group>"; };
+		131 /* TimerTaskManagerCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskManagerCore.swift; sourceTree = "<group>"; };
 		132 /* ReminderWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderWindowController.swift; sourceTree = "<group>"; };
 		133 /* TimerTaskViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskViews.swift; sourceTree = "<group>"; };
-		140 /* AudioRecorderManager+Engine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+Engine.swift"; sourceTree = "<group>"; };
-		141 /* AudioRecorderManager+SystemAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+SystemAudio.swift"; sourceTree = "<group>"; };
-		142 /* AudioRecorderManager+Writer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+Writer.swift"; sourceTree = "<group>"; };
-		143 /* AudioRecorderManager+Device.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+Device.swift"; sourceTree = "<group>"; };
-		144 /* AudioRecorderManager+UI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioRecorderManager+UI.swift"; sourceTree = "<group>"; };
+		140 /* AudioRecorderManagerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerEngine.swift; sourceTree = "<group>"; };
+		141 /* AudioRecorderManagerSystemAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerSystemAudio.swift; sourceTree = "<group>"; };
+		142 /* AudioRecorderManagerWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerWriter.swift; sourceTree = "<group>"; };
+		143 /* AudioRecorderManagerDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerDevice.swift; sourceTree = "<group>"; };
+		144 /* AudioRecorderManagerUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManagerUI.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,15 +100,15 @@
 		303 /* Managers */ = {
 			isa = PBXGroup;
 			children = (
-				102 /* AudioRecorderManager.swift */,
-				140 /* AudioRecorderManager+Engine.swift */,
-				141 /* AudioRecorderManager+SystemAudio.swift */,
-				142 /* AudioRecorderManager+Writer.swift */,
-				143 /* AudioRecorderManager+Device.swift */,
-				144 /* AudioRecorderManager+UI.swift */,
+				102 /* AudioRecorderManagerCore.swift */,
+				140 /* AudioRecorderManagerEngine.swift */,
+				141 /* AudioRecorderManagerSystemAudio.swift */,
+				142 /* AudioRecorderManagerWriter.swift */,
+				143 /* AudioRecorderManagerDevice.swift */,
+				144 /* AudioRecorderManagerUI.swift */,
 				103 /* HotKeyManager.swift */,
 				104 /* LogManager.swift */,
-				131 /* TimerTaskManager.swift */,
+				131 /* TimerTaskManagerCore.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -116,7 +116,7 @@
 		304 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				105 /* AppSettings.swift */,
+				105 /* AppSettingsCore.swift */,
 				130 /* TimerTask.swift */,
 			);
 			path = Models;
@@ -125,7 +125,7 @@
 		305 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				114 /* MainWindowView.swift */,
+				114 /* MainWindowSettingsView.swift */,
 				132 /* ReminderWindowController.swift */,
 				133 /* TimerTaskViews.swift */,
 			);
@@ -225,19 +225,19 @@
 			buildActionMask = 2147483647;
 			files = (
 				001 /* SimpleRecorderApp.swift in Sources */,
-				002 /* AudioRecorderManager.swift in Sources */,
-				020 /* AudioRecorderManager+Engine.swift in Sources */,
-				021 /* AudioRecorderManager+SystemAudio.swift in Sources */,
-				022 /* AudioRecorderManager+Writer.swift in Sources */,
-				023 /* AudioRecorderManager+Device.swift in Sources */,
-				024 /* AudioRecorderManager+UI.swift in Sources */,
+				002 /* AudioRecorderManagerCore.swift in Sources */,
+				020 /* AudioRecorderManagerEngine.swift in Sources */,
+				021 /* AudioRecorderManagerSystemAudio.swift in Sources */,
+				022 /* AudioRecorderManagerWriter.swift in Sources */,
+				023 /* AudioRecorderManagerDevice.swift in Sources */,
+				024 /* AudioRecorderManagerUI.swift in Sources */,
 				003 /* HotKeyManager.swift in Sources */,
 				004 /* LogManager.swift in Sources */,
-				005 /* AppSettings.swift in Sources */,
+				005 /* AppSettingsCore.swift in Sources */,
 				017 /* NativeMP3Encoder.swift in Sources */,
-				012 /* MainWindowView.swift in Sources */,
+				012 /* MainWindowSettingsView.swift in Sources */,
 				013 /* TimerTask.swift in Sources */,
-				014 /* TimerTaskManager.swift in Sources */,
+				014 /* TimerTaskManagerCore.swift in Sources */,
 				015 /* ReminderWindowController.swift in Sources */,
 				016 /* TimerTaskViews.swift in Sources */,
 			);
