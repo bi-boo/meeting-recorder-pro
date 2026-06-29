@@ -8,6 +8,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import ScreenCaptureKit
 
 final class QAAutomationRunner {
     static private(set) var isActive = false
@@ -88,6 +89,12 @@ final class QAAutomationRunner {
                     playSystemAudio: false
                 )
             )
+
+            if scenario.includeMP3 {
+                report.steps.append(
+                    await runMP3OutputStep(duration: max(2.0, scenario.recordDuration / 2))
+                )
+            }
 
             if scenario.includeSystemAudio {
                 report.steps.append(
@@ -236,6 +243,7 @@ final class QAAutomationRunner {
         let before = audioFiles()
 
         AppSettings.shared.audioSource = source
+        AppSettings.shared.outputFormat = .m4a
         AppSettings.shared.openFolderAfterRecording = false
 
         guard AudioRecorderManager.shared.startRecording() else {
@@ -290,6 +298,7 @@ final class QAAutomationRunner {
         let before = audioFiles()
 
         AppSettings.shared.audioSource = .microphone
+        AppSettings.shared.outputFormat = .m4a
         AppSettings.shared.openFolderAfterRecording = false
 
         guard AudioRecorderManager.shared.startRecording() else {
@@ -357,11 +366,124 @@ final class QAAutomationRunner {
             )
         }
 
+        let availability = await screenCaptureDisplayAvailability()
+        guard availability.isAvailable else {
+            return skippedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "当前自动化进程无法枚举可录制显示器，系统音频场景留待有 display 的环境验证",
+                details: availability.details
+            )
+        }
+
         return await runRecordingStep(
             name: name,
             source: source,
             duration: duration,
             playSystemAudio: true
+        )
+    }
+
+    @MainActor
+    private func screenCaptureDisplayAvailability() async -> (
+        isAvailable: Bool, details: [String: String]
+    ) {
+        guard AppSettings.isSystemAudioSupported else {
+            return (false, ["screenCapture": "unsupported"])
+        }
+
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false,
+                onScreenWindowsOnly: false
+            )
+            return (
+                !content.displays.isEmpty,
+                [
+                    "displayCount": "\(content.displays.count)",
+                    "windowCount": "\(content.windows.count)",
+                    "applicationCount": "\(content.applications.count)",
+                ]
+            )
+        } catch {
+            return (
+                false,
+                [
+                    "screenCaptureError": error.localizedDescription
+                ]
+            )
+        }
+    }
+
+    @MainActor
+    private func runMP3OutputStep(duration: TimeInterval) async -> QAStepResult {
+        let name = "5.2 output-format-mp3"
+        let startedAt = Date()
+
+        guard MP3Encoder.isEncodingAvailable else {
+            return skippedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "当前构建未提供 MP3 编码器",
+                details: ["backend": MP3Encoder.backendName]
+            )
+        }
+
+        let before = audioFiles()
+        let settings = AppSettings.shared
+        settings.audioSource = .microphone
+        settings.outputFormat = .mp3
+        settings.openFolderAfterRecording = false
+
+        guard AudioRecorderManager.shared.startRecording() else {
+            settings.outputFormat = .m4a
+            return failedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "MP3 格式录音启动 API 返回失败",
+                details: ["backend": MP3Encoder.backendName]
+            )
+        }
+
+        guard await waitForState(.recording, timeout: 12.0) else {
+            await stopCurrentRecording()
+            settings.outputFormat = .m4a
+            return failedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "MP3 格式录音未进入 recording 状态",
+                details: currentRecorderDetails(source: .microphone)
+            )
+        }
+
+        await sleep(seconds: duration)
+        await stopCurrentRecording()
+
+        let minimumBytes = minimumRecordingBytes(for: .microphone)
+        let recordings = await waitForNewRecordings(
+            since: before,
+            extensionName: "mp3",
+            minimumBytes: minimumBytes,
+            timeout: 20.0
+        )
+        settings.outputFormat = .m4a
+
+        let passed = recordings.contains {
+            $0.extensionName == "mp3" && $0.bytes >= minimumBytes
+        }
+        return QAStepResult(
+            name: name,
+            status: passed ? .passed : .failed,
+            startedAt: startedAt,
+            finishedAt: Date(),
+            message: passed ? "MP3 输出已生成有效文件" : "未发现达到有效阈值的 MP3 文件",
+            details: currentRecorderDetails(source: .microphone).merging(
+                [
+                    "backend": MP3Encoder.backendName,
+                    "minimumFileBytes": "\(minimumBytes)",
+                ],
+                uniquingKeysWith: { _, new in new }),
+            recordings: recordings
         )
     }
 
@@ -374,6 +496,7 @@ final class QAAutomationRunner {
         let originalTasks = manager.tasks
 
         AppSettings.shared.audioSource = .microphone
+        AppSettings.shared.outputFormat = .m4a
         manager.stopScheduler()
 
         let now = Date()
@@ -548,6 +671,29 @@ final class QAAutomationRunner {
             }
     }
 
+    private func waitForNewRecordings(
+        since before: Set<URL>,
+        extensionName: String,
+        minimumBytes: Int64,
+        timeout: TimeInterval
+    ) async -> [QARecording] {
+        let deadline = Date().addingTimeInterval(timeout)
+        var recordings = newRecordings(since: before)
+
+        while Date() < deadline {
+            if recordings.contains(where: {
+                $0.extensionName == extensionName && $0.bytes >= minimumBytes
+            }) {
+                return recordings
+            }
+
+            await sleep(seconds: 0.5)
+            recordings = newRecordings(since: before)
+        }
+
+        return recordings
+    }
+
     @MainActor
     private func currentRecorderDetails(source: AudioSource) -> [String: String] {
         let recorder = AudioRecorderManager.shared
@@ -602,6 +748,7 @@ private struct QAScenario: Decodable {
     let recordSeconds: Double?
     let pauseSeconds: Double?
     private let includeSettingsValue: Bool?
+    private let includeMP3Value: Bool?
     private let includeSystemAudioValue: Bool?
     private let includeMixedAudioValue: Bool?
     private let includeTimerValue: Bool?
@@ -612,6 +759,7 @@ private struct QAScenario: Decodable {
         case recordSeconds
         case pauseSeconds
         case includeSettingsValue = "includeSettings"
+        case includeMP3Value = "includeMP3"
         case includeSystemAudioValue = "includeSystemAudio"
         case includeMixedAudioValue = "includeMixedAudio"
         case includeTimerValue = "includeTimer"
@@ -631,6 +779,10 @@ private struct QAScenario: Decodable {
 
     var includeSettings: Bool {
         includeSettingsValue ?? true
+    }
+
+    var includeMP3: Bool {
+        includeMP3Value ?? true
     }
 
     var includeSystemAudio: Bool {

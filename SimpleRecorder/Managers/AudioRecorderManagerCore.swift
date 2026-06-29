@@ -357,19 +357,24 @@ class AudioRecorderManager: NSObject, ObservableObject {
                             self.isAutoStoppedByLimit = false
                         }
 
-                        // 检查是否需要转换为 MP3
-                        if AppSettings.shared.outputFormat == .mp3 && NativeMP3Encoder.isEncodingAvailable {
-                            self.convertToMP3(from: finalURL) { mp3URL in
-                                if AppSettings.shared.openFolderAfterRecording {
-                                    if let mp3URL = mp3URL {
-                                        NSWorkspace.shared.activateFileViewerSelecting([mp3URL])
-                                    } else {
-                                        NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+                        let shouldOpenFolder = AppSettings.shared.openFolderAfterRecording
+
+                        // 检查是否需要转换为 MP3。转码延迟到当前收尾闭包返回后启动，
+                        // 确保 AVAssetWriter 已释放刚写完的 M4A 文件。
+                        if AppSettings.shared.outputFormat == .mp3 && MP3Encoder.isEncodingAvailable {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                                self?.convertToMP3(from: finalURL) { mp3URL in
+                                    if shouldOpenFolder {
+                                        if let mp3URL = mp3URL {
+                                            NSWorkspace.shared.activateFileViewerSelecting([mp3URL])
+                                        } else {
+                                            NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+                                        }
                                     }
                                 }
                             }
                         } else {
-                            if AppSettings.shared.openFolderAfterRecording {
+                            if shouldOpenFolder {
                                 NSWorkspace.shared.activateFileViewerSelecting([finalURL])
                             }
                         }

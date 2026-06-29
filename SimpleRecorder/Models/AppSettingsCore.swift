@@ -42,7 +42,7 @@ enum OutputFormat: String, CaseIterable, Codable {
     case mp3 = "mp3"
 
     static var availableCases: [OutputFormat] {
-        NativeMP3Encoder.isEncodingAvailable ? allCases : [.m4a]
+        MP3Encoder.isEncodingAvailable ? allCases : [.m4a]
     }
 
     var displayName: String {
@@ -135,7 +135,7 @@ class AppSettings: ObservableObject {
     // MARK: - 输出格式设置
     @Published var outputFormat: OutputFormat {
         didSet {
-            if outputFormat == .mp3 && !NativeMP3Encoder.isEncodingAvailable {
+            if outputFormat == .mp3 && !MP3Encoder.isEncodingAvailable {
                 LogManager.shared.warning("MP3 编码不可用，保存格式已回落为 M4A")
                 outputFormat = .m4a
                 return
@@ -329,7 +329,7 @@ class AppSettings: ObservableObject {
         if let savedFormat = UserDefaults.standard.string(forKey: "outputFormat"),
             let format = OutputFormat(rawValue: savedFormat)
         {
-            if format == .mp3 && !NativeMP3Encoder.isEncodingAvailable {
+            if format == .mp3 && !MP3Encoder.isEncodingAvailable {
                 self.outputFormat = .m4a
                 UserDefaults.standard.set(OutputFormat.m4a.rawValue, forKey: "outputFormat")
                 LogManager.shared.warning("已保存的 MP3 格式不可用，启动时回落为 M4A")

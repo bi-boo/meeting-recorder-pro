@@ -8,7 +8,7 @@
 - **UI 框架**：SwiftUI (主视图) + AppKit (菜单栏与生命周期管理)
 - **音频处理**：AVFoundation (`AVAudioEngine` 采集, `AVAssetWriter` 写入)
 - **系统音频**：ScreenCaptureKit (macOS 13.0+ 系统音频采集)
-- **MP3 编码**：NativeMP3Encoder 运行时检测系统原生 MP3 编码能力；不可用时回落为 M4A
+- **MP3 编码**：MP3Encoder 优先使用内嵌 LAME 分块转码；系统原生 MP3 仅作为兜底
 - **热键管理**：Carbon (全局快捷键注册)
 - **存储**：UserDefaults (配置与状态持久化)
 - **日志系统**：自研 LogManager (5级日志、文件存储、7天轮转)
@@ -87,7 +87,7 @@
 - **录音上限**：小时 + 分钟组合设置（0-9 小时，0-59 分钟）
 - **音频源**：三种模式（microphone / systemAudio / both）
 - **输入设备**：通过 `AVCaptureDevice.DiscoverySession` 枚举可用麦克风
-- **输出格式**：默认 M4A；系统原生 MP3 编码可用时显示 MP3 选项
+- **输出格式**：默认 M4A；支持录音结束后异步转为 MP3
 - **录音后动作**：自动打开 Finder 定位文件开关
 - **图标样式**：支持 `microphone` / `circle_dot` / `waveform` 三种样式切换
 - **显示控制**：控制录音期间是否显示计时，以及闲置时是否变暗
@@ -110,11 +110,12 @@
 
 # H1 音频格式转换
 
-## H2 NativeMP3Encoder
-历史版本曾封装 LAME；当前版本不再内嵌第三方 MP3 编码器，改为原生能力检测。
+## H2 MP3Encoder
+MP3 输出统一入口，录音阶段仍先写入 M4A，停止后按用户设置异步转为 MP3。
 
-- **转换流程**：读取 M4A → PCM 解码 → 系统原生 MP3 写入能力可用时输出 MP3
-- **不可用处理**：设置页隐藏 MP3 选项；历史偏好为 MP3 时启动自动回落 M4A
+- **转换流程**：读取 M4A → 分块解码 PCM → LAME 分块编码 → 追加写入 MP3
+- **内存控制**：每次处理 8192 帧，避免长录音一次性解码到内存
+- **兜底处理**：LAME 不可用时尝试 `NativeMP3Encoder`；编码器均不可用时回落 M4A
 - **异步处理**：转换在 `userInitiated` 队列执行，不阻塞主线程
 
 ---

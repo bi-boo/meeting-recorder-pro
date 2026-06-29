@@ -334,7 +334,7 @@ struct AdvancedSettingsView: View {
                         Text("体积小、音质优，Apple 设备首选")
                     }
                     HStack(spacing: 6) {
-                        if NativeMP3Encoder.isEncodingAvailable {
+                        if MP3Encoder.isEncodingAvailable {
                             Text("MP3")
                                 .font(.system(size: 10, weight: .bold))
                                 .padding(.horizontal, 3)
@@ -349,7 +349,7 @@ struct AdvancedSettingsView: View {
                                 .padding(.vertical, 0.5)
                                 .background(Color.secondary.opacity(0.12))
                                 .cornerRadius(2)
-                            Text("当前系统不支持原生 MP3 编码，暂以 M4A 保存")
+                            Text("MP3 编码器不可用，暂以 M4A 保存")
                         }
                     }
                 }

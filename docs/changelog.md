@@ -1,3 +1,31 @@
+# [2026-06-29 23:35]
+- **用户需求/反馈**: 需要恢复 MP3 输出能力，不能因为系统原生 MP3 编码不可用而只剩 M4A。
+- **技术逻辑变更**:
+    - **恢复内嵌 LAME 编码链路**：新增 `MP3Encoder`，优先使用 LAME 转码，系统原生 `NativeMP3Encoder` 仅作为兜底。
+    - **分块流式转码**：每次读取 8192 帧 PCM 后立即编码并写入 MP3，避免旧实现一次性解码整段录音导致长会议内存暴涨。
+    - **工程链接恢复**：重新接入 `SimpleRecorder/ThirdParty/lame` 静态库、头文件和 module map，并将静态库重编为 `arm64 + macOS 13.0 minos`。
+    - **设置与 UI 回归**：保存格式选择重新展示 MP3；历史 MP3 偏好只有在编码器不可用时才回落 M4A。
+    - **QA 覆盖补齐**：自动化流程新增 `5.2 output-format-mp3`，录制一小段后等待异步转码并验证 `.mp3` 文件。
+- **涉及文件清单**:
+    - `SimpleRecorder/MP3Encoder.swift` [NEW]
+    - `SimpleRecorder/ThirdParty/lame/COPYING` [NEW]
+    - `SimpleRecorder/ThirdParty/lame/lame.h` [NEW]
+    - `SimpleRecorder/ThirdParty/lame/libmp3lame.a` [NEW]
+    - `SimpleRecorder/ThirdParty/lame/module.modulemap` [NEW]
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `SimpleRecorder/Models/AppSettingsCore.swift`
+    - `SimpleRecorder/Views/MainWindowSettingsView.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerCore.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerWriter.swift`
+    - `SimpleRecorder/Services/QAAutomationRunner.swift`
+    - `scripts/run_full_qa.sh`
+    - `README.md`
+    - `docs/architecture.md`
+    - `docs/prd.md`
+    - `docs/qa-regression.md`
+    - `docs/changelog.md`
+- **变更原因**: 保留“先录 M4A、再转 MP3”的可靠录音链路，同时让 MP3 输出不再依赖不同 macOS 版本是否提供原生 MP3 写入能力。
+
 # [2026-06-29 23:05]
 - **用户需求/反馈**: 希望把大部分功能测试自动化，后续每次改动都能由 Agent 直接跑一遍。
 - **技术逻辑变更**:

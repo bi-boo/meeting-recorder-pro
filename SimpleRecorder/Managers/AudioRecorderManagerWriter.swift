@@ -220,14 +220,14 @@ extension AudioRecorderManager {
         }
     }
 
-    // MARK: - M4A 转 MP3（使用原生 AudioToolbox，无第三方依赖）
+    // MARK: - M4A 转 MP3（优先使用内嵌 LAME 分块转码）
     func convertToMP3(from sourceURL: URL, completion: @escaping (URL?) -> Void) {
         let mp3URL = sourceURL.deletingPathExtension().appendingPathExtension("mp3")
 
         LogManager.shared.info("开始转换 MP3 | 源文件: \(sourceURL.lastPathComponent)")
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let success = NativeMP3Encoder.convertToMP3(from: sourceURL, to: mp3URL)
+            let success = MP3Encoder.convertToMP3(from: sourceURL, to: mp3URL)
 
             if success {
                 try? FileManager.default.removeItem(at: sourceURL)

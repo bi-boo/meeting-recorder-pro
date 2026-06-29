@@ -9,7 +9,7 @@
 - **全局快捷键**：任意界面下一键开始/结束/暂停录音
 - **双声道同时录制**：同时捕获麦克风和系统声音，线上会议两端声音一次录齐
 - **定时录音**：支持每天/每周定时计划，到点自动开始，不再手动开录
-- **轻量常驻**：纯菜单栏应用，不占 Dock，支持 M4A 输出；系统原生编码可用时显示 MP3 选项
+- **轻量常驻**：纯菜单栏应用，不占 Dock，支持 M4A / MP3 输出格式
 
 ## 系统要求
 
@@ -38,7 +38,7 @@ open SimpleRecorder.xcodeproj
 scripts/run_full_qa.sh
 ```
 
-自动化会打包 Release 产物，覆盖设置回读、麦克风录音、暂停继续、连续录音、系统声音、混合音源和定时自动录音，并输出 `qa-runs/*/report.md`。剩余强交互或系统授权场景按回归测试流程人工补测。
+自动化会打包 Release 产物，覆盖设置回读、麦克风录音、暂停继续、连续录音、MP3 输出、系统声音、混合音源和定时自动录音，并输出 `qa-runs/*/report.md`。剩余强交互或系统授权场景按回归测试流程人工补测。
 
 ### 敏感配置
 
@@ -49,6 +49,7 @@ scripts/run_full_qa.sh
 ```
 SimpleRecorder/
 ├── SimpleRecorderApp.swift          # 入口 + 菜单栏
+├── MP3Encoder.swift                 # MP3 输出入口（LAME 分块转码 + 原生兜底）
 ├── Models/
 │   ├── AppSettingsCore.swift        # 全局设置（UserDefaults）
 │   └── TimerTask.swift              # 定时任务数据模型

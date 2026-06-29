@@ -17,6 +17,7 @@ LOG_FILE="$HOME/Library/Application Support/Logs/MeetingRecorderPro_$(date +%Y-%
 
 RECORD_SECONDS="${QA_RECORD_SECONDS:-4}"
 PAUSE_SECONDS="${QA_PAUSE_SECONDS:-1}"
+INCLUDE_MP3="${QA_INCLUDE_MP3:-true}"
 INCLUDE_SYSTEM_AUDIO="${QA_INCLUDE_SYSTEM_AUDIO:-true}"
 INCLUDE_MIXED_AUDIO="${QA_INCLUDE_MIXED_AUDIO:-true}"
 INCLUDE_TIMER="${QA_INCLUDE_TIMER:-true}"
@@ -31,6 +32,7 @@ cat > "$SCENARIO_PATH" <<JSON
   "recordSeconds": $RECORD_SECONDS,
   "pauseSeconds": $PAUSE_SECONDS,
   "includeSettings": true,
+  "includeMP3": $INCLUDE_MP3,
   "includeSystemAudio": $INCLUDE_SYSTEM_AUDIO,
   "includeMixedAudio": $INCLUDE_MIXED_AUDIO,
   "includeTimer": $INCLUDE_TIMER
