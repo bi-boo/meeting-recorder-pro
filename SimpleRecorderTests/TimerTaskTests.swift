@@ -61,4 +61,26 @@ final class TimerTaskTests: XCTestCase {
         XCTAssertEqual(TimerTask(daysOfWeek: [6, 7]).daysDisplay, "周末")
         XCTAssertEqual(TimerTask(repeatType: .daily).daysDisplay, "每天")
     }
+
+    func testAutoStartConfirmationPolicyWaitsForAsyncStartup() {
+        XCTAssertEqual(
+            TimerRecordingStartConfirmationPolicy.decision(for: .starting, remainingAttempts: 1),
+            .wait
+        )
+        XCTAssertEqual(
+            TimerRecordingStartConfirmationPolicy.decision(for: .idle, remainingAttempts: 1),
+            .wait
+        )
+    }
+
+    func testAutoStartConfirmationPolicyConfirmsOnlyAfterRecording() {
+        XCTAssertEqual(
+            TimerRecordingStartConfirmationPolicy.decision(for: .recording, remainingAttempts: 0),
+            .confirmed
+        )
+        XCTAssertEqual(
+            TimerRecordingStartConfirmationPolicy.decision(for: .starting, remainingAttempts: 0),
+            .failed
+        )
+    }
 }

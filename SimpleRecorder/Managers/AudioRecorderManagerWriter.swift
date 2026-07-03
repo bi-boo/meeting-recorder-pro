@@ -220,7 +220,7 @@ extension AudioRecorderManager {
         }
     }
 
-    // MARK: - M4A 转 MP3（优先使用内嵌 LAME 分块转码）
+    // MARK: - M4A 转 MP3（使用 macOS 原生分块转码）
     func convertToMP3(from sourceURL: URL, completion: @escaping (URL?) -> Void) {
         let mp3URL = sourceURL.deletingPathExtension().appendingPathExtension("mp3")
 

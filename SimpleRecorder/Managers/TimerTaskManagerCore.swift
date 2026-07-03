@@ -288,13 +288,12 @@ class TimerTaskManager: ObservableObject {
 
         switch startResult {
         case .requested:
-            showAutoStartNotificationIfRecording(for: task)
+            confirmAutoStartRecording(for: task)
         case .alreadyRecording:
             markTaskAsTriggered(taskID: task.id)
             scheduleNextTrigger()
         case .rejected:
-            LogManager.shared.warning("定时任务录音未能启动，任务保留为未完成 | ID: \(task.id)")
-            scheduleNextTrigger()
+            markAutoStartTaskAsMissed(taskID: task.id, reason: "录音启动请求被拒绝")
         }
     }
 
@@ -304,6 +303,11 @@ class TimerTaskManager: ObservableObject {
         taskDisplay: String
     ) -> TimerRecordingStartResult {
         let recorderManager = AudioRecorderManager.shared
+
+        if recorderManager.recordingState == .starting {
+            LogManager.shared.info("录音启动仍在处理中，继续等待 | 任务: \(taskDisplay)")
+            return .requested
+        }
 
         if recorderManager.isRecording {
             LogManager.shared.info("已在录音中，跳过本次定时启动 | 任务: \(taskDisplay)")
@@ -319,20 +323,58 @@ class TimerTaskManager: ObservableObject {
         return .requested
     }
 
-    /// 只有在录音真正开始后才显示通知
-    /// 延迟 0.5 秒检查录音状态，避免录音失败时弹窗一直显示
-    private func showAutoStartNotificationIfRecording(for task: TimerTask) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            let recorderManager = AudioRecorderManager.shared
-            if recorderManager.isRecording {
-                _ = self?.markTaskAsTriggered(taskID: task.id)
-                self?.showAutoStartNotification(for: task)
-                self?.scheduleNextTrigger()
-            } else {
-                LogManager.shared.warning("录音未成功启动，跳过显示通知弹窗 | 任务: \(task.timeDisplay)")
-                self?.scheduleNextTrigger()
+    /// 只有在录音真正开始后才显示通知。
+    /// 系统音频启动和首次授权都是异步路径，必须给启动过程足够时间完成。
+    private func confirmAutoStartRecording(
+        for task: TimerTask,
+        remainingAttempts: Int = TimerRecordingStartConfirmationPolicy.maxAttempts
+    ) {
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + TimerRecordingStartConfirmationPolicy.retryInterval
+        ) { [weak self] in
+            guard let self = self else { return }
+
+            switch TimerRecordingStartConfirmationPolicy.decision(
+                for: self.currentRecordingStartObservation(),
+                remainingAttempts: remainingAttempts
+            ) {
+            case .confirmed:
+                _ = self.markTaskAsTriggered(taskID: task.id)
+                self.showAutoStartNotification(for: task)
+                self.scheduleNextTrigger()
+            case .wait:
+                self.confirmAutoStartRecording(
+                    for: task,
+                    remainingAttempts: remainingAttempts - 1
+                )
+            case .failed:
+                self.markAutoStartTaskAsMissed(taskID: task.id, reason: "等待录音进入 recording 超时")
             }
         }
+    }
+
+    private func currentRecordingStartObservation() -> TimerRecordingStartObservation {
+        switch AudioRecorderManager.shared.recordingState {
+        case .idle:
+            return .idle
+        case .starting:
+            return .starting
+        case .recording, .paused, .stopping:
+            return .recording
+        }
+    }
+
+    private func markAutoStartTaskAsMissed(taskID: UUID, reason: String) {
+        if let task = markTaskAsTriggered(taskID: taskID) {
+            LogManager.shared.warning(
+                "自动录音未能启动，本次计划已跳过并推进到下一次 | ID: \(task.id) | 原因: \(reason)"
+            )
+        } else {
+            triggeredTaskIDs.remove(taskID)
+            LogManager.shared.warning("自动录音未能启动，任务已不存在 | ID: \(taskID) | 原因: \(reason)")
+        }
+
+        scheduleNextTrigger()
     }
 
     /// 显示自动录音通知（5秒后自动消失）

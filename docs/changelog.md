@@ -1,3 +1,34 @@
+# [2026-07-03 23:20]
+- **用户需求/反馈**: 继续优化剩余问题，完成开源独立 DMG 分发前的许可证、仓库卫生和定时录音稳定性修复。
+- **技术逻辑变更**:
+    - **开源许可说明**：新增 MIT `LICENSE` 与 `THIRD_PARTY_NOTICES.md`，并将应用版权文案改为 MIT Licensed。
+    - **移除内嵌 LAME**：删除静态链接的 `libmp3lame.a`、头文件和 module map，降低开源二进制分发许可复杂度。
+    - **收敛发布承诺**：当前系统无可用 MP3 编码器时，公开版只承诺 M4A 输出；MP3 作为可选扩展能力保留运行时保护，不进入默认 QA 场景。
+    - **定时自动录音确认加固**：自动录音触发后最多等待 30 秒确认录音进入 `recording`，避免首次授权或系统音频异步启动慢时被 0.5 秒检查误判。
+    - **开源仓库清理**：将 `.agent/` 本地规则从 Git 跟踪中移除；移除与录音软件无关的 Cooper 导出脚本。
+    - **测试覆盖补齐**：新增自动录音启动确认策略单元测试。
+- **涉及文件清单**:
+    - `LICENSE` [NEW]
+    - `THIRD_PARTY_NOTICES.md` [NEW]
+    - `SimpleRecorder/MP3Encoder.swift`
+    - `SimpleRecorder/Models/TimerTask.swift`
+    - `SimpleRecorder/Managers/TimerTaskManagerCore.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerWriter.swift`
+    - `SimpleRecorder/Info.plist`
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `SimpleRecorderTests/TimerTaskTests.swift`
+    - `README.md`
+    - `docs/distribution.md`
+    - `docs/architecture.md`
+    - `docs/prd.md`
+    - `docs/qa-regression.md`
+    - `docs/changelog.md`
+    - `scripts/run_full_qa.sh`
+    - `.agent/` [UNTRACKED]
+    - `scripts/export_cooper_knowledge.mjs` [REMOVED]
+    - `SimpleRecorder/ThirdParty/lame/` [REMOVED]
+- **变更原因**: 降低独立分发和开源发布风险，同时修复定时任务在异步录音启动路径上的漏触发边界问题。
+
 # [2026-06-29 23:35]
 - **用户需求/反馈**: 需要恢复 MP3 输出能力，不能因为系统原生 MP3 编码不可用而只剩 M4A。
 - **技术逻辑变更**:

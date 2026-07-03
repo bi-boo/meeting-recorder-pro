@@ -51,15 +51,16 @@ NOTARY_PROFILE="notarytool-profile"
 
 ## 开源发布前检查
 
-- 根目录补齐 `LICENSE`，明确主项目开源许可证。
-- 保留 `SimpleRecorder/ThirdParty/lame/COPYING`，发布说明中注明内嵌 LAME 的许可来源。
+- 根目录保留 `LICENSE`，明确主项目开源许可证。
+- 保留 `THIRD_PARTY_NOTICES.md`，发布说明中注明第三方组件来源。
+- 当前公开版只承诺 M4A 输出；不随项目分发第三方 MP3 编码二进制库。
 - 跑完整 QA：
 
 ```bash
 scripts/run_full_qa.sh
 ```
 
-- 检查 DMG 是否通过签名、公证和 Gatekeeper：
+- 使用 Developer ID 正式发布时，检查 DMG 是否通过签名、公证和 Gatekeeper。未公证的开发包会被 Gatekeeper 标记为 not accepted，只适合本机验证或面向愿意手动放行的测试用户。
 
 ```bash
 spctl --assess --type open --context context:primary-signature --verbose=4 MeetingRecorderPro_YYYYMMDD.dmg
@@ -73,7 +74,7 @@ spctl --assess --type open --context context:primary-signature --verbose=4 Meeti
 - 支持麦克风、系统声音、麦克风 + 系统声音三种录音模式。
 - 支持定时录音、暂停继续、全局快捷键。
 - 录音期间保持系统唤醒，降低长会议中断风险。
-- 支持 M4A 和 MP3 输出。
+- 输出高兼容 M4A 录音文件。
 
 下载 DMG 后打开，将“会议录音 Pro”拖入 Applications 文件夹。首次录音需要授予麦克风权限；录制系统声音时需要额外授予屏幕与系统音频录制权限。
 ```

@@ -44,6 +44,37 @@ enum TimerActionType: String, CaseIterable, Codable {
     }
 }
 
+// MARK: - 自动录音启动确认
+
+enum TimerRecordingStartObservation: Equatable {
+    case idle
+    case starting
+    case recording
+}
+
+enum TimerRecordingStartConfirmationDecision: Equatable {
+    case confirmed
+    case wait
+    case failed
+}
+
+struct TimerRecordingStartConfirmationPolicy {
+    static let retryInterval: TimeInterval = 0.5
+    static let maxAttempts = 60
+
+    static func decision(
+        for observation: TimerRecordingStartObservation,
+        remainingAttempts: Int
+    ) -> TimerRecordingStartConfirmationDecision {
+        switch observation {
+        case .recording:
+            return .confirmed
+        case .starting, .idle:
+            return remainingAttempts > 0 ? .wait : .failed
+        }
+    }
+}
+
 // MARK: - 定时任务模型
 
 /// 定时录音任务模型
