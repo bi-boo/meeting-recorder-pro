@@ -29,6 +29,7 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 qa-runs/
+*.profraw
 
 # =====================================
 # 敏感配置（隐私保护）

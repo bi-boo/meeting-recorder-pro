@@ -258,8 +258,7 @@ extension AudioRecorderManager {
         lastWarningTime = 0
         lastDiskCheckTime = Date().timeIntervalSince1970
         isHandlingInterruption = false
-        droppedFrameCount = 0
-        totalFrameCount = 0
+        resetFrameDropStats()
 
         hasPrintedFirstSample = false
         hasPrintedSystemAudioFormat = false
@@ -304,9 +303,9 @@ extension AudioRecorderManager {
                 self.lastStatsLogTime = currentTime
                 let framesWritten = self.framesCounter.withLock { $0 }
                 let durationStr = String(format: "%.1f", self.recordingDuration)
-                let dropRate = self.totalFrameCount > 0 ? String(format: "%.2f%%", Double(self.droppedFrameCount) / Double(self.totalFrameCount) * 100) : "N/A"
+                let stats = self.frameDropStatsSnapshot()
                 let hwFormat = self.audioEngine.inputNode.inputFormat(forBus: 0)
-                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 丢帧: \(self.droppedFrameCount)/\(self.totalFrameCount) (\(dropRate)), 硬件格式: \(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
+                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 硬件格式: \(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
             }
         }
 
@@ -398,7 +397,7 @@ extension AudioRecorderManager {
             }
 
             if buffer.frameLength > 0 {
-                self.totalFrameCount += 1
+                self.incrementTotalFrameCount()
                 self.processAudioBufferWithPTS(buffer, pts: pts)
             }
         }
@@ -435,7 +434,7 @@ extension AudioRecorderManager {
             }
 
             if buffer.frameLength > 0 {
-                self.totalFrameCount += 1
+                self.incrementTotalFrameCount()
                 self.processAudioBufferWithPTS(buffer, pts: pts)
             }
         }

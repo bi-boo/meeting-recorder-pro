@@ -170,9 +170,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
     var lastStatsLogTime: TimeInterval = 0  // 上次统计日志时间
     var isHandlingInterruption = false  // 防止中断处理重入
 
-    // 丢帧诊断计数（步骤 1：定量分析写入繁忙频率）
-    var droppedFrameCount: Int = 0
-    var totalFrameCount: Int = 0
+    // 丢帧诊断计数：音频 tap、写入队列和主线程 timer 都会访问，必须用锁保护。
+    let droppedFrameCounter = OSAllocatedUnfairLock<Int>(initialState: 0)
+    let totalFrameCounter = OSAllocatedUnfairLock<Int>(initialState: 0)
 
     // 非阻塞通知控制器（用于录音完成/中断通知，避免阻塞主线程）
     lazy var notificationController = ReminderWindowController()
@@ -255,6 +255,38 @@ class AudioRecorderManager: NSObject, ObservableObject {
         UserDefaults.standard.synchronize()
     }
 
+    func resetFrameDropStats() {
+        droppedFrameCounter.withLock { $0 = 0 }
+        totalFrameCounter.withLock { $0 = 0 }
+    }
+
+    var droppedFrameCount: Int {
+        droppedFrameCounter.withLock { $0 }
+    }
+
+    var totalFrameCount: Int {
+        totalFrameCounter.withLock { $0 }
+    }
+
+    func incrementTotalFrameCount() {
+        totalFrameCounter.withLock { $0 += 1 }
+    }
+
+    @discardableResult
+    func incrementDroppedFrameCount() -> Int {
+        droppedFrameCounter.withLock {
+            $0 += 1
+            return $0
+        }
+    }
+
+    func frameDropStatsSnapshot() -> (dropped: Int, total: Int, rate: String) {
+        let dropped = droppedFrameCounter.withLock { $0 }
+        let total = totalFrameCounter.withLock { $0 }
+        let rate = total > 0 ? String(format: "%.2f%%", Double(dropped) / Double(total) * 100) : "N/A"
+        return (dropped, total, rate)
+    }
+
     // MARK: - 公开 API：启动录音
 
     @discardableResult
@@ -310,9 +342,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         let finalDuration = recordingDuration
         let finalFrames = framesCounter.withLock { $0 }
-        let dropRate = totalFrameCount > 0 ? String(format: "%.2f%%", Double(droppedFrameCount) / Double(totalFrameCount) * 100) : "N/A"
+        let stats = frameDropStatsSnapshot()
         LogManager.shared.info(
-            "正在结束录音 | 已录制时长: \(String(format: "%.1f", finalDuration))s, 总帧数: \(finalFrames), 丢帧: \(droppedFrameCount)/\(totalFrameCount) (\(dropRate))")
+            "正在结束录音 | 已录制时长: \(String(format: "%.1f", finalDuration))s, 总帧数: \(finalFrames), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate))")
         recordingTimer?.invalidate()
         recordingTimer = nil
 

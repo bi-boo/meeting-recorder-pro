@@ -2,6 +2,8 @@
 
 > 专为会议场景设计的 macOS 录音工具，支持定时录音、双声道同时录制，断电也不丢失录音。
 
+本项目计划开源并通过独立 DMG 分发，不提交 Mac App Store。发布与签名策略见 [独立分发说明](docs/distribution.md)。
+
 ## 功能特点
 
 - **实时保存**：录音文件循环写入，断电/崩溃不丢失已录内容
@@ -14,6 +16,7 @@
 ## 系统要求
 
 - macOS 13.0 (Ventura) 或更高版本
+- 当前预编译 DMG 面向 Apple Silicon (`arm64`)
 - 录制系统声音需要授予「屏幕录制」权限
 
 ## 开发
@@ -28,7 +31,12 @@
 ```bash
 # 直接用 Xcode 打开工程文件
 open SimpleRecorder.xcodeproj
+
+# 生成本地 DMG
+./build_dmg.sh
 ```
+
+没有 Developer ID 证书时，打包脚本会使用 ad-hoc 签名，只适合本机验证。公开分发版本应使用 Developer ID 签名并完成 notarization。
 
 ### 回归测试
 
@@ -80,4 +88,4 @@ SimpleRecorder/
 
 ## License
 
-Copyright © 2024–2026 Zheng Bao. All rights reserved.
+项目开源许可证发布前需要在根目录补齐 `LICENSE`。第三方 LAME 许可见 [COPYING](SimpleRecorder/ThirdParty/lame/COPYING)。

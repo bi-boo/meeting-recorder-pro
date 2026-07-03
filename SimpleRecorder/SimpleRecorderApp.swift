@@ -141,9 +141,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 退出前检查是否正在录音，确保保存（异步，不阻塞主线程）
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // 停止定时任务调度器
-        TimerTaskManager.shared.stopScheduler()
-
         // 如果正在录音，先保存
         if recordingManager.isRecording {
             // 弹出确认对话框
@@ -157,6 +154,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
                 LogManager.shared.info("应用退出 | 正在保存录音...")
+                TimerTaskManager.shared.stopScheduler()
                 // 异步保存，保存完成后通知系统继续退出（不阻塞主线程）
                 recordingManager.saveRecordingImmediately {
                     NSApp.reply(toApplicationShouldTerminate: true)
@@ -167,6 +165,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        TimerTaskManager.shared.stopScheduler()
         return .terminateNow
     }
 

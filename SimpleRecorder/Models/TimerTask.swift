@@ -24,6 +24,26 @@ enum RepeatType: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - 定时行为类型枚举
+enum TimerActionType: String, CaseIterable, Codable {
+    case remind = "remind"  // 提前提醒模式
+    case autoStart = "auto_start"  // 自动开始录音模式
+
+    var displayName: String {
+        switch self {
+        case .remind: return "到时提醒我"
+        case .autoStart: return "自动录音"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .remind: return "提前弹窗询问是否开始录音"
+        case .autoStart: return "到时间自动开始录音"
+        }
+    }
+}
+
 // MARK: - 定时任务模型
 
 /// 定时录音任务模型

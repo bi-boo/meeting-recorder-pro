@@ -84,8 +84,8 @@ extension AudioRecorderManager {
                     }
                 } else {
                     // 重试后仍写不进去，记录并丢弃
-                    self.droppedFrameCount += 1
-                    LogManager.shared.warning("写入队列繁忙，丢弃采样 | 累计丢帧: \(self.droppedFrameCount)")
+                    let droppedFrames = self.incrementDroppedFrameCount()
+                    LogManager.shared.warning("写入队列繁忙，丢弃采样 | 累计丢帧: \(droppedFrames)")
                 }
             }
         }

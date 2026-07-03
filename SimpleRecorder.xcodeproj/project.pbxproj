@@ -29,6 +29,8 @@
 		026 /* MP3Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146; };
 		027 /* libmp3lame.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 147; };
 		030 /* PermissionFlow in Frameworks */ = {isa = PBXBuildFile; productRef = 060 /* PermissionFlow */; };
+		031 /* TimerTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130; };
+		032 /* TimerTaskTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,6 +60,8 @@
 		147 /* libmp3lame.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libmp3lame.a; sourceTree = "<group>"; };
 		148 /* lame.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lame.h; sourceTree = "<group>"; };
 		149 /* module.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; path = module.modulemap; sourceTree = "<group>"; };
+		150 /* TimerTaskTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskTests.swift; sourceTree = "<group>"; };
+		151 /* SimpleRecorderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimpleRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +74,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		201 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -77,6 +88,7 @@
 			isa = PBXGroup;
 			children = (
 				301 /* SimpleRecorder */,
+				310 /* SimpleRecorderTests */,
 				302 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -104,6 +116,7 @@
 			isa = PBXGroup;
 			children = (
 				100 /* SimpleRecorder.app */,
+				151 /* SimpleRecorderTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -177,6 +190,14 @@
 			path = lame;
 			sourceTree = "<group>";
 		};
+		310 /* SimpleRecorderTests */ = {
+			isa = PBXGroup;
+			children = (
+				150 /* TimerTaskTests.swift */,
+			);
+			path = SimpleRecorderTests;
+			sourceTree = "<group>";
+		};
 	/* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -200,6 +221,23 @@
 			productReference = 100 /* SimpleRecorder.app */;
 			productType = "com.apple.product-type.application";
 		};
+		450 /* SimpleRecorderTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 501 /* Build configuration list for PBXNativeTarget "SimpleRecorderTests" */;
+			buildPhases = (
+				404 /* Sources */,
+				201 /* Frameworks */,
+				403 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SimpleRecorderTests;
+			productName = SimpleRecorderTests;
+			productReference = 151 /* SimpleRecorderTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -211,6 +249,9 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					400 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					450 = {
 						CreatedOnToolsVersion = 15.0;
 					};
 				};
@@ -233,6 +274,7 @@
 			projectRoot = "";
 			targets = (
 				400 /* SimpleRecorder */,
+				450 /* SimpleRecorderTests */,
 			);
 		};
 /* End PBXProject section */
@@ -244,6 +286,13 @@
 			files = (
 				011 /* Assets.xcassets in Resources */,
 				018 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		403 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -272,6 +321,15 @@
 				016 /* TimerTaskViews.swift in Sources */,
 				025 /* QAAutomationRunner.swift in Sources */,
 				026 /* MP3Encoder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		404 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				031 /* TimerTask.swift in Sources */,
+				032 /* TimerTaskTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -455,7 +513,45 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
-		};
+			};
+			704 /* Debug */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					GENERATE_INFOPLIST_FILE = YES;
+					LD_RUNPATH_SEARCH_PATHS = (
+						"$(inherited)",
+						"@executable_path/../Frameworks",
+						"@loader_path/../Frameworks",
+					);
+					MACOSX_DEPLOYMENT_TARGET = 14.0;
+					MARKETING_VERSION = 1.0.0;
+					PRODUCT_BUNDLE_IDENTIFIER = com.meetingrecorderpro.app.tests;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SWIFT_VERSION = 5.0;
+				};
+				name = Debug;
+			};
+			705 /* Release */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					GENERATE_INFOPLIST_FILE = YES;
+					LD_RUNPATH_SEARCH_PATHS = (
+						"$(inherited)",
+						"@executable_path/../Frameworks",
+						"@loader_path/../Frameworks",
+					);
+					MACOSX_DEPLOYMENT_TARGET = 14.0;
+					MARKETING_VERSION = 1.0.0;
+					PRODUCT_BUNDLE_IDENTIFIER = com.meetingrecorderpro.app.tests;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SWIFT_VERSION = 5.0;
+				};
+				name = Release;
+			};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -464,6 +560,15 @@
 			buildConfigurations = (
 				702 /* Debug */,
 				703 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		501 /* Build configuration list for PBXNativeTarget "SimpleRecorderTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				704 /* Debug */,
+				705 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

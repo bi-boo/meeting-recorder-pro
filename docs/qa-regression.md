@@ -77,7 +77,7 @@ QA_INCLUDE_SYSTEM_AUDIO=false QA_INCLUDE_MIXED_AUDIO=false scripts/run_full_qa.s
      CODE_SIGNING_ALLOWED=NO test
    ```
 
-   当前 scheme 没有配置 test action，记录为已知缺口。以后新增测试 target 后，此命令必须通过。
+   当前 scheme 已配置 `SimpleRecorderTests`，此命令必须通过；新增纯逻辑或可隔离边界逻辑时优先补充 XCTest。
 
 5. 生成安装包：
 

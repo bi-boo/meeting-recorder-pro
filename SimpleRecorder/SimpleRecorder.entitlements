@@ -3,10 +3,9 @@
 <plist version="1.0">
 <dict>
     <!--
-        ⚠️ 临时配置：sandbox 禁用以让 PermissionFlow 的拖拽授权动画能工作。
-        PermissionFlow 内部用 AX API 跨进程访问 com.apple.systempreferences,
-        受 App Sandbox 限制无法工作。
-        上架 Mac App Store 前必须改回 true,并对 PermissionFlow 调用做 sandbox 兜底。
+        独立 DMG 分发版本不启用 App Sandbox。
+        PermissionFlow 的拖拽授权引导需要跟踪系统设置窗口，受 App Sandbox 限制无法稳定工作。
+        本项目不提交 Mac App Store；如果未来改为 MAS 上架，需要重新开启 sandbox 并为权限引导加原生兜底。
     -->
     <key>com.apple.security.app-sandbox</key>
     <false/>
