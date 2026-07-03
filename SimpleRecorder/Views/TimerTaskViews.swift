@@ -37,12 +37,27 @@ struct TimerTaskListView: View {
         Form {
             Section {
                 if manager.tasks.isEmpty {
-                    // 空状态（简洁提示）
-                    Text("还没有定时计划，点击「添加」自动在固定时间开始录音")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
+                    VStack(spacing: 10) {
+                        Image(systemName: "clock.badge.plus")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.secondary)
+
+                        Text("还没有定时计划")
+                            .font(.headline)
+
+                        Text("添加一个计划，到点自动开始录音")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        Button(action: { showingAddSheet = true }) {
+                            Label("添加定时计划", systemImage: "plus.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                        .padding(.top, 4)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 22)
                 } else {
                     // 任务列表（按时间早晚排序）
                     ForEach(sortedTasks) { task in
@@ -53,25 +68,25 @@ struct TimerTaskListView: View {
                             }
                     }
                     .onDelete(perform: deleteTasks)
-                }
 
-                // 添加按钮（达到上限时禁用）
-                VStack(alignment: .leading, spacing: 4) {
-                    Button(action: { showingAddSheet = true }) {
-                        HStack {
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundColor(isAtLimit ? .secondary : .green)
-                            Text("添加定时计划")
+                    // 添加按钮（达到上限时禁用）
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button(action: { showingAddSheet = true }) {
+                            HStack {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundColor(isAtLimit ? .secondary : .green)
+                                Text("添加定时计划")
+                            }
                         }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isAtLimit)
+                        .buttonStyle(.plain)
+                        .disabled(isAtLimit)
 
-                    if isAtLimit {
-                        Text("最多添加 \(maxTaskCount) 个计划")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.leading, 4)
+                        if isAtLimit {
+                            Text("最多添加 \(maxTaskCount) 个计划")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.leading, 4)
+                        }
                     }
                 }
             } header: {
@@ -105,6 +120,7 @@ struct TimerTaskListView: View {
             }
         }
         .formStyle(.grouped)
+        .padding(.top, SettingsWindowLayout.contentTopPadding)
         .sheet(isPresented: $showingAddSheet) {
             TimerTaskEditView(mode: .add)
         }
@@ -457,7 +473,7 @@ struct DaysOfWeekPicker: View {
     ]
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ForEach(days, id: \.0) { day, name in
                 DayButton(
                     name: name,
@@ -496,7 +512,7 @@ struct DayButton: View {
         Button(action: action) {
             Text(name)
                 .font(.system(size: 14, weight: .medium))
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .background(
                     Circle()
                         .fill(isSelected ? Color.blue : Color.secondary.opacity(0.2))
