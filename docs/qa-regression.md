@@ -141,7 +141,7 @@ QA_INCLUDE_SYSTEM_AUDIO=false QA_INCLUDE_MIXED_AUDIO=false scripts/run_full_qa.s
 | 编号 | 测试项 | 操作 | 通过标准 |
 |---|---|---|---|
 | 5.1 | 保存格式 M4A | 选择 M4A 并录音 | 输出 `.m4a`，`afinfo` 显示 AAC 音频流 |
-| 5.2 | 保存格式 MP3（可选） | 仅在 `MP3Encoder.backendName` 非 `Unavailable` 或接入合规编码器后执行；自动化用 `QA_INCLUDE_MP3=true scripts/run_full_qa.sh` | 输出 `.mp3`；源 `.m4a` 转码成功后被移除。当前公开 DMG 默认不承诺此项 |
+| 5.2 | 保存格式 MP3 | 选择 MP3 并录音 | 输出 `.mp3`；自动化报告中 `5.2 output-format-mp3` 通过；源 `.m4a` 转码成功后被移除 |
 | 5.3 | 时长上限控件 | 调整小时和分钟 | 范围限制符合 0-9 小时、5 分钟步进，重启后保留 |
 | 5.4 | 图标样式 | 切换“麦克风”“指示点”“波形图” | 菜单栏图标立即更新，重启后保留 |
 | 5.5 | 显示时长 | 录音中开关“显示录音时长” | 开启时菜单栏显示计时；关闭时只显示图标 |

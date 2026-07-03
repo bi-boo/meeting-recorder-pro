@@ -13,4 +13,13 @@ The PermissionFlow license is included by Swift Package Manager in the resolved 
 
 ## MP3 Encoding
 
-The current public build does not vendor or link any third-party MP3 encoder. MP3 remains guarded by runtime availability checks in the source code and is not part of the default binary release promise unless a compatible encoder is supplied and documented separately.
+MP3 export is implemented with `libmp3lame` first, with macOS native encoding kept as a fallback when available.
+
+## LAME / libmp3lame
+
+- Files: `SimpleRecorder/ThirdParty/lame/`
+- Included artifacts: `libmp3lame.a`, `lame.h`, `module.modulemap`, `COPYING`
+- License: GNU Library General Public License version 2, or later as stated in the upstream header
+- Purpose: Converts finished M4A recordings to MP3 for services that require MP3 uploads.
+
+The LAME license text is kept at `SimpleRecorder/ThirdParty/lame/COPYING`. Keep that notice with source and binary releases. If the static `libmp3lame.a` is redistributed, release notes should also describe how the bundled library was built and how users can replace or rebuild it.

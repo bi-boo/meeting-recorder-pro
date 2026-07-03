@@ -1,3 +1,24 @@
+# [2026-07-04 00:05]
+- **用户需求/反馈**: 很多转写服务不支持 MP4/M4A 上传，MP3 输出必须保留在默认能力里。
+- **技术逻辑变更**:
+    - **恢复 MP3 默认支持**：恢复 `MP3Encoder` 的 LAME 优先、系统原生兜底编码链路。
+    - **恢复工程链接**：重新加入 `SimpleRecorder/ThirdParty/lame` 静态库、头文件和 module map，并恢复 Xcode 工程搜索路径。
+    - **恢复 QA 覆盖**：`scripts/run_full_qa.sh` 默认重新执行 `5.2 output-format-mp3`。
+    - **同步分发说明**：README、PRD、架构、分发和回归测试文档重新写明 M4A/MP3 都是公开版能力；第三方声明补充 LAME 许可和分发注意事项。
+- **涉及文件清单**:
+    - `SimpleRecorder/MP3Encoder.swift`
+    - `SimpleRecorder/ThirdParty/lame/` [RESTORED]
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `scripts/run_full_qa.sh`
+    - `README.md`
+    - `THIRD_PARTY_NOTICES.md`
+    - `docs/distribution.md`
+    - `docs/architecture.md`
+    - `docs/prd.md`
+    - `docs/qa-regression.md`
+    - `docs/changelog.md`
+- **变更原因**: 转写上传兼容性优先；开源分发风险通过 LAME 许可说明和发布流程管理。
+
 # [2026-07-03 23:20]
 - **用户需求/反馈**: 继续优化剩余问题，完成开源独立 DMG 分发前的许可证、仓库卫生和定时录音稳定性修复。
 - **技术逻辑变更**:
