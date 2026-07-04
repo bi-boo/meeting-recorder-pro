@@ -117,8 +117,8 @@ RELEASE=1 ./build_dmg.sh
 
 - 自动更新使用 Sparkle 2，更新源固定为 GitHub Releases 的 `appcast.xml`，不维护额外服务器。
 - `CFBundleVersion` 是 Sparkle 判断新旧版本的依据，每次发布必须递增。
-- 菜单栏默认显示“检查更新...”；后台发现更新后显示“有新版本 x.y.z...”。
-- 录音中禁止检查更新，菜单项必须禁用，避免更新流程影响录音。
+- 菜单栏更新项默认显示“当前版本 x.y.z”；后台发现更新后同一菜单项显示“下载并安装 x.y.z...”。
+- 录音中禁止检查和安装更新，菜单项必须禁用，避免更新流程影响录音。
 - 后台每日检查只更新菜单状态，不主动弹出更新窗口。
 - 用户点击可用更新后，不展示更新窗口和版本说明，直接进入 Sparkle 的下载、验签、重启安装流程；系统权限授权提示除外。
 - 每次正式版本迭代必须执行 `RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh`，确保 GitHub Release 同时包含 DMG 和 `appcast.xml`。

@@ -8,7 +8,7 @@
 |---|---|
 | 应用名称 | 会议录音 Pro |
 | Bundle ID | `com.meetingrecorderpro.app` |
-| 当前版本 | `1.0.0` (`1`) |
+| 当前版本 | `1.0.3` (`4`) |
 | 支持系统 | macOS 13.0 或更高版本 |
 | 当前发布架构 | Apple Silicon (`arm64`) |
 | 分发产物 | `MeetingRecorderPro_YYYYMMDD.dmg` |
@@ -67,7 +67,7 @@ RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh
 - Appcast：`https://github.com/bi-boo/meeting-recorder-pro/releases/latest/download/appcast.xml`
 - 更新包：GitHub Release asset 中的 `MeetingRecorderPro_YYYYMMDD.dmg`
 - 检查频率：每天一次
-- 菜单栏默认显示“检查更新...”，发现更新后显示“有新版本 x.y.z...”
+- 菜单栏更新项默认显示“当前版本 x.y.z”，发现更新后显示“下载并安装 x.y.z...”
 - 录音中禁止检查更新，避免安装流程影响录音保存
 - 用户点击可用更新后，不展示更新窗口和版本说明，Sparkle 负责下载、验签、替换应用并重启安装；系统权限授权提示除外
 

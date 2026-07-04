@@ -18,14 +18,13 @@ final class UpdateManager: NSObject {
         case extracting
         case readyToInstall
         case installing
-        case completed(String)
         case failed(String)
 
         var isBusy: Bool {
             switch self {
             case .checking, .downloading, .extracting, .readyToInstall, .installing:
                 return true
-            case .idle, .completed, .failed:
+            case .idle, .failed:
                 return false
             }
         }
@@ -48,20 +47,7 @@ final class UpdateManager: NSObject {
     private var didStart = false
 
     var menuTitle: String {
-        if let availableVersion {
-            return "下载并安装 \(availableVersion)..."
-        }
-        return "检查更新..."
-    }
-
-    var currentVersionTitle: String {
-        "当前版本 \(Self.currentDisplayVersion)"
-    }
-
-    var statusTitle: String? {
         switch status {
-        case .idle:
-            return nil
         case .checking:
             return "正在检查更新..."
         case .downloading:
@@ -70,16 +56,21 @@ final class UpdateManager: NSObject {
             return "正在准备安装..."
         case .readyToInstall, .installing:
             return "正在安装并重启..."
-        case .completed(let version):
-            return "已更新到 \(version)"
-        case .failed(let message):
-            return "更新失败：\(message)"
+        case .idle, .failed:
+            break
         }
+
+        if let availableVersion {
+            return "下载并安装 \(availableVersion)..."
+        }
+        return "当前版本 \(Self.currentDisplayVersion)"
     }
 
     var canSelectMenuItem: Bool {
         guard didStart else { return false }
-        return !AudioRecorderManager.shared.isRecording && !status.isBusy
+        return availableVersion != nil
+            && !AudioRecorderManager.shared.isRecording
+            && !status.isBusy
     }
 
     func start(onStatusChanged: @escaping () -> Void) {
@@ -122,15 +113,8 @@ final class UpdateManager: NSObject {
             return
         }
 
-        guard !updater.sessionInProgress else {
-            LogManager.shared.warning("当前无法检查更新 | Sparkle 会话正在进行")
-            NSSound.beep()
-            return
-        }
-
-        setStatus(.checking)
-        LogManager.shared.info("用户手动检查更新")
-        updater.checkForUpdateInformation()
+        LogManager.shared.info("当前已是最新版本 | 版本: \(Self.currentDisplayVersion)")
+        NSSound.beep()
     }
 
     private func setStatus(_ newStatus: UpdateStatus) {
@@ -219,7 +203,6 @@ final class UpdateManager: NSObject {
 
         if didComplete {
             LogManager.shared.info("更新安装完成确认 | 当前版本: \(Self.currentDisplayVersion)")
-            setStatus(.completed(Self.currentDisplayVersion))
         } else if startedAt > 0 && Date().timeIntervalSince1970 - startedAt < 3600 {
             LogManager.shared.warning("更新安装未完成 | 目标版本: \(pendingDisplayVersion)")
             setStatus(.failed("安装未完成"))
@@ -286,7 +269,9 @@ extension UpdateManager: SPUUpdaterDelegate {
     ) {
         if let error {
             LogManager.shared.warning("更新检查结束 | \(error.localizedDescription)")
-            markUpdateFailed(error)
+            if installingDisplayVersion != nil || status.isBusy {
+                markUpdateFailed(error)
+            }
             return
         }
         if status == .checking {
@@ -296,7 +281,9 @@ extension UpdateManager: SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
         LogManager.shared.warning("更新流程中止 | \(error.localizedDescription)")
-        markUpdateFailed(error)
+        if installingDisplayVersion != nil || status.isBusy {
+            markUpdateFailed(error)
+        }
     }
 }
 
