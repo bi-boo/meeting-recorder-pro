@@ -165,6 +165,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        if recordingManager.isFinalizingOutput {
+            LogManager.shared.info("应用退出 | 正在等待录音文件收尾...")
+            TimerTaskManager.shared.stopScheduler()
+            recordingManager.waitForOutputFinalization {
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
+
         TimerTaskManager.shared.stopScheduler()
         return .terminateNow
     }

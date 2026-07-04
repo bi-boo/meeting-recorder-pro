@@ -121,6 +121,9 @@ struct TimerTaskListView: View {
         }
         .formStyle(.grouped)
         .padding(.top, SettingsWindowLayout.contentTopPadding)
+        .onAppear {
+            settings.refreshLaunchAtLoginStatus()
+        }
         .sheet(isPresented: $showingAddSheet) {
             TimerTaskEditView(mode: .add)
         }
@@ -520,6 +523,8 @@ struct DayButton: View {
                         .fill(isSelected ? Color.blue : Color.secondary.opacity(0.2))
                 )
                 .foregroundColor(isSelected ? .white : .primary)
+                .padding(4)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityName)

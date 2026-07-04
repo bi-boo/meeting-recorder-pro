@@ -1,3 +1,28 @@
+# [2026-07-04 继续三轮 subagent 检测修复]
+- **用户需求/反馈**: 再派出三个 subagent 分别检查项目，先分析可能风险，再确认项目是否存在类似问题，存在则修复。
+- **技术逻辑变更**:
+    - **录音收尾加固**：录音停止后立即停止接收新音频 buffer，避免停止流程中继续 append；普通停止后的 MP3 转码被纳入输出收尾状态，退出应用会等待转码完成。
+    - **系统音频流隔离**：SCStream 采集加入 generation 标记，异步停止后的旧回调不会进入新一轮系统音频队列。
+    - **设置状态校准**：最长录音时长最低 5 分钟；开机自启动从系统状态回读，注册失败时回滚 UI 状态；设备移除检测先刷新真实设备列表。
+    - **QA 与发布门禁**：完整 QA 默认把核心场景 skipped 视为失败；场景 JSON 改用安全序列化；`RELEASE=1` 打包必须通过 Developer ID、公证、stapler、Gatekeeper；DMG 根目录包含主项目和 LAME 许可文件。
+    - **UI 小修**：快捷键录制器避免双监听；星期按钮保持 36 视觉尺寸，同时保留更稳的点击热区。
+- **涉及文件清单**:
+    - `SimpleRecorder/Managers/AudioRecorderManagerCore.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerEngine.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerWriter.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerSystemAudio.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerDevice.swift`
+    - `SimpleRecorder/Models/AppSettingsCore.swift`
+    - `SimpleRecorder/Views/MainWindowSettingsView.swift`
+    - `SimpleRecorder/Views/TimerTaskViews.swift`
+    - `SimpleRecorder/NativeMP3Encoder.swift`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `scripts/run_full_qa.sh`
+    - `build_dmg.sh`
+    - `docs/distribution.md`
+    - `docs/qa-regression.md`
+- **变更原因**: 优先修复可能导致丢录音、误判测试通过或公开分发包不合规的边界风险，保持项目短小但发布前证据更硬。
+
 # [2026-07-04 00:05]
 - **用户需求/反馈**: 很多转写服务不支持 MP4/M4A 上传，MP3 输出必须保留在默认能力里。
 - **技术逻辑变更**:

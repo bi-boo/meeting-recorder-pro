@@ -21,6 +21,7 @@ INCLUDE_MP3="${QA_INCLUDE_MP3:-true}"
 INCLUDE_SYSTEM_AUDIO="${QA_INCLUDE_SYSTEM_AUDIO:-true}"
 INCLUDE_MIXED_AUDIO="${QA_INCLUDE_MIXED_AUDIO:-true}"
 INCLUDE_TIMER="${QA_INCLUDE_TIMER:-true}"
+ALLOW_SKIPS="${QA_ALLOW_SKIPS:-false}"
 QA_TIMEOUT_SECONDS="${QA_TIMEOUT_SECONDS:-180}"
 
 json_bool() {
@@ -61,23 +62,45 @@ INCLUDE_MP3_JSON="$(json_bool QA_INCLUDE_MP3 "$INCLUDE_MP3")"
 INCLUDE_SYSTEM_AUDIO_JSON="$(json_bool QA_INCLUDE_SYSTEM_AUDIO "$INCLUDE_SYSTEM_AUDIO")"
 INCLUDE_MIXED_AUDIO_JSON="$(json_bool QA_INCLUDE_MIXED_AUDIO "$INCLUDE_MIXED_AUDIO")"
 INCLUDE_TIMER_JSON="$(json_bool QA_INCLUDE_TIMER "$INCLUDE_TIMER")"
+ALLOW_SKIPS_JSON="$(json_bool QA_ALLOW_SKIPS "$ALLOW_SKIPS")"
 QA_TIMEOUT_SECONDS="$(json_positive_int QA_TIMEOUT_SECONDS "$QA_TIMEOUT_SECONDS")"
 
 mkdir -p "$RECORDINGS_DIR"
 
-cat > "$SCENARIO_PATH" <<JSON
-{
-  "outputPath": "$RESULT_PATH",
-  "recordingsPath": "$RECORDINGS_DIR",
-  "recordSeconds": $RECORD_SECONDS_JSON,
-  "pauseSeconds": $PAUSE_SECONDS_JSON,
-  "includeSettings": true,
-  "includeMP3": $INCLUDE_MP3_JSON,
-  "includeSystemAudio": $INCLUDE_SYSTEM_AUDIO_JSON,
-  "includeMixedAudio": $INCLUDE_MIXED_AUDIO_JSON,
-  "includeTimer": $INCLUDE_TIMER_JSON
+QA_SCENARIO_PATH="$SCENARIO_PATH" \
+QA_RESULT_PATH="$RESULT_PATH" \
+QA_RECORDINGS_PATH="$RECORDINGS_DIR" \
+QA_RECORD_SECONDS_JSON="$RECORD_SECONDS_JSON" \
+QA_PAUSE_SECONDS_JSON="$PAUSE_SECONDS_JSON" \
+QA_INCLUDE_MP3_JSON="$INCLUDE_MP3_JSON" \
+QA_INCLUDE_SYSTEM_AUDIO_JSON="$INCLUDE_SYSTEM_AUDIO_JSON" \
+QA_INCLUDE_MIXED_AUDIO_JSON="$INCLUDE_MIXED_AUDIO_JSON" \
+QA_INCLUDE_TIMER_JSON="$INCLUDE_TIMER_JSON" \
+/usr/bin/python3 <<'PY'
+import json
+import os
+import pathlib
+
+def bool_env(name):
+    return os.environ[name] == "true"
+
+scenario = {
+    "outputPath": os.environ["QA_RESULT_PATH"],
+    "recordingsPath": os.environ["QA_RECORDINGS_PATH"],
+    "recordSeconds": int(os.environ["QA_RECORD_SECONDS_JSON"]),
+    "pauseSeconds": int(os.environ["QA_PAUSE_SECONDS_JSON"]),
+    "includeSettings": True,
+    "includeMP3": bool_env("QA_INCLUDE_MP3_JSON"),
+    "includeSystemAudio": bool_env("QA_INCLUDE_SYSTEM_AUDIO_JSON"),
+    "includeMixedAudio": bool_env("QA_INCLUDE_MIXED_AUDIO_JSON"),
+    "includeTimer": bool_env("QA_INCLUDE_TIMER_JSON"),
 }
-JSON
+
+pathlib.Path(os.environ["QA_SCENARIO_PATH"]).write_text(
+    json.dumps(scenario, ensure_ascii=False, indent=2) + "\n",
+    encoding="utf-8",
+)
+PY
 
 echo "== QA run =="
 echo "目录: $QA_DIR"
@@ -140,9 +163,15 @@ fi
 echo
 echo "== QA result =="
 set +e
+QA_ALLOW_SKIPS_JSON="$ALLOW_SKIPS_JSON" \
+QA_EXPECT_MP3="$INCLUDE_MP3_JSON" \
+QA_EXPECT_SYSTEM_AUDIO="$INCLUDE_SYSTEM_AUDIO_JSON" \
+QA_EXPECT_MIXED_AUDIO="$INCLUDE_MIXED_AUDIO_JSON" \
+QA_EXPECT_TIMER="$INCLUDE_TIMER_JSON" \
 /usr/bin/python3 - "$RESULT_PATH" "$REPORT_PATH" "$DMG_PATH" <<'PY'
 import hashlib
 import json
+import os
 import pathlib
 import platform
 import subprocess
@@ -162,6 +191,22 @@ except Exception:
     commit = "unknown"
 
 sha256 = hashlib.sha256(dmg_path.read_bytes()).hexdigest()
+allow_skips = os.environ.get("QA_ALLOW_SKIPS_JSON") == "true"
+
+required_steps = []
+if os.environ.get("QA_EXPECT_MP3") == "true":
+    required_steps.append("5.2 output-format-mp3")
+if os.environ.get("QA_EXPECT_SYSTEM_AUDIO") == "true":
+    required_steps.append("4.3 system-audio")
+if os.environ.get("QA_EXPECT_MIXED_AUDIO") == "true":
+    required_steps.append("4.4 mixed-audio")
+if os.environ.get("QA_EXPECT_TIMER") == "true":
+    required_steps.append("6.2 timer-auto-start")
+
+skipped_required = [
+    step for step in steps
+    if step.get("name") in required_steps and step.get("status") == "skipped"
+]
 
 lines = [
     "# 会议录音 Pro QA 自动化记录",
@@ -173,6 +218,7 @@ lines = [
     f"- SHA256: {sha256}",
     f"- 录音目录: {data.get('recordingsPath', '')}",
     f"- 结果: passed={summary.get('passed', 0)}, failed={summary.get('failed', 0)}, skipped={summary.get('skipped', 0)}, total={summary.get('total', len(steps))}",
+    f"- 核心场景 skipped 策略: {'允许' if allow_skips else '失败'}",
     "",
     "| 场景 | 结果 | 说明 | 录音文件 |",
     "|---|---|---|---|",
@@ -188,10 +234,22 @@ for step in steps:
         f"| {step.get('name', '')} | {step.get('status', '')} | {message} | {recordings} |"
     )
 
+if skipped_required and not allow_skips:
+    lines.extend([
+        "",
+        "## 未通过原因",
+        "",
+        "以下核心场景被跳过，默认视为 QA 未通过：",
+    ])
+    for step in skipped_required:
+        lines.append(f"- {step.get('name')}: {step.get('message', '')}")
+
 report_path.write_text("\n".join(lines) + "\n")
 print(report_path)
 
-sys.exit(1 if int(summary.get("failed", 0)) > 0 else 0)
+has_failed_steps = int(summary.get("failed", 0)) > 0
+has_blocking_skips = bool(skipped_required) and not allow_skips
+sys.exit(1 if has_failed_steps or has_blocking_skips else 0)
 PY
 RESULT_EXIT=$?
 set -e

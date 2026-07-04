@@ -183,6 +183,9 @@ struct BasicSettingsView: View {
                             currentHotKey: hotKeyManager.recordHotKey,
                             conflictKey: hotKeyManager.pauseHotKey,
                             conflictKeyName: "暂停/继续录音",
+                            onBeginRecording: {
+                                isRecordingPauseShortcut = false
+                            },
                             onHotKeyRecorded: { config in
                                 hotKeyManager.saveRecordHotKey(config)
                             }
@@ -197,6 +200,9 @@ struct BasicSettingsView: View {
                             currentHotKey: hotKeyManager.pauseHotKey,
                             conflictKey: hotKeyManager.recordHotKey,
                             conflictKeyName: "开始/结束录音",
+                            onBeginRecording: {
+                                isRecordingShortcut = false
+                            },
                             onHotKeyRecorded: { config in
                                 hotKeyManager.savePauseHotKey(config)
                             }
@@ -332,6 +338,10 @@ struct BasicSettingsView: View {
 // MARK: - 高级设置
 struct AdvancedSettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
+    private var maxDurationMinuteOptions: [Int] {
+        let allOptions = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
+        return settings.maxDurationHours == 0 ? Array(allOptions.dropFirst()) : allOptions
+    }
 
     var body: some View {
         Form {
@@ -350,8 +360,7 @@ struct AdvancedSettingsView: View {
                             .frame(width: 85)
 
                             Picker("", selection: $settings.maxDurationMinutes) {
-                                ForEach([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], id: \.self)
-                                { minute in
+                                ForEach(maxDurationMinuteOptions, id: \.self) { minute in
                                     Text("\(minute) 分钟").tag(minute)
                                 }
                             }
@@ -447,17 +456,20 @@ struct ShortcutRecorderView: View {
     let currentHotKey: HotKeyManager.HotKeyConfiguration?
     var conflictKey: HotKeyManager.HotKeyConfiguration? = nil
     var conflictKeyName: String = "其他功能"
+    var onBeginRecording: () -> Void = {}
     let onHotKeyRecorded: (HotKeyManager.HotKeyConfiguration) -> Void
     @State private var eventMonitor: Any?
     @State private var showConflictAlert = false
 
     var body: some View {
         Button(action: {
-            isRecording.toggle()
             if isRecording {
-                startMonitoring()
-            } else {
+                isRecording = false
                 stopMonitoring()
+            } else {
+                onBeginRecording()
+                isRecording = true
+                startMonitoring()
             }
         }) {
             if isRecording {
@@ -474,6 +486,11 @@ struct ShortcutRecorderView: View {
             }
         }
         .buttonStyle(.bordered)
+        .onChange(of: isRecording) { newValue in
+            if !newValue {
+                stopMonitoring()
+            }
+        }
         .onDisappear {
             stopMonitoring()
         }

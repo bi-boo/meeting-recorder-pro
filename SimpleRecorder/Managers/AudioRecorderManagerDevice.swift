@@ -110,6 +110,9 @@ extension AudioRecorderManager {
         guard isRecording, !isPaused, currentAudioSource != .systemAudio else { return }
         guard let deviceID = recordingDeviceID, deviceID != "default" else { return }
 
+        // 先刷新真实设备列表，避免用旧缓存误判设备是否仍然存在。
+        AppSettings.shared.refreshInputDevices()
+
         // 检查当前使用的设备是否还在列表中
         let availableDevices = AppSettings.shared.availableInputDevices
         let deviceStillExists = availableDevices.contains { $0.id == deviceID }

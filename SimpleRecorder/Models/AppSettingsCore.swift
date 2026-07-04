@@ -78,6 +78,10 @@ enum IconStyle: String, CaseIterable, Codable {
 
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
+    static let minimumMaxDurationMinutes = 5
+
+    private var isNormalizingMaxDuration = false
+    private var isApplyingLaunchAtLoginSystemState = false
 
     // MARK: - 存储路径设置
     @Published var recordingsPath: URL {
@@ -96,15 +100,16 @@ class AppSettings: ObservableObject {
 
     // MARK: - 录音设置
     @Published var maxDurationHours: Int {
-        didSet { UserDefaults.standard.set(maxDurationHours, forKey: "maxDurationHours") }
+        didSet { normalizeAndPersistMaxDuration() }
     }
 
     @Published var maxDurationMinutes: Int {
-        didSet { UserDefaults.standard.set(maxDurationMinutes, forKey: "maxDurationMinutes") }
+        didSet { normalizeAndPersistMaxDuration() }
     }
 
     var maxRecordingDuration: TimeInterval {
-        TimeInterval(maxDurationHours * 3600 + maxDurationMinutes * 60)
+        let rawSeconds = maxDurationHours * 3600 + maxDurationMinutes * 60
+        return TimeInterval(max(rawSeconds, Self.minimumMaxDurationMinutes * 60))
     }
 
     // MARK: - 音频源设置
@@ -127,8 +132,21 @@ class AppSettings: ObservableObject {
     // MARK: - 行为设置
     @Published var launchAtLogin: Bool {
         didSet {
+            guard !isApplyingLaunchAtLoginSystemState else {
+                UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
+                return
+            }
+
+            let requestedValue = launchAtLogin
+            guard applyLaunchAtLogin(requestedValue) else {
+                isApplyingLaunchAtLoginSystemState = true
+                launchAtLogin = oldValue
+                isApplyingLaunchAtLoginSystemState = false
+                UserDefaults.standard.set(oldValue, forKey: "launchAtLogin")
+                return
+            }
+
             UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
-            updateLaunchAtLogin(launchAtLogin)
         }
     }
 
@@ -354,6 +372,9 @@ class AppSettings: ObservableObject {
         self.preventSleepWithSchedule =
             UserDefaults.standard.object(forKey: "preventSleepWithSchedule") as? Bool ?? true  // 默认开启
 
+        normalizeAndPersistMaxDuration()
+        refreshLaunchAtLoginStatus()
+
         // 初始刷新一次设备列表
         refreshInputDevices()
 
@@ -505,8 +526,53 @@ class AppSettings: ObservableObject {
         return physicalTransportTypes.contains(transportType)
     }
 
+    private func normalizeAndPersistMaxDuration() {
+        if isNormalizingMaxDuration {
+            UserDefaults.standard.set(maxDurationHours, forKey: "maxDurationHours")
+            UserDefaults.standard.set(maxDurationMinutes, forKey: "maxDurationMinutes")
+            return
+        }
+
+        isNormalizingMaxDuration = true
+
+        let clampedHours = min(max(maxDurationHours, 0), 9)
+        let clampedMinutes = min(max(maxDurationMinutes, 0), 55)
+        let steppedMinutes = (clampedMinutes / 5) * 5
+
+        if maxDurationHours != clampedHours {
+            maxDurationHours = clampedHours
+        }
+        if maxDurationMinutes != steppedMinutes {
+            maxDurationMinutes = steppedMinutes
+        }
+        if maxDurationHours == 0 && maxDurationMinutes == 0 {
+            maxDurationMinutes = Self.minimumMaxDurationMinutes
+        }
+
+        isNormalizingMaxDuration = false
+
+        UserDefaults.standard.set(maxDurationHours, forKey: "maxDurationHours")
+        UserDefaults.standard.set(maxDurationMinutes, forKey: "maxDurationMinutes")
+    }
+
     // MARK: - 开机自启动
-    private func updateLaunchAtLogin(_ enable: Bool) {
+    func refreshLaunchAtLoginStatus() {
+        if #available(macOS 13.0, *) {
+            let systemEnabled = SMAppService.mainApp.status == .enabled
+            guard launchAtLogin != systemEnabled else {
+                UserDefaults.standard.set(systemEnabled, forKey: "launchAtLogin")
+                return
+            }
+
+            isApplyingLaunchAtLoginSystemState = true
+            launchAtLogin = systemEnabled
+            isApplyingLaunchAtLoginSystemState = false
+            UserDefaults.standard.set(systemEnabled, forKey: "launchAtLogin")
+        }
+    }
+
+    @discardableResult
+    private func applyLaunchAtLogin(_ enable: Bool) -> Bool {
         if #available(macOS 13.0, *) {
             do {
                 if enable {
@@ -515,9 +581,13 @@ class AppSettings: ObservableObject {
                     try SMAppService.mainApp.unregister()
                 }
                 LogManager.shared.info("开机自启动设置: \(enable ? "已启用" : "已禁用")")
+                return true
             } catch {
                 LogManager.shared.error("开机自启动设置失败: \(error.localizedDescription)")
+                return false
             }
         }
+
+        return false
     }
 }

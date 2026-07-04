@@ -20,6 +20,11 @@ extension AudioRecorderManager {
 
     // MARK: - 核心写入逻辑（带 PTS 时间戳）
     func processAudioBufferWithPTS(_ buffer: AVAudioPCMBuffer, pts: CMTime) {
+        guard canAcceptAudioBuffers() else {
+            incrementDroppedFrameCount()
+            return
+        }
+
         // 1. 实现 Buffer 池化复用
         let bufferCopy: AVAudioPCMBuffer
         bufferPoolLock.lock()
@@ -51,7 +56,8 @@ extension AudioRecorderManager {
 
         writingQueue.async { [weak self] in
             guard let self = self, let currentWriter = self.assetWriter,
-                let currentInput = self.assetWriterInput, self.isRecording
+                let currentInput = self.assetWriterInput, self.isRecording,
+                self.canAcceptAudioBuffers()
             else {
                 self?.returnBufferToPool(bufferCopy)
                 return
@@ -160,12 +166,13 @@ extension AudioRecorderManager {
         dateFormatter.dateFormat = "E"
         let weekPart = dateFormatter.string(from: now)
 
-        // 3. 时间: 24小时制 HH.mm
-        dateFormatter.dateFormat = "HH.mm"
+        // 3. 时间: 24小时制 HH.mm.ss
+        dateFormatter.dateFormat = "HH.mm.ss"
         let timePart = dateFormatter.string(from: now)
+        let uniquePart = UUID().uuidString.prefix(8).lowercased()
 
-        // 双空格分隔，格式：2026.01.14  Mon  18.59 - ing.m4a
-        return "\(datePart)  \(weekPart)  \(timePart) - ing.m4a"
+        // 双空格分隔，格式：2026.01.14  Mon  18.59.12 - a1b2c3d4 - ing.m4a
+        return "\(datePart)  \(weekPart)  \(timePart) - \(uniquePart) - ing.m4a"
     }
 
     func renameToFinalFormat(url: URL) -> URL {

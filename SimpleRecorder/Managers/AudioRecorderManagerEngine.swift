@@ -68,6 +68,7 @@ extension AudioRecorderManager {
     @discardableResult
     func startMicrophoneRecording(at recordingsPath: URL) -> Bool {
         do {
+            setAcceptingAudioBuffers(false)
             try FileManager.default.createDirectory(
                 at: recordingsPath, withIntermediateDirectories: true)
 
@@ -104,11 +105,13 @@ extension AudioRecorderManager {
                 throw assetWriter?.error ?? NSError(domain: "AudioRecorder", code: -1)
             }
 
+            setAcceptingAudioBuffers(true)
             try audioEngine.start()
             finalizeRecordingStart(fileURL: finalFileURL)
             return true
 
         } catch {
+            setAcceptingAudioBuffers(false)
             LogManager.shared.error("麦克风录音启动失败 | 错误: \(error.localizedDescription)")
 
             // 轻量级清理：只清理本次录音创建的资源，不调用 reset() 避免破坏引擎状态
@@ -145,6 +148,7 @@ extension AudioRecorderManager {
     @available(macOS 13.0, *)
     func startSystemAudioRecording(at recordingsPath: URL) async {
         do {
+            setAcceptingAudioBuffers(false)
             try FileManager.default.createDirectory(
                 at: recordingsPath, withIntermediateDirectories: true)
 
@@ -186,10 +190,12 @@ extension AudioRecorderManager {
             }
 
             // 启动音频引擎以开始处理
+            setAcceptingAudioBuffers(true)
             try audioEngine.start()
             finalizeRecordingStart(fileURL: finalFileURL)
 
         } catch {
+            setAcceptingAudioBuffers(false)
             LogManager.shared.error("系统音频录音启动失败 | 错误: \(error.localizedDescription)")
 
             // 轻量级清理：只清理本次录音创建的资源
@@ -211,6 +217,7 @@ extension AudioRecorderManager {
             }
 
             // 【关键】必须停止 SCStream 以释放屏幕录制权限
+            invalidateSystemAudioCaptureGeneration()
             let stream = systemAudioStream
             systemAudioStream = nil
             systemAudioOutput = nil
@@ -249,6 +256,7 @@ extension AudioRecorderManager {
         saveRecordingState(file: fileURL.path)
 
         recordingState = .recording
+        setAcceptingAudioBuffers(true)
         recordingDuration = 0
         framesCounter.withLock { $0 = 0 }
         systemAudioBufferHeadIndex = 0
@@ -326,6 +334,9 @@ extension AudioRecorderManager {
     /// 在每次新录音开始前调用，确保音频引擎处于干净状态
     /// 这对于从之前失败的录音恢复非常重要
     func prepareAudioEngineForNewRecording() {
+        setAcceptingAudioBuffers(false)
+        invalidateSystemAudioCaptureGeneration()
+
         // 1. 停止引擎（如果正在运行）
         if audioEngine.isRunning {
             audioEngine.stop()
@@ -442,6 +453,8 @@ extension AudioRecorderManager {
     // MARK: - 音频采集资源清理
     func cleanupAudioCapture() {
         LogManager.shared.debug("开始清理音频采集资源...")
+        setAcceptingAudioBuffers(false)
+        invalidateSystemAudioCaptureGeneration()
 
         // 1. 停止并移除 tap (必须首先执行)
         audioEngine.inputNode.removeTap(onBus: 0)

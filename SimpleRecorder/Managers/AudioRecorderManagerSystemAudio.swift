@@ -82,6 +82,7 @@ extension AudioRecorderManager {
     // MARK: - 系统音频采集启动
     @available(macOS 13.0, *)
     func startSystemAudioCapture() async throws {
+        let captureGeneration = nextSystemAudioCaptureGeneration()
         let configuration = SCStreamConfiguration()
 
         // 【性能至上】配置精简，彻底解决外接鼠标卡顿问题
@@ -123,7 +124,8 @@ extension AudioRecorderManager {
                 exceptingWindows: [])
 
             systemAudioOutput = SystemAudioStreamOutput { [weak self] sampleBuffer in
-                self?.handleSystemAudioSampleBuffer(sampleBuffer)
+                self?.handleSystemAudioSampleBuffer(
+                    sampleBuffer, captureGeneration: captureGeneration)
             }
 
             systemAudioStream = SCStream(
@@ -142,7 +144,8 @@ extension AudioRecorderManager {
             let filter = SCContentFilter(display: display, excludingWindows: [])
 
             systemAudioOutput = SystemAudioStreamOutput { [weak self] sampleBuffer in
-                self?.handleSystemAudioSampleBuffer(sampleBuffer)
+                self?.handleSystemAudioSampleBuffer(
+                    sampleBuffer, captureGeneration: captureGeneration)
             }
 
             systemAudioStream = SCStream(
@@ -197,10 +200,31 @@ extension AudioRecorderManager {
         }
     }
 
+    func nextSystemAudioCaptureGeneration() -> Int {
+        systemAudioQueueLock.lock()
+        systemAudioCaptureGeneration += 1
+        let generation = systemAudioCaptureGeneration
+        systemAudioQueueLock.unlock()
+        return generation
+    }
+
+    func invalidateSystemAudioCaptureGeneration() {
+        systemAudioQueueLock.lock()
+        systemAudioCaptureGeneration += 1
+        systemAudioQueueLock.unlock()
+    }
+
+    func isCurrentSystemAudioGeneration(_ generation: Int) -> Bool {
+        systemAudioQueueLock.lock()
+        let isCurrent = generation == systemAudioCaptureGeneration
+        systemAudioQueueLock.unlock()
+        return isCurrent
+    }
+
     // MARK: - 处理系统音频样本
-    func handleSystemAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    func handleSystemAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, captureGeneration: Int) {
         // 如果已暂停，直接丢弃数据
-        guard !isPaused else { return }
+        guard isCurrentSystemAudioGeneration(captureGeneration), !isPaused else { return }
 
         guard CMSampleBufferIsValid(sampleBuffer),
             let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),

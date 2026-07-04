@@ -85,6 +85,12 @@ QA_INCLUDE_SYSTEM_AUDIO=false QA_INCLUDE_MIXED_AUDIO=false scripts/run_full_qa.s
    ./build_dmg.sh
    ```
 
+   正式对外发布必须使用严格模式：
+
+   ```bash
+   RELEASE=1 ./build_dmg.sh
+   ```
+
 6. 校验 DMG、签名和录音样本：
 
    ```bash
@@ -94,7 +100,9 @@ QA_INCLUDE_SYSTEM_AUDIO=false QA_INCLUDE_MIXED_AUDIO=false scripts/run_full_qa.s
      --recordings /path/to/test-recordings
    ```
 
-   `spctl` 若提示 `Unnotarized Developer ID`，表示未公证。本地功能测试可以继续，对外分发前必须完成 notarization。
+   `spctl` 若提示 `Unnotarized Developer ID`，表示未公证。本地功能测试可以继续，对外分发前必须完成 notarization。`RELEASE=1` 会把未公证、stapler 校验失败或 Gatekeeper 不通过视为构建失败。
+
+   `scripts/run_full_qa.sh` 默认要求 MP3、系统音频、混合录音和定时自动录音等核心场景不能被跳过；仅本机权限不完整的烟测可临时使用 `QA_ALLOW_SKIPS=true`。
 
 ## 二、启动与权限
 

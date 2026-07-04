@@ -78,6 +78,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     @Published var recordingState: RecordingState = .idle
     @Published var currentRecordingURL: URL?
     @Published var recordingDuration: TimeInterval = 0
+    @Published var isFinalizingOutput = false
 
     /// 对外兼容属性，外部代码（AppDelegate、Views）无需改动
     var isRecording: Bool { recordingState == .recording || recordingState == .paused || recordingState == .stopping }
@@ -97,8 +98,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // 状态管理
     var isWriterStarted = false
+    private var outputFinalizationCompletions: [() -> Void] = []
     // 使用 OSAllocatedUnfairLock 保护 totalFramesWritten（realtime 音频线程与主线程共同访问）
     let framesCounter = OSAllocatedUnfairLock<Int64>(initialState: 0)
+    let audioBufferAcceptanceLock = OSAllocatedUnfairLock<Bool>(initialState: false)
     var isAutoStoppedByLimit = false  // 标记是否因为达到时长上限而停止
 
     // 当前录音使用的音频源（录音开始时锁定）
@@ -133,6 +136,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     var cachedAudioConverter: AVAudioConverter?
     var lastSrcFormat: AVAudioFormat?
     var lastDstFormat: AVAudioFormat?
+    var systemAudioCaptureGeneration = 0
 
     // 调试辅助标记
     var hasPrintedFirstSample = false
@@ -155,8 +159,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
     let warningInterval: TimeInterval = 10 * 60  // 每 10 分钟提醒
     var lastWarningTime: TimeInterval = 0
 
-    // 最小磁盘空间要求（100MB，足以保证 1 小时录制）
-    let minimumDiskSpace: Int64 = 100 * 1024 * 1024
+    // 最小磁盘空间要求：按当前最长录音和输出格式动态估算，同时保留 100MB 下限。
+    var minimumDiskSpace: Int64 {
+        let duration = max(AppSettings.shared.maxRecordingDuration, 5 * 60)
+        let m4aBytes = Int64(duration * 128_000 / 8)
+        let mp3Bytes = AppSettings.shared.outputFormat == .mp3 ? m4aBytes : 0
+        let estimatedBytes = Int64(Double(m4aBytes + mp3Bytes) * 1.25)
+        return max(100 * 1024 * 1024, estimatedBytes + 50 * 1024 * 1024)
+    }
 
     // 崩溃恢复相关的 UserDefaults 键
     let recordingInProgressKey = "recording_in_progress"
@@ -289,6 +299,34 @@ class AudioRecorderManager: NSObject, ObservableObject {
         return (dropped, total, rate)
     }
 
+    func setAcceptingAudioBuffers(_ accepting: Bool) {
+        audioBufferAcceptanceLock.withLock { $0 = accepting }
+    }
+
+    func canAcceptAudioBuffers() -> Bool {
+        audioBufferAcceptanceLock.withLock { $0 }
+    }
+
+    func beginOutputFinalization() {
+        guard !isFinalizingOutput else { return }
+        isFinalizingOutput = true
+    }
+
+    func endOutputFinalization() {
+        let completions = outputFinalizationCompletions
+        outputFinalizationCompletions.removeAll()
+        isFinalizingOutput = false
+        completions.forEach { $0() }
+    }
+
+    func waitForOutputFinalization(completion: @escaping () -> Void) {
+        if isFinalizingOutput {
+            outputFinalizationCompletions.append(completion)
+        } else {
+            completion()
+        }
+    }
+
     // MARK: - 公开 API：启动录音
 
     @discardableResult
@@ -341,6 +379,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             return
         }
         recordingState = .stopping
+        setAcceptingAudioBuffers(false)
 
         let finalDuration = recordingDuration
         let finalFrames = framesCounter.withLock { $0 }
@@ -360,11 +399,28 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 2. 在写入队列中执行收尾操作，确保所有 pending 的 append 都已完成
         writingQueue.async { [weak self] in
             guard let self = self else { return }
+            guard let currentWriter = currentWriter else {
+                DispatchQueue.main.async {
+                    self.recordingState = .idle
+                    self.isWriterStarted = false
+                    self.isHandlingInterruption = false
+                    self.assetWriter = nil
+                    self.assetWriterInput = nil
+                    self.currentRecordingURL = nil
+                    self.recordingDeviceID = nil
+                    self.recordingDeviceName = nil
+                    self.clearRecordingState()
+                    self.releaseSleepPrevention()
+                    LogManager.shared.endRecordingSession()
+                    NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+                }
+                return
+            }
 
             currentInput?.markAsFinished()
             LogManager.shared.debug("写入队列已接收停止指令，正在固化文件...")
 
-            currentWriter?.finishWriting { [weak self] in
+            currentWriter.finishWriting { [weak self] in
                 guard let self = self else { return }
 
                 DispatchQueue.main.async {
@@ -374,8 +430,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     // 结束录音会话
                     LogManager.shared.endRecordingSession()
 
-                    if let writer = currentWriter, writer.status == .completed, let url = outputURL
-                    {
+                    if currentWriter.status == .completed, let url = outputURL {
                         let finalURL = self.renameToFinalFormat(url: url)
                         let fileSize =
                             (try? FileManager.default.attributesOfItem(atPath: finalURL.path)[.size]
@@ -396,8 +451,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
                         // 检查是否需要转换为 MP3。转码延迟到当前收尾闭包返回后启动，
                         // 确保 AVAssetWriter 已释放刚写完的 M4A 文件。
                         if AppSettings.shared.outputFormat == .mp3 && MP3Encoder.isEncodingAvailable {
+                            self.beginOutputFinalization()
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                                self?.convertToMP3(from: finalURL) { mp3URL in
+                                guard let self = self else { return }
+                                self.convertToMP3(from: finalURL) { mp3URL in
                                     if shouldOpenFolder {
                                         if let mp3URL = mp3URL {
                                             NSWorkspace.shared.activateFileViewerSelecting([mp3URL])
@@ -405,6 +462,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
                                             NSWorkspace.shared.activateFileViewerSelecting([finalURL])
                                         }
                                     }
+                                    self.endOutputFinalization()
                                 }
                             }
                         } else {
@@ -412,11 +470,11 @@ class AudioRecorderManager: NSObject, ObservableObject {
                                 NSWorkspace.shared.activateFileViewerSelecting([finalURL])
                             }
                         }
-                    } else if let err = currentWriter?.error {
+                    } else if let err = currentWriter.error {
                         LogManager.shared.error("写入结束时出错 | 错误: \(err.localizedDescription)")
                     } else {
                         LogManager.shared.warning(
-                            "写入可能未正常完成 | 状态: \(currentWriter?.status.rawValue ?? -1)")
+                            "写入可能未正常完成 | 状态: \(currentWriter.status.rawValue)")
                     }
 
                     // 3. 后续清理
@@ -532,7 +590,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     NotificationCenter.default.removeObserver(token)
                     observerBox.token = nil
                 }
-                completion?()
+                self.waitForOutputFinalization {
+                    completion?()
+                }
             }
             return
         }
@@ -542,6 +602,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
 
         recordingState = .stopping
+        setAcceptingAudioBuffers(false)
 
         recordingTimer?.invalidate()
         recordingTimer = nil
@@ -601,7 +662,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
                         LogManager.shared.info("录音已紧急保存并重命名 | 文件: \(finalURL.lastPathComponent)")
 
                         if AppSettings.shared.outputFormat == .mp3 && MP3Encoder.isEncodingAvailable {
+                            self.beginOutputFinalization()
                             self.convertToMP3(from: finalURL) { _ in
+                                self.endOutputFinalization()
                                 completeSave()
                             }
                             return

@@ -100,6 +100,11 @@ class NativeMP3Encoder {
             processed += AVAudioFramePosition(buffer.frameLength)
         }
 
+        guard processed > 0 else {
+            LogManager.shared.error("NativeMP3Encoder: 源文件没有可编码的 PCM 数据")
+            return false
+        }
+
         LogManager.shared.info("NativeMP3Encoder: 转换完成 | 处理帧数: \(processed)")
         return true
     }

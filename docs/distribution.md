@@ -33,7 +33,15 @@ NOTARY_PROFILE="notarytool-profile"
 ./build_dmg.sh
 ```
 
-脚本会完成 Release 构建、应用签名、DMG 生成、DMG 签名、`codesign` 校验、`hdiutil verify` 校验，并在可用时执行 notarization 和 stapling。
+该命令用于本机验证包：有 Developer ID 和 `NOTARY_PROFILE` 时会自动公证；没有证书时会退回 ad-hoc 签名，仅适合本机功能验证。
+
+正式对外发布必须使用严格模式：
+
+```bash
+RELEASE=1 ./build_dmg.sh
+```
+
+严格模式会要求 Developer ID Application 证书和 `NOTARY_PROFILE`，并强制通过 notarization、stapler validation、`codesign`、`hdiutil verify` 与 Gatekeeper 校验。
 
 ## 权限说明
 
@@ -55,6 +63,7 @@ NOTARY_PROFILE="notarytool-profile"
 - 根目录保留 `LICENSE`，明确主项目开源许可证。
 - 保留 `THIRD_PARTY_NOTICES.md`，发布说明中注明第三方组件来源。
 - 保留 `SimpleRecorder/ThirdParty/lame/COPYING`，发布说明中注明内嵌 LAME 的许可来源。
+- `build_dmg.sh` 会把 `LICENSE.txt`、`THIRD_PARTY_NOTICES.md`、`LAME-COPYING.txt` 放入 DMG 根目录。
 - 当前公开版支持 M4A 与 MP3 输出；MP3 由内嵌 `libmp3lame.a` 分块转码实现。
 - 若二进制 DMG 内继续分发 `libmp3lame.a`，Release Notes 需要说明 LAME 构建来源、替换/重建方式，并链接 `THIRD_PARTY_NOTICES.md`。
 - 跑完整 QA：
@@ -63,9 +72,11 @@ NOTARY_PROFILE="notarytool-profile"
 scripts/run_full_qa.sh
 ```
 
+- 自动化 QA 默认不允许核心场景跳过；若只是缺权限环境下的本机烟测，可临时加 `QA_ALLOW_SKIPS=true`，但不能作为正式发布证据。
 - 使用 Developer ID 正式发布时，检查 DMG 是否通过签名、公证和 Gatekeeper。未公证的开发包会被 Gatekeeper 标记为 not accepted，只适合本机验证或面向愿意手动放行的测试用户。
 
 ```bash
+RELEASE=1 ./build_dmg.sh
 spctl --assess --type open --context context:primary-signature --verbose=4 MeetingRecorderPro_YYYYMMDD.dmg
 ```
 
