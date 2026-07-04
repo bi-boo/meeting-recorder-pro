@@ -35,7 +35,7 @@ QA_RECORD_SECONDS=8 QA_TIMEOUT_SECONDS=240 scripts/run_full_qa.sh
 QA_INCLUDE_SYSTEM_AUDIO=false QA_INCLUDE_MIXED_AUDIO=false scripts/run_full_qa.sh
 ```
 
-系统声音和混合音源依赖“屏幕录制”权限；未授权时自动化会触发权限申请，并在报告中标记为 `skipped`。授权后重新运行脚本即可补齐。
+系统声音和混合音源依赖“屏幕录制”权限；未授权时自动化会触发权限申请，并在报告中标记为 `skipped`。默认策略下核心场景 skipped 会让 QA 失败，授权后重新运行脚本即可补齐。只有本机烟测可临时使用 `QA_ALLOW_SKIPS=true`。
 
 自动化预计覆盖 80-90% 的功能路径。以下场景仍需按本文件人工补测：菜单栏视觉状态、设置窗口 Tab、快捷键改绑与冲突、提醒弹窗点击、开机登录项、Finder 打开、录音中退出、强杀恢复、设备插拔、睡眠断言和系统权限撤销类异常。
 

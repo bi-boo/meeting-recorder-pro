@@ -73,7 +73,7 @@
 
 - **注册机制**：使用 Carbon 的 `RegisterEventHotKey` API
 - **配置存储**：快捷键配置序列化后存入 `UserDefaults`
-- **默认值**：`Cmd + Shift + R`
+- **默认值**：开始/结束为 `Control + Option + Command + 5`，暂停/继续为 `Control + Option + Command + 4`
 - **通知广播**：快捷键变更时通过 `NotificationCenter` 广播，实现菜单栏 UI 实时刷新
 
 ---
@@ -84,7 +84,7 @@
 应用配置管理器，采用单例模式 (`shared`)，使用 `@Published` 属性包装器实现响应式更新。
 
 - **存储路径**：支持安全书签（Security-Scoped Bookmark）持久化路径权限
-- **录音上限**：小时 + 分钟组合设置（0-9 小时，0-59 分钟）
+- **录音上限**：小时 + 分钟组合设置（5 分钟到 9 小时 55 分钟）
 - **音频源**：三种模式（microphone / systemAudio / both）
 - **输入设备**：通过 `AVCaptureDevice.DiscoverySession` 枚举可用麦克风
 - **输出格式**：默认 M4A；支持录音结束后异步转为 MP3
@@ -102,7 +102,7 @@
 日志管理器，采用单例模式 (`shared`)。
 
 - **5 级日志**：debug / info / warning / error / critical
-- **文件路径**：`~/会议录音 Pro/.日志/MeetingRecorderPro_YYYY-MM-DD.log`
+- **文件路径**：`~/Library/Application Support/Logs/MeetingRecorderPro_YYYY-MM-DD.log`
 - **7 天轮转**：启动时自动清理过期日志
 - **崩溃安全**：使用 `FileHandle.synchronize()` 确保写入
 

@@ -28,7 +28,7 @@ extension AudioRecorderManager {
                 let isEnough = space >= minimumDiskSpace
                 if !isEnough {
                     LogManager.shared.warning(
-                        "磁盘空间不足 | 可用: \(String(format: "%.1f", spaceMB))MB, 最小要求: 100MB")
+                        "磁盘空间不足 | 可用: \(String(format: "%.1f", spaceMB))MB, 最小要求: \(minimumDiskSpaceText)")
                 }
                 return isEnough
             }
@@ -37,6 +37,14 @@ extension AudioRecorderManager {
             return true
         }
         return true
+    }
+
+    var minimumDiskSpaceText: String {
+        let mb = Double(minimumDiskSpace) / (1024 * 1024)
+        if mb >= 1024 {
+            return String(format: "%.1fGB", mb / 1024)
+        }
+        return "\(Int(ceil(mb)))MB"
     }
 
     /// 检查目录是否可写（公开方法，用于启动时预检）
@@ -100,7 +108,7 @@ extension AudioRecorderManager {
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = "磁盘空间不足"
-            alert.informativeText = "请至少保留 100MB 可用空间。"
+            alert.informativeText = "请至少保留 \(self.minimumDiskSpaceText) 可用空间。"
             alert.alertStyle = .critical
             alert.addButton(withTitle: "确定")
             alert.runModal()

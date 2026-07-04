@@ -4,6 +4,10 @@
 
 本项目计划开源并通过独立 DMG 分发，不提交 Mac App Store。发布与签名策略见 [独立分发说明](docs/distribution.md)。
 
+## 交付标准
+
+本项目不靠无限审查判断稳定性，统一按 [稳定交付标准](docs/stable-delivery-standard.md) 执行。功能范围见 [功能清单](docs/feature-list.md)，测试入口见 [测试用例与流程](docs/test-cases.md)，发版前检查见 [发布检查清单](docs/release-checklist.md)。
+
 ## 功能特点
 
 - **实时保存**：录音文件循环写入，断电/崩溃不丢失已录内容

@@ -1,3 +1,23 @@
+# [2026-07-04 稳定交付标准固化]
+- **用户需求/反馈**: 用户希望未来新项目先设定稳定交付标准，再围绕标准迭代；当前项目需要把交付标准、功能清单、测试 case 和测试流程固化为项目文档。
+- **技术逻辑变更**:
+    - **项目规则入口**：新增 `AGENTS.md`，明确本项目先按稳定交付门槛执行，不用无限审查替代固定 QA。
+    - **标准文档补齐**：新增稳定交付标准、功能清单、测试用例与流程、发布检查清单。
+    - **文档口径修正**：README 增加交付标准入口；PRD 和架构文档对齐动态磁盘门槛、实际日志路径、默认快捷键和录音上限范围。
+    - **磁盘提示修正**：磁盘空间不足提示改为显示当前动态计算的最小可用空间，不再写死 100MB。
+- **涉及文件清单**:
+    - `AGENTS.md` [NEW]
+    - `docs/stable-delivery-standard.md` [NEW]
+    - `docs/feature-list.md` [NEW]
+    - `docs/test-cases.md` [NEW]
+    - `docs/release-checklist.md` [NEW]
+    - `README.md`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/qa-regression.md`
+    - `SimpleRecorder/Managers/AudioRecorderManagerUI.swift`
+- **变更原因**: 把“什么时候算稳定、什么时候停止继续排查”变成项目可执行门禁，同时修复文档与实现不一致的问题。
+
 # [2026-07-04 继续三轮 subagent 检测修复]
 - **用户需求/反馈**: 再派出三个 subagent 分别检查项目，先分析可能风险，再确认项目是否存在类似问题，存在则修复。
 - **技术逻辑变更**:
