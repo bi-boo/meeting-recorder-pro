@@ -512,7 +512,7 @@ struct DayButton: View {
         Button(action: action) {
             Text(name)
                 .font(.system(size: 14, weight: .medium))
-                .frame(width: 44, height: 44)
+                .frame(width: 36, height: 36)
                 .background(
                     Circle()
                         .fill(isSelected ? Color.blue : Color.secondary.opacity(0.2))
@@ -520,7 +520,8 @@ struct DayButton: View {
                 .foregroundColor(isSelected ? .white : .primary)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(isSelected ? "\(accessibilityName)，已选" : accessibilityName)
+        .accessibilityLabel(accessibilityName)
+        .accessibilityValue(isSelected ? "已选" : "未选")
     }
 }
 
