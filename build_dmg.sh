@@ -5,14 +5,17 @@
 
 set -euo pipefail
 
-APP_NAME="SimpleRecorder"
+PRODUCT_APP_NAME="SimpleRecorder"
+DISPLAY_APP_NAME="会议录音 Pro"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build"
-RELEASE_APP_PATH="${BUILD_DIR}/Release/${APP_NAME}.app"
+RELEASE_APP_PATH="${BUILD_DIR}/Release/${PRODUCT_APP_NAME}.app"
+DMG_STAGING_DIR="${BUILD_DIR}/dmg-staging"
+STAGED_APP_PATH="${DMG_STAGING_DIR}/${DISPLAY_APP_NAME}.app"
 DMG_NAME="MeetingRecorderPro_$(date +%Y%m%d).dmg"
 DMG_PATH="${PROJECT_DIR}/${DMG_NAME}"
 TEMP_DMG="${PROJECT_DIR}/temp.dmg"
-VOLUME_NAME="会议录音 Pro"
+VOLUME_NAME="${DISPLAY_APP_NAME}"
 
 load_env_file() {
     local env_file="$1"
@@ -41,8 +44,8 @@ rm -f "${TEMP_DMG}" "${DMG_PATH}"
 echo "--- [2/5] 执行 Xcode 构建 (Release) ---"
 cd "${PROJECT_DIR}"
 set -o pipefail
-xcodebuild -project "${APP_NAME}.xcodeproj" \
-           -scheme "${APP_NAME}" \
+xcodebuild -project "${PRODUCT_APP_NAME}.xcodeproj" \
+           -scheme "${PRODUCT_APP_NAME}" \
            -configuration Release \
            -destination "platform=macOS,arch=arm64" \
            -derivedDataPath "${BUILD_DIR}/DerivedData" \
@@ -85,7 +88,11 @@ xattr -cr "${RELEASE_APP_PATH}"
 echo "已清除隔离属性 (xattr -cr)"
 
 echo "--- [4/5] 生成 DMG 镜像 ---"
-hdiutil create -volname "${VOLUME_NAME}" -srcfolder "${RELEASE_APP_PATH}" -ov -format UDZO "${TEMP_DMG}"
+rm -rf "${DMG_STAGING_DIR}"
+mkdir -p "${DMG_STAGING_DIR}"
+ditto "${RELEASE_APP_PATH}" "${STAGED_APP_PATH}"
+ln -s /Applications "${DMG_STAGING_DIR}/Applications"
+hdiutil create -volname "${VOLUME_NAME}" -srcfolder "${DMG_STAGING_DIR}" -ov -format UDZO "${TEMP_DMG}"
 mv "${TEMP_DMG}" "${DMG_PATH}"
 
 echo "--- [5/5] DMG 签名 ---"
@@ -104,6 +111,7 @@ fi
 
 echo "--- 校验产物 ---"
 codesign --verify --strict --verbose=2 "${RELEASE_APP_PATH}"
+codesign --verify --strict --verbose=2 "${STAGED_APP_PATH}"
 codesign --verify --verbose=2 "${DMG_PATH}"
 hdiutil verify "${DMG_PATH}"
 if spctl --assess --type open --context context:primary-signature --verbose=4 "${DMG_PATH}"; then

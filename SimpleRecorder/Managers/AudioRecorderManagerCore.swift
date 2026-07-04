@@ -107,6 +107,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     // 系统音频采集相关（macOS 13.0+）
     var systemAudioStream: SCStream?
     var systemAudioOutput: SystemAudioStreamOutput?
+    let systemAudioSampleQueueKey = DispatchSpecificKey<Bool>()
     let systemAudioSampleQueue = DispatchQueue(
         label: "com.meetingrecorderpro.systemAudioSampleQueue", qos: .userInitiated)
 
@@ -198,6 +199,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private override init() {
         super.init()
         LogManager.shared.info("AudioRecorderManager 初始化")
+        systemAudioSampleQueue.setSpecific(key: systemAudioSampleQueueKey, value: true)
         setupAudioHardwareListeners()
         setupEngineConfigurationChangeListener()
     }
@@ -494,27 +496,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
             return
         }
 
-        // 2. 【关键修复】引擎启动成功后立即恢复录音状态
-        //    必须紧跟在 audioEngine.start() 之后，在其他任何操作之前
-        //    这确保 tap 回调能立即开始处理新的音频数据
+        // 2. 先在系统音频采集队列上重置缓冲和 converter，再恢复录音态。
+        //    这样不会和正在执行的 SCStream 音频回调并发访问同一个 AVAudioConverter。
+        resetSystemAudioStateForResume()
         recordingState = .recording
 
-        // 3. 清空恢复后可能残留的旧数据，并重置缓冲状态
-        systemAudioQueueLock.lock()
-        for buffer in systemAudioBufferQueue {
-            returnBufferToPool(buffer)
-        }
-        systemAudioBufferQueue.removeAll()
-        systemAudioBufferHeadIndex = 0
-        systemAudioBufferReadOffset = 0
-        // 混合模式恢复时重新开启预缓冲建立储备，单系统音频模式保持实时
-        isSystemAudioBuffering = (currentAudioSource == .both)
-        systemAudioQueueLock.unlock()
-
-        // 4. 重置转换器内部状态，防止相位残音
-        cachedAudioConverter?.reset()
-
-        // 5. 恢复计时器
+        // 3. 恢复计时器
         currentSegmentStartTime = Date()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self, let startDate = self.currentSegmentStartTime else { return }
@@ -554,6 +541,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
             completion?(); return
         }
 
+        recordingState = .stopping
+
         recordingTimer?.invalidate()
         recordingTimer = nil
 
@@ -565,8 +554,27 @@ class AudioRecorderManager: NSObject, ObservableObject {
         let currentInput = assetWriterInput
 
         writingQueue.async { [weak self] in
+            guard let currentWriter = currentWriter else {
+                DispatchQueue.main.async {
+                    guard let self = self else { completion?(); return }
+                    self.recordingState = .idle
+                    self.isWriterStarted = false
+                    self.isHandlingInterruption = false
+                    self.assetWriter = nil
+                    self.assetWriterInput = nil
+                    self.currentRecordingURL = nil
+                    self.recordingDeviceID = nil
+                    self.recordingDeviceName = nil
+                    self.clearRecordingState()
+                    self.releaseSleepPrevention()
+                    NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+                    completion?()
+                }
+                return
+            }
+
             currentInput?.markAsFinished()
-            currentWriter?.finishWriting {
+            currentWriter.finishWriting {
                 DispatchQueue.main.async {
                     guard let self = self else { completion?(); return }
 
@@ -583,15 +591,26 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     self.clearRecordingState()
                     self.releaseSleepPrevention()
 
+                    let completeSave: () -> Void = {
+                        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+                        completion?()
+                    }
+
                     if let url = outputURL, FileManager.default.fileExists(atPath: url.path) {
                         let finalURL = self.renameToFinalFormat(url: url)
                         LogManager.shared.info("录音已紧急保存并重命名 | 文件: \(finalURL.lastPathComponent)")
+
+                        if AppSettings.shared.outputFormat == .mp3 && MP3Encoder.isEncodingAvailable {
+                            self.convertToMP3(from: finalURL) { _ in
+                                completeSave()
+                            }
+                            return
+                        }
                     } else {
                         LogManager.shared.info("录音已紧急保存")
                     }
 
-                    NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
-                    completion?()
+                    completeSave()
                 }
             }
         }

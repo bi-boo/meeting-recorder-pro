@@ -91,10 +91,6 @@ extension AudioRecorderManager {
         }
     }
 
-    func processAudioBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        // 已废弃，由 processAudioBufferWithPTS 替代
-    }
-
     // 将使用完的 Buffer 归还给池以便重用
     func returnBufferToPool(_ buffer: AVAudioPCMBuffer) {
         bufferPoolLock.lock()
@@ -199,30 +195,57 @@ extension AudioRecorderManager {
 
         // 基础文件名：2026.01.14  Mon  18.59 - 13min.m4a
         let baseFileName = "\(datePart)  \(weekPart)  \(startPart) - \(durationPart)"
-        let newURL = url.deletingLastPathComponent().appendingPathComponent("\(baseFileName).m4a")
+        let directory = url.deletingLastPathComponent()
+        let newURL = uniqueRecordingURL(
+            in: directory,
+            baseFileName: baseFileName,
+            fileExtension: "m4a",
+            conflictExtensions: ["m4a", "mp3"]
+        )
 
         do {
-            var finalURL = newURL
-            var counter = 1
+            try FileManager.default.moveItem(at: url, to: newURL)
+            return newURL
+        } catch {
+            LogManager.shared.error("重命名失败: \(error.localizedDescription)")
+            return url
+        }
+    }
 
-            // 循环检测直到找到不存在的文件名
-            while FileManager.default.fileExists(atPath: finalURL.path) {
-                let uniqueFileName = "\(baseFileName) (\(counter)).m4a"
-                finalURL = url.deletingLastPathComponent().appendingPathComponent(uniqueFileName)
-                counter += 1
+    func uniqueRecordingURL(
+        in directory: URL,
+        baseFileName: String,
+        fileExtension: String,
+        conflictExtensions: [String]
+    ) -> URL {
+        var counter = 0
+
+        while true {
+            let suffix = counter == 0 ? "" : " (\(counter))"
+            let fileName = "\(baseFileName)\(suffix)"
+            let hasConflict = conflictExtensions.contains { ext in
+                let candidate = directory.appendingPathComponent("\(fileName).\(ext)")
+                return FileManager.default.fileExists(atPath: candidate.path)
             }
 
-            try FileManager.default.moveItem(at: url, to: finalURL)
-            return finalURL
-        } catch {
-            print("❌ 重命名失败: \(error.localizedDescription)")
-            return url
+            if !hasConflict {
+                return directory.appendingPathComponent("\(fileName).\(fileExtension)")
+            }
+
+            counter += 1
         }
     }
 
     // MARK: - M4A 转 MP3（使用 macOS 原生分块转码）
     func convertToMP3(from sourceURL: URL, completion: @escaping (URL?) -> Void) {
-        let mp3URL = sourceURL.deletingPathExtension().appendingPathExtension("mp3")
+        let directory = sourceURL.deletingLastPathComponent()
+        let baseFileName = sourceURL.deletingPathExtension().lastPathComponent
+        let mp3URL = uniqueRecordingURL(
+            in: directory,
+            baseFileName: baseFileName,
+            fileExtension: "mp3",
+            conflictExtensions: ["mp3"]
+        )
 
         LogManager.shared.info("开始转换 MP3 | 源文件: \(sourceURL.lastPathComponent)")
 

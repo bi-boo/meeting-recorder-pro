@@ -54,8 +54,14 @@ class TimerTaskManager: ObservableObject {
     // MARK: - CRUD 操作
 
     /// 添加任务
-    func addTask(_ task: TimerTask) {
+    @discardableResult
+    func addTask(_ task: TimerTask) -> Bool {
         var newTask = task
+        guard !hasTimeConflict(hour: newTask.hour, minute: newTask.minute, excludingTaskID: newTask.id) else {
+            LogManager.shared.warning("添加定时任务失败，时间冲突 | 时间: \(newTask.timeDisplay)")
+            return false
+        }
+
         newTask.calculateNextTriggerTime()
         tasks = tasks + [newTask]
         saveTasks()
@@ -66,13 +72,20 @@ class TimerTaskManager: ObservableObject {
 
         // 重新调度定时器
         scheduleNextTrigger()
+        return true
     }
 
     /// 更新任务
-    func updateTask(_ task: TimerTask) {
+    @discardableResult
+    func updateTask(_ task: TimerTask) -> Bool {
         guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
             LogManager.shared.warning("更新任务失败，未找到任务 | ID: \(task.id)")
-            return
+            return false
+        }
+
+        guard !hasTimeConflict(hour: task.hour, minute: task.minute, excludingTaskID: task.id) else {
+            LogManager.shared.warning("更新定时任务失败，时间冲突 | ID: \(task.id) | 时间: \(task.timeDisplay)")
+            return false
         }
 
         var updatedTask = task
@@ -96,6 +109,16 @@ class TimerTaskManager: ObservableObject {
 
         // 重新调度定时器
         scheduleNextTrigger()
+        return true
+    }
+
+    func hasTimeConflict(hour: Int, minute: Int, excludingTaskID: UUID? = nil) -> Bool {
+        TimerTaskScheduleValidator.hasTimeConflict(
+            tasks: tasks,
+            hour: hour,
+            minute: minute,
+            excludingTaskID: excludingTaskID
+        )
     }
 
     /// 删除任务

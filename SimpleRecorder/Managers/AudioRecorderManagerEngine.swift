@@ -352,6 +352,7 @@ extension AudioRecorderManager {
         // 4. 【关键修复】创建全新的 AVAudioEngine 实例
         // 这可以彻底解决设备切换后 inputNode 状态不稳定导致的崩溃问题
         audioEngine = AVAudioEngine()
+        setupEngineConfigurationChangeListener()
 
         // 5. 清空系统音频缓冲队列
         systemAudioQueueLock.lock()
@@ -361,9 +362,7 @@ extension AudioRecorderManager {
         systemAudioQueueLock.unlock()
 
         // 6. 清理音频转换器缓存
-        cachedAudioConverter = nil
-        lastSrcFormat = nil
-        lastDstFormat = nil
+        resetSystemAudioConverterCacheSynchronously()
 
         LogManager.shared.debug("音频引擎已重建，准备开始新录音")
     }
@@ -466,9 +465,7 @@ extension AudioRecorderManager {
         systemAudioSourceNode = nil
         self.recordingMixer = nil
         mixerNode = nil
-        cachedAudioConverter = nil
-        lastSrcFormat = nil
-        lastDstFormat = nil
+        resetSystemAudioConverterCacheSynchronously()
 
         // 5. 清空缓冲队列
         systemAudioQueueLock.lock()

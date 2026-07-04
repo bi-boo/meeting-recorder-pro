@@ -83,4 +83,29 @@ final class TimerTaskTests: XCTestCase {
             .failed
         )
     }
+
+    func testScheduleValidatorDetectsSameHourMinuteConflict() {
+        let existing = TimerTask(hour: 9, minute: 30)
+        let tasks = [existing, TimerTask(hour: 10, minute: 30)]
+
+        XCTAssertTrue(
+            TimerTaskScheduleValidator.hasTimeConflict(tasks: tasks, hour: 9, minute: 30)
+        )
+        XCTAssertFalse(
+            TimerTaskScheduleValidator.hasTimeConflict(tasks: tasks, hour: 9, minute: 31)
+        )
+    }
+
+    func testScheduleValidatorExcludesCurrentTaskWhenEditing() {
+        let existing = TimerTask(hour: 9, minute: 30)
+
+        XCTAssertFalse(
+            TimerTaskScheduleValidator.hasTimeConflict(
+                tasks: [existing],
+                hour: 9,
+                minute: 30,
+                excludingTaskID: existing.id
+            )
+        )
+    }
 }

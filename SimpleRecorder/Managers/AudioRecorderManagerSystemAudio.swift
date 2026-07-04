@@ -158,6 +158,45 @@ extension AudioRecorderManager {
         print("🔊 系统音频采集已启动")
     }
 
+    // MARK: - 系统音频缓存重置
+
+    func resetSystemAudioStateForResume() {
+        performOnSystemAudioSampleQueueSynchronously {
+            systemAudioQueueLock.lock()
+            for buffer in systemAudioBufferQueue {
+                returnBufferToPool(buffer)
+            }
+            systemAudioBufferQueue.removeAll()
+            systemAudioBufferHeadIndex = 0
+            systemAudioBufferReadOffset = 0
+            isSystemAudioBuffering = (currentAudioSource == .both)
+            cachedAudioConverter?.reset()
+            cachedAudioConverter = nil
+            lastSrcFormat = nil
+            lastDstFormat = nil
+            systemAudioQueueLock.unlock()
+        }
+    }
+
+    func resetSystemAudioConverterCacheSynchronously() {
+        performOnSystemAudioSampleQueueSynchronously {
+            systemAudioQueueLock.lock()
+            cachedAudioConverter?.reset()
+            cachedAudioConverter = nil
+            lastSrcFormat = nil
+            lastDstFormat = nil
+            systemAudioQueueLock.unlock()
+        }
+    }
+
+    private func performOnSystemAudioSampleQueueSynchronously(_ work: () -> Void) {
+        if DispatchQueue.getSpecific(key: systemAudioSampleQueueKey) == true {
+            work()
+        } else {
+            systemAudioSampleQueue.sync(execute: work)
+        }
+    }
+
     // MARK: - 处理系统音频样本
     func handleSystemAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         // 如果已暂停，直接丢弃数据
@@ -349,23 +388,6 @@ extension AudioRecorderManager {
         systemAudioBufferHeadIndex = 0
     }
 
-    // MARK: - 直接处理系统音频并写入 AssetWriter（已废弃，保留以备参考）
-    func processSystemAudioDirectly(_ sampleBuffer: CMSampleBuffer) {
-        guard let writer = assetWriter, let input = assetWriterInput else { return }
-        guard writer.status == .writing || !isWriterStarted else { return }
-
-        // 初始化时间戳
-        if !isWriterStarted {
-            let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            writer.startSession(atSourceTime: presentationTime)
-            isWriterStarted = true
-            print("📝 系统音频 AssetWriter 会话已启动")
-        }
-
-        if input.isReadyForMoreMediaData {
-            input.append(sampleBuffer)
-        }
-    }
 }
 
 // MARK: - SCStreamOutput 实现（系统音频采集回调）

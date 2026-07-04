@@ -408,11 +408,7 @@ struct TimerTaskEditView: View {
 
         // 检查时间冲突（相同时间点不允许重复）
         let existingTaskID = mode.existingTask?.id
-        let hasConflict = manager.tasks.contains { task in
-            task.id != existingTaskID && task.hour == hour && task.minute == minute
-        }
-
-        if hasConflict {
+        if manager.hasTimeConflict(hour: hour, minute: minute, excludingTaskID: existingTaskID) {
             showConflictAlert = true
             return
         }
@@ -431,7 +427,10 @@ struct TimerTaskEditView: View {
             task.reminderMinutes = reminderMinutes
             task.updatedAt = Date()
 
-            manager.updateTask(task)
+            guard manager.updateTask(task) else {
+                showConflictAlert = true
+                return
+            }
         } else {
             task = TimerTask(
                 enabled: enabled,
@@ -443,7 +442,10 @@ struct TimerTaskEditView: View {
                 reminderMinutes: reminderMinutes
             )
 
-            manager.addTask(task)
+            guard manager.addTask(task) else {
+                showConflictAlert = true
+                return
+            }
         }
 
         dismiss()

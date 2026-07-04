@@ -23,19 +23,59 @@ INCLUDE_MIXED_AUDIO="${QA_INCLUDE_MIXED_AUDIO:-true}"
 INCLUDE_TIMER="${QA_INCLUDE_TIMER:-true}"
 QA_TIMEOUT_SECONDS="${QA_TIMEOUT_SECONDS:-180}"
 
+json_bool() {
+  local name="$1"
+  local value
+  value="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+
+  case "$value" in
+    true|1|yes|y) echo "true" ;;
+    false|0|no|n) echo "false" ;;
+    *)
+      echo "$name must be a boolean: true/false/1/0/yes/no" >&2
+      exit 2
+      ;;
+  esac
+}
+
+json_positive_int() {
+  local name="$1"
+  local value="$2"
+
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "$name must be a positive integer." >&2
+    exit 2
+  fi
+
+  if [[ "$value" -eq 0 ]]; then
+    echo "$name must be a positive integer." >&2
+    exit 2
+  fi
+
+  echo "$value"
+}
+
+RECORD_SECONDS_JSON="$(json_positive_int QA_RECORD_SECONDS "$RECORD_SECONDS")"
+PAUSE_SECONDS_JSON="$(json_positive_int QA_PAUSE_SECONDS "$PAUSE_SECONDS")"
+INCLUDE_MP3_JSON="$(json_bool QA_INCLUDE_MP3 "$INCLUDE_MP3")"
+INCLUDE_SYSTEM_AUDIO_JSON="$(json_bool QA_INCLUDE_SYSTEM_AUDIO "$INCLUDE_SYSTEM_AUDIO")"
+INCLUDE_MIXED_AUDIO_JSON="$(json_bool QA_INCLUDE_MIXED_AUDIO "$INCLUDE_MIXED_AUDIO")"
+INCLUDE_TIMER_JSON="$(json_bool QA_INCLUDE_TIMER "$INCLUDE_TIMER")"
+QA_TIMEOUT_SECONDS="$(json_positive_int QA_TIMEOUT_SECONDS "$QA_TIMEOUT_SECONDS")"
+
 mkdir -p "$RECORDINGS_DIR"
 
 cat > "$SCENARIO_PATH" <<JSON
 {
   "outputPath": "$RESULT_PATH",
   "recordingsPath": "$RECORDINGS_DIR",
-  "recordSeconds": $RECORD_SECONDS,
-  "pauseSeconds": $PAUSE_SECONDS,
+  "recordSeconds": $RECORD_SECONDS_JSON,
+  "pauseSeconds": $PAUSE_SECONDS_JSON,
   "includeSettings": true,
-  "includeMP3": $INCLUDE_MP3,
-  "includeSystemAudio": $INCLUDE_SYSTEM_AUDIO,
-  "includeMixedAudio": $INCLUDE_MIXED_AUDIO,
-  "includeTimer": $INCLUDE_TIMER
+  "includeMP3": $INCLUDE_MP3_JSON,
+  "includeSystemAudio": $INCLUDE_SYSTEM_AUDIO_JSON,
+  "includeMixedAudio": $INCLUDE_MIXED_AUDIO_JSON,
+  "includeTimer": $INCLUDE_TIMER_JSON
 }
 JSON
 

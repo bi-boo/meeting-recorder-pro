@@ -25,11 +25,22 @@ enum MP3Encoder {
     }
 
     static func convertToMP3(from sourceURL: URL, to destinationURL: URL, bitrate: Int32 = 128) -> Bool {
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: destinationURL.path) else {
+            LogManager.shared.error("MP3Encoder: 目标文件已存在，拒绝覆盖 \(destinationURL.lastPathComponent)")
+            return false
+        }
+
+        let tempURL = destinationURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(destinationURL.deletingPathExtension().lastPathComponent).\(UUID().uuidString).tmp.mp3")
+        defer { try? fileManager.removeItem(at: tempURL) }
+
+        let encoded: Bool
         if LameMP3Encoder.isEncodingAvailable {
             let maxAttempts = 3
-            for attempt in 1...maxAttempts {
+            encoded = (1...maxAttempts).contains { attempt in
                 if LameMP3Encoder.convertToMP3(
-                    from: sourceURL, to: destinationURL, bitrate: bitrate)
+                    from: sourceURL, to: tempURL, bitrate: bitrate)
                 {
                     return true
                 }
@@ -41,13 +52,23 @@ enum MP3Encoder {
                     )
                     Thread.sleep(forTimeInterval: delay)
                 }
-            }
 
-            return false
+                return false
+            }
+        } else {
+            LogManager.shared.warning("MP3Encoder: LAME 不可用，尝试系统原生 MP3 编码")
+            encoded = NativeMP3Encoder.convertToMP3(from: sourceURL, to: tempURL, bitrate: bitrate)
         }
 
-        LogManager.shared.warning("MP3Encoder: LAME 不可用，尝试系统原生 MP3 编码")
-        return NativeMP3Encoder.convertToMP3(from: sourceURL, to: destinationURL, bitrate: bitrate)
+        guard encoded else { return false }
+
+        do {
+            try fileManager.moveItem(at: tempURL, to: destinationURL)
+            return true
+        } catch {
+            LogManager.shared.error("MP3Encoder: 移动 MP3 临时文件失败 - \(error.localizedDescription)")
+            return false
+        }
     }
 }
 

@@ -75,6 +75,19 @@ struct TimerRecordingStartConfirmationPolicy {
     }
 }
 
+enum TimerTaskScheduleValidator {
+    static func hasTimeConflict(
+        tasks: [TimerTask],
+        hour: Int,
+        minute: Int,
+        excludingTaskID: UUID? = nil
+    ) -> Bool {
+        tasks.contains { task in
+            task.id != excludingTaskID && task.hour == hour && task.minute == minute
+        }
+    }
+}
+
 // MARK: - 定时任务模型
 
 /// 定时录音任务模型

@@ -70,11 +70,16 @@ extension AudioRecorderManager {
 
     /// 设置 AVAudioEngine 配置变更监听
     func setupEngineConfigurationChangeListener() {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .AVAudioEngineConfigurationChange,
+            object: nil
+        )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleAudioEngineConfigChange),
             name: .AVAudioEngineConfigurationChange,
-            object: audioEngine
+            object: nil
         )
         LogManager.shared.info("已注册 AVAudioEngine 配置变更监听器")
     }
@@ -118,6 +123,12 @@ extension AudioRecorderManager {
 
     /// 处理 AVAudioEngine 配置变更
     @objc func handleAudioEngineConfigChange(_ notification: Notification) {
+        if let changedEngine = notification.object as? AVAudioEngine,
+            changedEngine !== audioEngine
+        {
+            return
+        }
+
         // 只有在录音中时才处理
         guard isRecording, !isPaused else { return }
 
@@ -178,6 +189,7 @@ extension AudioRecorderManager {
 
                 // 重新创建 AVAudioEngine 以使用新设备
                 audioEngine = AVAudioEngine()
+                setupEngineConfigurationChangeListener()
             } else {
                 LogManager.shared.warning("无法添加设备输入 | 名称: \(targetDevice.localizedName)，将使用默认设备")
             }

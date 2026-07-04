@@ -12,6 +12,7 @@
 | 支持系统 | macOS 13.0 或更高版本 |
 | 当前发布架构 | Apple Silicon (`arm64`) |
 | 分发产物 | `MeetingRecorderPro_YYYYMMDD.dmg` |
+| DMG 内应用名 | `会议录音 Pro.app` |
 | 分发渠道 | GitHub Releases 或项目主页下载链接 |
 | 上架状态 | 不提交 Mac App Store |
 
@@ -55,6 +56,7 @@ NOTARY_PROFILE="notarytool-profile"
 - 保留 `THIRD_PARTY_NOTICES.md`，发布说明中注明第三方组件来源。
 - 保留 `SimpleRecorder/ThirdParty/lame/COPYING`，发布说明中注明内嵌 LAME 的许可来源。
 - 当前公开版支持 M4A 与 MP3 输出；MP3 由内嵌 `libmp3lame.a` 分块转码实现。
+- 若二进制 DMG 内继续分发 `libmp3lame.a`，Release Notes 需要说明 LAME 构建来源、替换/重建方式，并链接 `THIRD_PARTY_NOTICES.md`。
 - 跑完整 QA：
 
 ```bash
@@ -76,6 +78,7 @@ spctl --assess --type open --context context:primary-signature --verbose=4 Meeti
 - 支持定时录音、暂停继续、全局快捷键。
 - 录音期间保持系统唤醒，降低长会议中断风险。
 - 支持 M4A 和 MP3 输出，便于上传到只接受 MP3 的转写服务。
+- MP3 转码使用内嵌 LAME 分块编码；第三方组件许可和重建说明见 `THIRD_PARTY_NOTICES.md`。
 
-下载 DMG 后打开，将“会议录音 Pro”拖入 Applications 文件夹。首次录音需要授予麦克风权限；录制系统声音时需要额外授予屏幕与系统音频录制权限。
+下载 DMG 后打开，将“会议录音 Pro.app”拖入 Applications 文件夹。首次录音需要授予麦克风权限；录制系统声音时需要额外授予屏幕与系统音频录制权限。
 ```
