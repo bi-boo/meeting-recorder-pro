@@ -52,7 +52,7 @@
 
 ![Codex Computer Use 权限引导示例](assets/codex-computer-use-permission-guide.png)
 
-*图源：[AI.cc 对 Codex Computer Use 的介绍](https://www.ai.cc/blogs/how-to-use-codex-openai-2026-update-computer-use-guide/)*
+*图源：[LinkedIn 视频《Codex AI Enhances Mac Computer Use》](https://www.linkedin.com/posts/agentic-ai-official_codex-ai-automation-activity-7460227851502419968-07gN)*
 
 回头看这次做的产品，重新想明白了"可用"这个词到底该如何定义。AI 能很快地把功能写出来，能让一个东西"跑起来"，但它不会替你判断这个东西够不够可靠、边界在哪里、哪些问题必须解决才能拿出去给别人用——这件事只能自己想清楚。而这恰恰是做产品的人容易跳过的一步，站在使用者角度想需求很自然，但站在工程角度去想会在哪里出问题，需要额外的经验和判断。
 
