@@ -263,7 +263,6 @@ extension AudioRecorderManager {
 
     private func audioDeviceTransportType(for uid: String) -> UInt32? {
         var deviceID: AudioDeviceID = 0
-        var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
 
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDeviceForUID,
@@ -272,22 +271,26 @@ extension AudioRecorderManager {
         )
 
         var cfUID: CFString = uid as CFString
-        var translation = AudioValueTranslation(
-            mInputData: &cfUID,
-            mInputDataSize: UInt32(MemoryLayout<CFString>.size),
-            mOutputData: &deviceID,
-            mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
+        let translationStatus: OSStatus = withUnsafeMutableBytes(of: &cfUID) { uidBytes in
+            withUnsafeMutableBytes(of: &deviceID) { deviceIDBytes in
+                var translation = AudioValueTranslation(
+                    mInputData: uidBytes.baseAddress!,
+                    mInputDataSize: UInt32(uidBytes.count),
+                    mOutputData: deviceIDBytes.baseAddress!,
+                    mOutputDataSize: UInt32(deviceIDBytes.count)
+                )
 
-        var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
-        let translationStatus = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &translationSize,
-            &translation
-        )
+                var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
+                return AudioObjectGetPropertyData(
+                    AudioObjectID(kAudioObjectSystemObject),
+                    &address,
+                    0,
+                    nil,
+                    &translationSize,
+                    &translation
+                )
+            }
+        }
 
         guard translationStatus == noErr, deviceID != 0 else {
             return nil
@@ -295,7 +298,7 @@ extension AudioRecorderManager {
 
         address.mSelector = kAudioDevicePropertyTransportType
         var transportType: UInt32 = 0
-        propertySize = UInt32(MemoryLayout<UInt32>.size)
+        var propertySize = UInt32(MemoryLayout<UInt32>.size)
         let transportStatus = AudioObjectGetPropertyData(
             deviceID,
             &address,
