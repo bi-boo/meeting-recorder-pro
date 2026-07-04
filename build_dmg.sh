@@ -152,7 +152,7 @@ cp "${PROJECT_DIR}/LICENSE" "${DMG_STAGING_DIR}/LICENSE.txt"
 cp "${PROJECT_DIR}/THIRD_PARTY_NOTICES.md" "${DMG_STAGING_DIR}/THIRD_PARTY_NOTICES.md"
 cp "${PROJECT_DIR}/SimpleRecorder/ThirdParty/lame/COPYING" "${DMG_STAGING_DIR}/LAME-COPYING.txt"
 ln -s /Applications "${DMG_STAGING_DIR}/Applications"
-hdiutil create -volname "${VOLUME_NAME}" -srcfolder "${DMG_STAGING_DIR}" -ov -format UDZO "${TEMP_DMG}"
+hdiutil create -volname "${VOLUME_NAME}" -srcfolder "${DMG_STAGING_DIR}" -ov -format UDZO -fs HFS+ "${TEMP_DMG}"
 mv "${TEMP_DMG}" "${DMG_PATH}"
 
 echo "--- [5/5] DMG 签名 ---"

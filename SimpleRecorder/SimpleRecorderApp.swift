@@ -292,6 +292,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateItem.isEnabled = updateManager.canSelectMenuItem
         menu.addItem(updateItem)
 
+        let currentVersionItem = NSMenuItem(
+            title: updateManager.currentVersionTitle,
+            action: nil,
+            keyEquivalent: ""
+        )
+        currentVersionItem.isEnabled = false
+        menu.addItem(currentVersionItem)
+
+        if let statusTitle = updateManager.statusTitle {
+            let updateStatusItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
+            updateStatusItem.isEnabled = false
+            menu.addItem(updateStatusItem)
+        }
+
         menu.addItem(NSMenuItem.separator())
 
         // 退出

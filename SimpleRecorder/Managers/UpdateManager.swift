@@ -5,6 +5,32 @@ import Sparkle
 final class UpdateManager: NSObject {
     static let shared = UpdateManager()
 
+    private enum DefaultsKey {
+        static let pendingInstallDisplayVersion = "UpdateManager.pendingInstallDisplayVersion"
+        static let pendingInstallBuildVersion = "UpdateManager.pendingInstallBuildVersion"
+        static let pendingInstallStartedAt = "UpdateManager.pendingInstallStartedAt"
+    }
+
+    private enum UpdateStatus: Equatable {
+        case idle
+        case checking
+        case downloading
+        case extracting
+        case readyToInstall
+        case installing
+        case completed(String)
+        case failed(String)
+
+        var isBusy: Bool {
+            switch self {
+            case .checking, .downloading, .extracting, .readyToInstall, .installing:
+                return true
+            case .idle, .completed, .failed:
+                return false
+            }
+        }
+    }
+
     private let userDriver = DirectInstallUpdateUserDriver()
     private lazy var updater = SPUUpdater(
         hostBundle: Bundle.main,
@@ -15,22 +41,45 @@ final class UpdateManager: NSObject {
 
     private var onStatusChanged: (() -> Void)?
     private(set) var availableVersion: String?
-    private(set) var isChecking = false
+    private var availableBuildVersion: String?
+    private var installingDisplayVersion: String?
+    private var installingBuildVersion: String?
+    private var status: UpdateStatus = .idle
     private var didStart = false
 
     var menuTitle: String {
-        if isChecking {
-            return "正在检查更新..."
-        }
         if let availableVersion {
-            return "有新版本 \(availableVersion)..."
+            return "下载并安装 \(availableVersion)..."
         }
         return "检查更新..."
     }
 
+    var currentVersionTitle: String {
+        "当前版本 \(Self.currentDisplayVersion)"
+    }
+
+    var statusTitle: String? {
+        switch status {
+        case .idle:
+            return nil
+        case .checking:
+            return "正在检查更新..."
+        case .downloading:
+            return "正在下载更新..."
+        case .extracting:
+            return "正在准备安装..."
+        case .readyToInstall, .installing:
+            return "正在安装并重启..."
+        case .completed(let version):
+            return "已更新到 \(version)"
+        case .failed(let message):
+            return "更新失败：\(message)"
+        }
+    }
+
     var canSelectMenuItem: Bool {
         guard didStart else { return false }
-        return !AudioRecorderManager.shared.isRecording && !isChecking
+        return !AudioRecorderManager.shared.isRecording && !status.isBusy
     }
 
     func start(onStatusChanged: @escaping () -> Void) {
@@ -40,6 +89,7 @@ final class UpdateManager: NSObject {
             return
         }
         didStart = true
+        restoreCompletedUpdateIfNeeded()
         do {
             try updater.start()
             LogManager.shared.info("自动更新已启动 | 检查间隔: 每天 | 更新源: GitHub Releases appcast")
@@ -65,7 +115,9 @@ final class UpdateManager: NSObject {
             }
 
             LogManager.shared.info("用户点击安装可用更新 | 版本: \(availableVersion ?? "未知")")
-            setChecking(true)
+            installingDisplayVersion = availableVersion
+            installingBuildVersion = availableBuildVersion
+            setStatus(.checking)
             updater.checkForUpdates()
             return
         }
@@ -76,31 +128,122 @@ final class UpdateManager: NSObject {
             return
         }
 
-        setChecking(true)
+        setStatus(.checking)
         LogManager.shared.info("用户手动检查更新")
         updater.checkForUpdateInformation()
     }
 
-    private func setChecking(_ checking: Bool) {
-        guard isChecking != checking else { return }
-        isChecking = checking
+    private func setStatus(_ newStatus: UpdateStatus) {
+        guard status != newStatus else { return }
+        status = newStatus
         notifyStatusChanged()
     }
 
-    private func setAvailableVersion(_ version: String?) {
-        guard availableVersion != version else {
-            setChecking(false)
+    private func setAvailableUpdate(displayVersion: String?, buildVersion: String?) {
+        availableVersion = displayVersion
+        availableBuildVersion = buildVersion
+        if status == .checking && installingDisplayVersion == nil {
+            setStatus(.idle)
             return
         }
-        availableVersion = version
-        isChecking = false
         notifyStatusChanged()
+    }
+
+    fileprivate func markDownloadStarted() {
+        setStatus(.downloading)
+    }
+
+    fileprivate func markUserInitiatedUpdateFound(displayVersion: String, buildVersion: String) {
+        installingDisplayVersion = displayVersion
+        installingBuildVersion = buildVersion
+        markDownloadStarted()
+    }
+
+    fileprivate func markExtractionStarted() {
+        setStatus(.extracting)
+    }
+
+    fileprivate func markReadyToInstall() {
+        let displayVersion = installingDisplayVersion ?? availableVersion
+        let buildVersion = installingBuildVersion ?? availableBuildVersion
+        if let displayVersion {
+            UserDefaults.standard.set(displayVersion, forKey: DefaultsKey.pendingInstallDisplayVersion)
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: DefaultsKey.pendingInstallStartedAt)
+            if let buildVersion {
+                UserDefaults.standard.set(buildVersion, forKey: DefaultsKey.pendingInstallBuildVersion)
+            } else {
+                UserDefaults.standard.removeObject(forKey: DefaultsKey.pendingInstallBuildVersion)
+            }
+        }
+        setStatus(.readyToInstall)
+    }
+
+    fileprivate func markInstalling() {
+        setStatus(.installing)
+    }
+
+    fileprivate func markUpdateFailed(_ error: any Error) {
+        clearPendingInstallation()
+        installingDisplayVersion = nil
+        installingBuildVersion = nil
+        setStatus(.failed(Self.shortErrorMessage(error)))
     }
 
     private func notifyStatusChanged() {
         DispatchQueue.main.async { [weak self] in
             self?.onStatusChanged?()
         }
+    }
+
+    private func restoreCompletedUpdateIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard let pendingDisplayVersion = defaults.string(
+            forKey: DefaultsKey.pendingInstallDisplayVersion
+        ) else {
+            return
+        }
+
+        let pendingBuildVersion = defaults.string(forKey: DefaultsKey.pendingInstallBuildVersion)
+        let didComplete: Bool
+        if let pendingBuildVersion,
+            let pendingBuildNumber = Int(pendingBuildVersion),
+            let currentBuildNumber = Int(Self.currentBuildVersion)
+        {
+            didComplete = currentBuildNumber >= pendingBuildNumber
+        } else {
+            didComplete = Self.currentDisplayVersion == pendingDisplayVersion
+        }
+
+        let startedAt = defaults.double(forKey: DefaultsKey.pendingInstallStartedAt)
+        clearPendingInstallation()
+
+        if didComplete {
+            LogManager.shared.info("更新安装完成确认 | 当前版本: \(Self.currentDisplayVersion)")
+            setStatus(.completed(Self.currentDisplayVersion))
+        } else if startedAt > 0 && Date().timeIntervalSince1970 - startedAt < 3600 {
+            LogManager.shared.warning("更新安装未完成 | 目标版本: \(pendingDisplayVersion)")
+            setStatus(.failed("安装未完成"))
+        }
+    }
+
+    private func clearPendingInstallation() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: DefaultsKey.pendingInstallDisplayVersion)
+        defaults.removeObject(forKey: DefaultsKey.pendingInstallBuildVersion)
+        defaults.removeObject(forKey: DefaultsKey.pendingInstallStartedAt)
+    }
+
+    private static var currentDisplayVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
+    }
+
+    private static var currentBuildVersion: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
+    }
+
+    private static func shortErrorMessage(_ error: any Error) -> String {
+        let message = error.localizedDescription
+        return message.count > 18 ? "请稍后重试" : message
     }
 }
 
@@ -119,12 +262,17 @@ extension UpdateManager: SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         LogManager.shared.info("发现新版本 | 版本: \(item.displayVersionString)")
-        setAvailableVersion(item.displayVersionString)
+        setAvailableUpdate(displayVersion: item.displayVersionString, buildVersion: item.versionString)
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
         LogManager.shared.info("未发现可用更新 | \(error.localizedDescription)")
-        setAvailableVersion(nil)
+        installingDisplayVersion = nil
+        installingBuildVersion = nil
+        setAvailableUpdate(displayVersion: nil, buildVersion: nil)
+        if status == .checking {
+            setStatus(.idle)
+        }
     }
 
     func updater(_ updater: SPUUpdater, shouldDownloadReleaseNotesForUpdate updateItem: SUAppcastItem) -> Bool {
@@ -138,13 +286,17 @@ extension UpdateManager: SPUUpdaterDelegate {
     ) {
         if let error {
             LogManager.shared.warning("更新检查结束 | \(error.localizedDescription)")
+            markUpdateFailed(error)
+            return
         }
-        setChecking(false)
+        if status == .checking {
+            setStatus(.idle)
+        }
     }
 
     func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
         LogManager.shared.warning("更新流程中止 | \(error.localizedDescription)")
-        setChecking(false)
+        markUpdateFailed(error)
     }
 }
 
@@ -178,6 +330,10 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
         }
 
         LogManager.shared.info("开始下载并安装更新 | 版本: \(appcastItem.displayVersionString)")
+        UpdateManager.shared.markUserInitiatedUpdateFound(
+            displayVersion: appcastItem.displayVersionString,
+            buildVersion: appcastItem.versionString
+        )
         return .install
     }
 
@@ -195,10 +351,12 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
 
     func showUpdaterError(_ error: any Error) async {
         LogManager.shared.warning("更新失败 | \(error.localizedDescription)")
+        UpdateManager.shared.markUpdateFailed(error)
     }
 
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
         LogManager.shared.info("开始下载更新包")
+        UpdateManager.shared.markDownloadStarted()
     }
 
     func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
@@ -210,6 +368,7 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
 
     func showDownloadDidStartExtractingUpdate() {
         LogManager.shared.info("更新包下载完成，开始解压")
+        UpdateManager.shared.markExtractionStarted()
     }
 
     func showExtractionReceivedProgress(_ progress: Double) {
@@ -222,6 +381,7 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
         }
 
         LogManager.shared.info("更新已准备好，开始重启安装")
+        UpdateManager.shared.markReadyToInstall()
         return .install
     }
 
@@ -230,6 +390,7 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
         retryTerminatingApplication: @escaping () -> Void
     ) {
         LogManager.shared.info("正在安装更新 | 应用已退出: \(applicationTerminated)")
+        UpdateManager.shared.markInstalling()
     }
 
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool) async {
