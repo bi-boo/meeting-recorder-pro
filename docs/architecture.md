@@ -8,10 +8,11 @@
 - **UI 框架**：SwiftUI (主视图) + AppKit (菜单栏与生命周期管理)
 - **音频处理**：AVFoundation (`AVAudioEngine` 采集, `AVAssetWriter` 写入)
 - **系统音频**：ScreenCaptureKit (macOS 13.0+ 系统音频采集)
-- **MP3 编码**：LAME (内嵌编码器，M4A 转 MP3)
+- **MP3 编码**：MP3Encoder 优先使用内嵌 LAME 分块转码；系统原生 MP3 仅作为兜底
 - **热键管理**：Carbon (全局快捷键注册)
 - **存储**：UserDefaults (配置与状态持久化)
 - **日志系统**：自研 LogManager (5级日志、文件存储、7天轮转)
+- **自动更新**：Sparkle 2 (GitHub Releases appcast + Ed25519 更新签名)
 
 ## 模块说明
 
@@ -73,7 +74,7 @@
 
 - **注册机制**：使用 Carbon 的 `RegisterEventHotKey` API
 - **配置存储**：快捷键配置序列化后存入 `UserDefaults`
-- **默认值**：`Cmd + Shift + R`
+- **默认值**：开始/结束为 `Control + Option + Command + 5`，暂停/继续为 `Control + Option + Command + 4`
 - **通知广播**：快捷键变更时通过 `NotificationCenter` 广播，实现菜单栏 UI 实时刷新
 
 ---
@@ -84,10 +85,10 @@
 应用配置管理器，采用单例模式 (`shared`)，使用 `@Published` 属性包装器实现响应式更新。
 
 - **存储路径**：支持安全书签（Security-Scoped Bookmark）持久化路径权限
-- **录音上限**：小时 + 分钟组合设置（0-9 小时，0-59 分钟）
+- **录音上限**：小时 + 分钟组合设置（5 分钟到 9 小时 55 分钟）
 - **音频源**：三种模式（microphone / systemAudio / both）
 - **输入设备**：通过 `AVCaptureDevice.DiscoverySession` 枚举可用麦克风
-- **输出格式**：M4A / MP3 格式选择
+- **输出格式**：默认 M4A；支持录音结束后异步转为 MP3
 - **录音后动作**：自动打开 Finder 定位文件开关
 - **图标样式**：支持 `microphone` / `circle_dot` / `waveform` 三种样式切换
 - **显示控制**：控制录音期间是否显示计时，以及闲置时是否变暗
@@ -102,20 +103,21 @@
 日志管理器，采用单例模式 (`shared`)。
 
 - **5 级日志**：debug / info / warning / error / critical
-- **文件路径**：`~/会议录音 Pro/.日志/MeetingRecorderPro_YYYY-MM-DD.log`
+- **文件路径**：`~/Library/Application Support/Logs/MeetingRecorderPro_YYYY-MM-DD.log`
 - **7 天轮转**：启动时自动清理过期日志
 - **崩溃安全**：使用 `FileHandle.synchronize()` 确保写入
 
 ---
 
-# H1 第三方模块
+# H1 音频格式转换
 
-## H2 LameEncoder
-MP3 编码器，封装 LAME 库。
+## H2 MP3Encoder
+MP3 输出统一入口，录音阶段仍先写入 M4A，停止后按用户设置异步转为 MP3。
 
-- **转换流程**：读取 M4A → PCM 解码 → LAME 编码 → 写入 MP3
-- **参数配置**：VBR 模式，质量等级 2（高质量）
-- **异步处理**：在 `userInitiated` 队列执行，不阻塞主线程
+- **转换流程**：读取 M4A → 分块解码 PCM → LAME 分块编码 → 追加写入 MP3
+- **内存控制**：每次处理 8192 帧，避免长录音一次性解码到内存
+- **兜底处理**：LAME 不可用时尝试 `NativeMP3Encoder`；编码器均不可用时回落 M4A
+- **异步处理**：转换在 `userInitiated` 队列执行，不阻塞主线程
 
 ---
 
@@ -129,6 +131,21 @@ MP3 编码器，封装 LAME 库。
 - **多级签名**：依次处理 `.app` 二进制和生成的 `.dmg` 文件
 - **隔离清理**：强制执行 `xattr -cr` 移除 `com.apple.quarantine` 属性，确保下载后双击即可运行
 - **运行时选项**：指定 `--options runtime` 启用 Hardened Runtime，满足系统安全性要求
+
+---
+
+# H1 自动更新模块
+
+## H2 UpdateManager
+
+自动更新管理器，封装 Sparkle 2，并把更新状态同步到菜单栏。
+
+- **更新源**：`SUFeedURL` 指向 GitHub Releases 的 `appcast.xml`，不依赖自建服务器。
+- **检查频率**：`SUScheduledCheckInterval=86400`，每天检查一次。
+- **菜单状态**：单个更新项默认“当前版本 x.y.z”，发现更新后显示“下载并安装 x.y.z...”，安装流程中显示下载、准备安装和安装重启状态。
+- **录音保护**：通过 Sparkle delegate 在录音中阻止所有更新检查，菜单项同步禁用。
+- **安装边界**：后台检查只更新菜单状态；用户点击可用更新后，Sparkle 才下载、验签、替换应用并重启安装；安装前记录目标版本，重启后比对当前版本并回到当前版本文案。
+- **发布签名**：`SUPublicEDKey` 保存在 `Info.plist`，私钥只保存在本机忽略文件，用于生成 appcast 中的 `sparkle:edSignature`。
 
 ---
 

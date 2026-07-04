@@ -41,6 +41,10 @@ enum OutputFormat: String, CaseIterable, Codable {
     case m4a = "m4a"
     case mp3 = "mp3"
 
+    static var availableCases: [OutputFormat] {
+        MP3Encoder.isEncodingAvailable ? allCases : [.m4a]
+    }
+
     var displayName: String {
         switch self {
         case .m4a: return "M4A"
@@ -72,28 +76,12 @@ enum IconStyle: String, CaseIterable, Codable {
     }
 }
 
-// MARK: - 定时行为类型枚举
-enum TimerActionType: String, CaseIterable, Codable {
-    case remind = "remind"  // 提前提醒模式
-    case autoStart = "auto_start"  // 自动开始录音模式
-
-    var displayName: String {
-        switch self {
-        case .remind: return "到时提醒我"
-        case .autoStart: return "自动录音"
-        }
-    }
-
-    var description: String {
-        switch self {
-        case .remind: return "提前弹窗询问是否开始录音"
-        case .autoStart: return "到时间自动开始录音"
-        }
-    }
-}
-
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
+    static let minimumMaxDurationMinutes = 5
+
+    private var isNormalizingMaxDuration = false
+    private var isApplyingLaunchAtLoginSystemState = false
 
     // MARK: - 存储路径设置
     @Published var recordingsPath: URL {
@@ -112,15 +100,16 @@ class AppSettings: ObservableObject {
 
     // MARK: - 录音设置
     @Published var maxDurationHours: Int {
-        didSet { UserDefaults.standard.set(maxDurationHours, forKey: "maxDurationHours") }
+        didSet { normalizeAndPersistMaxDuration() }
     }
 
     @Published var maxDurationMinutes: Int {
-        didSet { UserDefaults.standard.set(maxDurationMinutes, forKey: "maxDurationMinutes") }
+        didSet { normalizeAndPersistMaxDuration() }
     }
 
     var maxRecordingDuration: TimeInterval {
-        TimeInterval(maxDurationHours * 3600 + maxDurationMinutes * 60)
+        let rawSeconds = maxDurationHours * 3600 + maxDurationMinutes * 60
+        return TimeInterval(max(rawSeconds, Self.minimumMaxDurationMinutes * 60))
     }
 
     // MARK: - 音频源设置
@@ -130,14 +119,34 @@ class AppSettings: ObservableObject {
 
     // MARK: - 输出格式设置
     @Published var outputFormat: OutputFormat {
-        didSet { UserDefaults.standard.set(outputFormat.rawValue, forKey: "outputFormat") }
+        didSet {
+            if outputFormat == .mp3 && !MP3Encoder.isEncodingAvailable {
+                LogManager.shared.warning("MP3 编码不可用，保存格式已回落为 M4A")
+                outputFormat = .m4a
+                return
+            }
+            UserDefaults.standard.set(outputFormat.rawValue, forKey: "outputFormat")
+        }
     }
 
     // MARK: - 行为设置
     @Published var launchAtLogin: Bool {
         didSet {
+            guard !isApplyingLaunchAtLoginSystemState else {
+                UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
+                return
+            }
+
+            let requestedValue = launchAtLogin
+            guard applyLaunchAtLogin(requestedValue) else {
+                isApplyingLaunchAtLoginSystemState = true
+                launchAtLogin = oldValue
+                isApplyingLaunchAtLoginSystemState = false
+                UserDefaults.standard.set(oldValue, forKey: "launchAtLogin")
+                return
+            }
+
             UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
-            updateLaunchAtLogin(launchAtLogin)
         }
     }
 
@@ -318,7 +327,13 @@ class AppSettings: ObservableObject {
         if let savedFormat = UserDefaults.standard.string(forKey: "outputFormat"),
             let format = OutputFormat(rawValue: savedFormat)
         {
-            self.outputFormat = format
+            if format == .mp3 && !MP3Encoder.isEncodingAvailable {
+                self.outputFormat = .m4a
+                UserDefaults.standard.set(OutputFormat.m4a.rawValue, forKey: "outputFormat")
+                LogManager.shared.warning("已保存的 MP3 格式不可用，启动时回落为 M4A")
+            } else {
+                self.outputFormat = format
+            }
         } else {
             self.outputFormat = .m4a  // 默认 M4A
         }
@@ -356,6 +371,9 @@ class AppSettings: ObservableObject {
             UserDefaults.standard.object(forKey: "preventSleepDuringRecording") as? Bool ?? true  // 默认开启
         self.preventSleepWithSchedule =
             UserDefaults.standard.object(forKey: "preventSleepWithSchedule") as? Bool ?? true  // 默认开启
+
+        normalizeAndPersistMaxDuration()
+        refreshLaunchAtLoginStatus()
 
         // 初始刷新一次设备列表
         refreshInputDevices()
@@ -503,23 +521,27 @@ class AppSettings: ObservableObject {
             mElement: kAudioObjectPropertyElementMain
         )
 
-        var cfUID: CFString = uid as CFString
-        var translation = AudioValueTranslation(
-            mInputData: &cfUID,
-            mInputDataSize: UInt32(MemoryLayout<CFString>.size),
-            mOutputData: &deviceID,
-            mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
+        var uidPointerValue = Unmanaged.passUnretained(uid as CFString).toOpaque()
+        let status = withUnsafeMutablePointer(to: &uidPointerValue) { uidPointer in
+            withUnsafeMutablePointer(to: &deviceID) { deviceIDPointer in
+                var translation = AudioValueTranslation(
+                    mInputData: UnsafeMutableRawPointer(uidPointer),
+                    mInputDataSize: UInt32(MemoryLayout<UnsafeRawPointer>.size),
+                    mOutputData: UnsafeMutableRawPointer(deviceIDPointer),
+                    mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
+                )
 
-        var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &translationSize,
-            &translation
-        )
+                var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
+                return AudioObjectGetPropertyData(
+                    AudioObjectID(kAudioObjectSystemObject),
+                    &address,
+                    0,
+                    nil,
+                    &translationSize,
+                    &translation
+                )
+            }
+        }
 
         guard status == noErr, deviceID != 0 else {
             return false
@@ -538,6 +560,10 @@ class AppSettings: ObservableObject {
             &propertySize,
             &transportType
         )
+
+        guard transportStatus == noErr else {
+            return false
+        }
 
         // 获取传输类型字符串用于调试
         let transportTypeStr = String(
@@ -569,8 +595,53 @@ class AppSettings: ObservableObject {
         return physicalTransportTypes.contains(transportType)
     }
 
+    private func normalizeAndPersistMaxDuration() {
+        if isNormalizingMaxDuration {
+            UserDefaults.standard.set(maxDurationHours, forKey: "maxDurationHours")
+            UserDefaults.standard.set(maxDurationMinutes, forKey: "maxDurationMinutes")
+            return
+        }
+
+        isNormalizingMaxDuration = true
+
+        let clampedHours = min(max(maxDurationHours, 0), 9)
+        let clampedMinutes = min(max(maxDurationMinutes, 0), 55)
+        let steppedMinutes = (clampedMinutes / 5) * 5
+
+        if maxDurationHours != clampedHours {
+            maxDurationHours = clampedHours
+        }
+        if maxDurationMinutes != steppedMinutes {
+            maxDurationMinutes = steppedMinutes
+        }
+        if maxDurationHours == 0 && maxDurationMinutes == 0 {
+            maxDurationMinutes = Self.minimumMaxDurationMinutes
+        }
+
+        isNormalizingMaxDuration = false
+
+        UserDefaults.standard.set(maxDurationHours, forKey: "maxDurationHours")
+        UserDefaults.standard.set(maxDurationMinutes, forKey: "maxDurationMinutes")
+    }
+
     // MARK: - 开机自启动
-    private func updateLaunchAtLogin(_ enable: Bool) {
+    func refreshLaunchAtLoginStatus() {
+        if #available(macOS 13.0, *) {
+            let systemEnabled = SMAppService.mainApp.status == .enabled
+            guard launchAtLogin != systemEnabled else {
+                UserDefaults.standard.set(systemEnabled, forKey: "launchAtLogin")
+                return
+            }
+
+            isApplyingLaunchAtLoginSystemState = true
+            launchAtLogin = systemEnabled
+            isApplyingLaunchAtLoginSystemState = false
+            UserDefaults.standard.set(systemEnabled, forKey: "launchAtLogin")
+        }
+    }
+
+    @discardableResult
+    private func applyLaunchAtLogin(_ enable: Bool) -> Bool {
         if #available(macOS 13.0, *) {
             do {
                 if enable {
@@ -579,9 +650,13 @@ class AppSettings: ObservableObject {
                     try SMAppService.mainApp.unregister()
                 }
                 LogManager.shared.info("开机自启动设置: \(enable ? "已启用" : "已禁用")")
+                return true
             } catch {
                 LogManager.shared.error("开机自启动设置失败: \(error.localizedDescription)")
+                return false
             }
         }
+
+        return false
     }
 }

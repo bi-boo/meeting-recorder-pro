@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager+Engine.swift
-//  极简录音 - 音频引擎配置
+//  AudioRecorderManagerEngine.swift
+//  会议录音 Pro - 音频引擎配置
 //
 //  职责范围：
 //  - 录音启动流程编排（环境预检 → 选择音源 → 配置引擎）
@@ -18,7 +18,8 @@ extension AudioRecorderManager {
 
     // MARK: - 录音启动入口
 
-    func beginRecording() {
+    @discardableResult
+    func beginRecording() -> Bool {
         // recordingState 已在 startRecording() 设为 .starting，此处无需再设
 
         let recordingsPath = AppSettings.shared.recordingsPath
@@ -28,13 +29,13 @@ extension AudioRecorderManager {
             recordingState = .idle
             NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
             showDiskSpaceAlert()
-            return
+            return false
         }
         guard checkDirectoryWritable(at: recordingsPath) else {
             recordingState = .idle
             NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
             showDirectoryPermissionAlert()
-            return
+            return false
         }
 
         // 锁定当前录音使用的音频源
@@ -53,23 +54,26 @@ extension AudioRecorderManager {
         switch currentAudioSource {
         case .microphone:
             // 麦克风模式：同步启动
-            startMicrophoneRecording(at: recordingsPath)
+            return startMicrophoneRecording(at: recordingsPath)
         case .systemAudio, .both:
             // 系统音频模式：需要 async，使用 Task 启动
             if #available(macOS 13.0, *) {
                 Task { @MainActor in
                     await self.startSystemAudioRecording(at: recordingsPath)
                 }
+                return true
             } else {
                 // 降级到麦克风
-                startMicrophoneRecording(at: recordingsPath)
+                return startMicrophoneRecording(at: recordingsPath)
             }
         }
     }
 
     // MARK: - 麦克风录音启动（同步）
-    func startMicrophoneRecording(at recordingsPath: URL) {
+    @discardableResult
+    func startMicrophoneRecording(at recordingsPath: URL) -> Bool {
         do {
+            setAcceptingAudioBuffers(false)
             try FileManager.default.createDirectory(
                 at: recordingsPath, withIntermediateDirectories: true)
 
@@ -106,10 +110,13 @@ extension AudioRecorderManager {
                 throw assetWriter?.error ?? NSError(domain: "AudioRecorder", code: -1)
             }
 
+            setAcceptingAudioBuffers(true)
             try audioEngine.start()
             finalizeRecordingStart(fileURL: finalFileURL)
+            return true
 
         } catch {
+            setAcceptingAudioBuffers(false)
             LogManager.shared.error("麦克风录音启动失败 | 错误: \(error.localizedDescription)")
 
             // 轻量级清理：只清理本次录音创建的资源，不调用 reset() 避免破坏引擎状态
@@ -140,6 +147,7 @@ extension AudioRecorderManager {
             releaseDisplaySleepPrevention()
             recordingState = .idle
             NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+            return false
         }
     }
 
@@ -147,6 +155,7 @@ extension AudioRecorderManager {
     @available(macOS 13.0, *)
     func startSystemAudioRecording(at recordingsPath: URL) async {
         do {
+            setAcceptingAudioBuffers(false)
             try FileManager.default.createDirectory(
                 at: recordingsPath, withIntermediateDirectories: true)
 
@@ -188,10 +197,12 @@ extension AudioRecorderManager {
             }
 
             // 启动音频引擎以开始处理
+            setAcceptingAudioBuffers(true)
             try audioEngine.start()
             finalizeRecordingStart(fileURL: finalFileURL)
 
         } catch {
+            setAcceptingAudioBuffers(false)
             LogManager.shared.error("系统音频录音启动失败 | 错误: \(error.localizedDescription)")
 
             // 轻量级清理：只清理本次录音创建的资源
@@ -213,6 +224,7 @@ extension AudioRecorderManager {
             }
 
             // 【关键】必须停止 SCStream 以释放屏幕录制权限
+            invalidateSystemAudioCaptureGeneration()
             let stream = systemAudioStream
             systemAudioStream = nil
             systemAudioOutput = nil
@@ -253,8 +265,10 @@ extension AudioRecorderManager {
         saveRecordingState(file: fileURL.path)
 
         recordingState = .recording
+        setAcceptingAudioBuffers(true)
         recordingDuration = 0
         framesCounter.withLock { $0 = 0 }
+        systemAudioBufferHeadIndex = 0
         systemAudioBufferReadOffset = 0
         // 初始缓冲状态：仅在混合模式下默认开启以平滑时钟，仅系统音频模式下将由 setup 逻辑显式关闭
         isSystemAudioBuffering = (currentAudioSource == .both)
@@ -263,10 +277,7 @@ extension AudioRecorderManager {
         isHandlingInterruption = false
         lastObservedFrameCount = 0
         audioStallBeganAt = nil
-        droppedFrameCount = 0
-        totalFrameCount = 0
-        systemAudioOverflowDropCount = 0
-        lastSystemAudioOverflowLogTime = 0
+        resetFrameDropStats()
 
         hasPrintedFirstSample = false
         hasPrintedSystemAudioFormat = false
@@ -319,9 +330,9 @@ extension AudioRecorderManager {
                 self.lastStatsLogTime = currentTime
                 let framesWritten = self.framesCounter.withLock { $0 }
                 let durationStr = String(format: "%.1f", self.recordingDuration)
-                let dropRate = self.totalFrameCount > 0 ? String(format: "%.2f%%", Double(self.droppedFrameCount) / Double(self.totalFrameCount) * 100) : "N/A"
+                let stats = self.frameDropStatsSnapshot()
                 let hwFormat = self.audioEngine.inputNode.inputFormat(forBus: 0)
-                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 丢帧: \(self.droppedFrameCount)/\(self.totalFrameCount) (\(dropRate)), 硬件格式: \(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
+                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 硬件格式: \(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
             }
         }
 
@@ -379,6 +390,9 @@ extension AudioRecorderManager {
     /// 在每次新录音开始前调用，确保音频引擎处于干净状态
     /// 这对于从之前失败的录音恢复非常重要
     func prepareAudioEngineForNewRecording() {
+        setAcceptingAudioBuffers(false)
+        invalidateSystemAudioCaptureGeneration()
+
         // 1. 停止引擎（如果正在运行）
         if audioEngine.isRunning {
             audioEngine.stop()
@@ -405,16 +419,17 @@ extension AudioRecorderManager {
         // 4. 【关键修复】创建全新的 AVAudioEngine 实例
         // 这可以彻底解决设备切换后 inputNode 状态不稳定导致的崩溃问题
         audioEngine = AVAudioEngine()
+        setupEngineConfigurationChangeListener()
 
         // 5. 清空系统音频缓冲队列
         systemAudioQueueLock.lock()
         systemAudioBufferQueue.removeAll()
+        systemAudioBufferHeadIndex = 0
+        systemAudioBufferReadOffset = 0
         systemAudioQueueLock.unlock()
 
         // 6. 清理音频转换器缓存
-        cachedAudioConverter = nil
-        lastSrcFormat = nil
-        lastDstFormat = nil
+        resetSystemAudioConverterCacheSynchronously()
 
         LogManager.shared.debug("音频引擎已重建，准备开始新录音")
     }
@@ -473,7 +488,7 @@ extension AudioRecorderManager {
             }
 
             if buffer.frameLength > 0 {
-                self.totalFrameCount += 1
+                self.incrementTotalFrameCount()
                 self.processAudioBufferWithPTS(buffer, pts: pts)
             }
         }
@@ -482,6 +497,8 @@ extension AudioRecorderManager {
     // MARK: - 音频采集资源清理
     func cleanupAudioCapture() {
         LogManager.shared.debug("开始清理音频采集资源...")
+        setAcceptingAudioBuffers(false)
+        invalidateSystemAudioCaptureGeneration()
 
         // 1. 停止并移除 tap (必须首先执行)
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -505,14 +522,14 @@ extension AudioRecorderManager {
         systemAudioSourceNode = nil
         self.recordingMixer = nil
         mixerNode = nil
-        cachedAudioConverter = nil
-        lastSrcFormat = nil
-        lastDstFormat = nil
+        resetSystemAudioConverterCacheSynchronously()
 
         // 5. 清空缓冲队列
         systemAudioQueueLock.lock()
         let queueCount = systemAudioBufferQueue.count
         systemAudioBufferQueue.removeAll()
+        systemAudioBufferHeadIndex = 0
+        systemAudioBufferReadOffset = 0
         systemAudioQueueLock.unlock()
 
         // 6. 清理设备激活会话（用于 iPhone 连续互通等设备）

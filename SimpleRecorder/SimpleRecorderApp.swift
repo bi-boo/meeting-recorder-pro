@@ -27,10 +27,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var recordingManager = AudioRecorderManager.shared
     private var hotKeyManager = HotKeyManager.shared
+    private var updateManager = UpdateManager.shared
     private var animationTimer: Timer?
     private var lastToggleTime: Date = .distantPast  // 用于防抖
     private var lastTimeString: String = ""
     private var startingIndicatorStep: Int = 0
+    private var qaAutomationRunner: QAAutomationRunner?
 
     // 动态获取当前配置的图标
     private func getStatusImage() -> NSImage? {
@@ -52,6 +54,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusItem()
         setupHotKey()
+        updateManager.start { [weak self] in
+            self?.setupMenu()
+        }
 
         // 监听录音状态变化
         NotificationCenter.default.addObserver(
@@ -94,6 +99,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 仅当用户在录制来源中选择"系统声音"或"同时录制"时才触发权限申请
         // 用户首次启动应用时不再自动弹出权限请求
 
+        if let runner = QAAutomationRunner.fromCommandLine() {
+            qaAutomationRunner = runner
+            LogManager.shared.info("检测到 QA 自动化参数，跳过真实定时任务调度")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                runner.start()
+            }
+            return
+        }
+
         // 【新增】启动时检查录音目录权限，尽早发现问题
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let _ = AudioRecorderManager.shared.checkRecordingDirectoryPermission()
@@ -132,9 +146,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 退出前检查是否正在录音，确保保存（异步，不阻塞主线程）
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // 停止定时任务调度器
-        TimerTaskManager.shared.stopScheduler()
-
         // 如果正在录音，先保存
         if recordingManager.isRecording {
             // 弹出确认对话框
@@ -148,6 +159,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
                 LogManager.shared.info("应用退出 | 正在保存录音...")
+                TimerTaskManager.shared.stopScheduler()
                 // 异步保存，保存完成后通知系统继续退出（不阻塞主线程）
                 recordingManager.saveRecordingImmediately {
                     NSApp.reply(toApplicationShouldTerminate: true)
@@ -158,6 +170,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        if recordingManager.isFinalizingOutput {
+            LogManager.shared.info("应用退出 | 正在等待录音文件收尾...")
+            TimerTaskManager.shared.stopScheduler()
+            recordingManager.waitForOutputFinalization {
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
+
+        TimerTaskManager.shared.stopScheduler()
         return .terminateNow
     }
 
@@ -273,6 +295,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             title: "设置...", action: #selector(showMainWindow), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let updateItem = NSMenuItem(
+            title: updateManager.menuTitle,
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        updateItem.isEnabled = updateManager.canSelectMenuItem
+        menu.addItem(updateItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -402,6 +433,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
+    }
+
+    @objc private func checkForUpdates() {
+        updateManager.handleMenuSelection()
     }
 
     @objc private func handleHotKeyChanged() {

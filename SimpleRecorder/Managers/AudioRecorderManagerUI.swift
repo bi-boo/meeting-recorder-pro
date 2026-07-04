@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager+UI.swift
-//  极简录音 - 用户交互层
+//  AudioRecorderManagerUI.swift
+//  会议录音 Pro - 用户交互层
 //
 //  职责范围：
 //  - 6 种 NSAlert 弹窗（权限、磁盘、目录、引擎、限时、错误）
@@ -28,7 +28,7 @@ extension AudioRecorderManager {
                 let isEnough = space >= minimumDiskSpace
                 if !isEnough {
                     LogManager.shared.warning(
-                        "磁盘空间不足 | 可用: \(String(format: "%.1f", spaceMB))MB, 最小要求: 100MB")
+                        "磁盘空间不足 | 可用: \(String(format: "%.1f", spaceMB))MB, 最小要求: \(minimumDiskSpaceText)")
                 }
                 return isEnough
             }
@@ -37,6 +37,14 @@ extension AudioRecorderManager {
             return true
         }
         return true
+    }
+
+    var minimumDiskSpaceText: String {
+        let mb = Double(minimumDiskSpace) / (1024 * 1024)
+        if mb >= 1024 {
+            return String(format: "%.1fGB", mb / 1024)
+        }
+        return "\(Int(ceil(mb)))MB"
     }
 
     /// 检查目录是否可写（公开方法，用于启动时预检）
@@ -81,7 +89,7 @@ extension AudioRecorderManager {
             let alert = NSAlert()
             alert.messageText = "麦克风访问受限"
             alert.informativeText =
-                "检测到由于重新构建或签名变更，系统可能未能正确识别本应用的权限。\n\n解决办法：\n1. 请在“系统设置 - 隐私与安全性 - 麦克风”中，手动将“极简录音”的任务开关先关闭再重新开启。\n2. 若列表中没有本应用，请在终端执行 'tccutil reset Microphone com.simplerecorder.app' 后重新运行。"
+                "检测到由于重新构建或签名变更，系统可能未能正确识别本应用的权限。\n\n解决办法：\n1. 请在“系统设置 - 隐私与安全性 - 麦克风”中，手动将“会议录音 Pro”的开关先关闭再重新开启。\n2. 若列表中没有本应用，请在终端执行 'tccutil reset Microphone com.meetingrecorderpro.app' 后重新运行。"
             alert.alertStyle = .warning
             alert.addButton(withTitle: "打开设置")
             alert.addButton(withTitle: "我知道了")
@@ -100,7 +108,7 @@ extension AudioRecorderManager {
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = "磁盘空间不足"
-            alert.informativeText = "请至少保留 100MB 可用空间。"
+            alert.informativeText = "请至少保留 \(self.minimumDiskSpaceText) 可用空间。"
             alert.alertStyle = .critical
             alert.addButton(withTitle: "确定")
             alert.runModal()

@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager+Writer.swift
-//  极简录音 - 音频写入与文件管理
+//  AudioRecorderManagerWriter.swift
+//  会议录音 Pro - 音频写入与文件管理
 //
 //  职责范围：
 //  - 音频 Buffer 池化（避免高频内存分配）
@@ -20,6 +20,11 @@ extension AudioRecorderManager {
 
     // MARK: - 核心写入逻辑（带 PTS 时间戳）
     func processAudioBufferWithPTS(_ buffer: AVAudioPCMBuffer, pts: CMTime) {
+        guard canAcceptAudioBuffers() else {
+            incrementDroppedFrameCount()
+            return
+        }
+
         // 1. 实现 Buffer 池化复用
         let bufferCopy: AVAudioPCMBuffer
         bufferPoolLock.lock()
@@ -51,7 +56,8 @@ extension AudioRecorderManager {
 
         writingQueue.async { [weak self] in
             guard let self = self, let currentWriter = self.assetWriter,
-                let currentInput = self.assetWriterInput, self.isRecording
+                let currentInput = self.assetWriterInput, self.isRecording,
+                self.canAcceptAudioBuffers()
             else {
                 self?.returnBufferToPool(bufferCopy)
                 return
@@ -84,15 +90,11 @@ extension AudioRecorderManager {
                     }
                 } else {
                     // 重试后仍写不进去，记录并丢弃
-                    self.droppedFrameCount += 1
-                    LogManager.shared.warning("写入队列繁忙，丢弃采样 | 累计丢帧: \(self.droppedFrameCount)")
+                    let droppedFrames = self.incrementDroppedFrameCount()
+                    LogManager.shared.warning("写入队列繁忙，丢弃采样 | 累计丢帧: \(droppedFrames)")
                 }
             }
         }
-    }
-
-    func processAudioBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        // 已废弃，由 processAudioBufferWithPTS 替代
     }
 
     // 将使用完的 Buffer 归还给池以便重用
@@ -164,12 +166,13 @@ extension AudioRecorderManager {
         dateFormatter.dateFormat = "E"
         let weekPart = dateFormatter.string(from: now)
 
-        // 3. 时间: 24小时制 HH.mm
-        dateFormatter.dateFormat = "HH.mm"
+        // 3. 时间: 24小时制 HH.mm.ss
+        dateFormatter.dateFormat = "HH.mm.ss"
         let timePart = dateFormatter.string(from: now)
+        let uniquePart = UUID().uuidString.prefix(8).lowercased()
 
-        // 双空格分隔，格式：2026.01.14  Mon  18.59 - ing.m4a
-        return "\(datePart)  \(weekPart)  \(timePart) - ing.m4a"
+        // 双空格分隔，格式：2026.01.14  Mon  18.59.12 - a1b2c3d4 - ing.m4a
+        return "\(datePart)  \(weekPart)  \(timePart) - \(uniquePart) - ing.m4a"
     }
 
     func renameToFinalFormat(url: URL) -> URL {
@@ -199,35 +202,62 @@ extension AudioRecorderManager {
 
         // 基础文件名：2026.01.14  Mon  18.59 - 13min.m4a
         let baseFileName = "\(datePart)  \(weekPart)  \(startPart) - \(durationPart)"
-        let newURL = url.deletingLastPathComponent().appendingPathComponent("\(baseFileName).m4a")
+        let directory = url.deletingLastPathComponent()
+        let newURL = uniqueRecordingURL(
+            in: directory,
+            baseFileName: baseFileName,
+            fileExtension: "m4a",
+            conflictExtensions: ["m4a", "mp3"]
+        )
 
         do {
-            var finalURL = newURL
-            var counter = 1
-
-            // 循环检测直到找到不存在的文件名
-            while FileManager.default.fileExists(atPath: finalURL.path) {
-                let uniqueFileName = "\(baseFileName) (\(counter)).m4a"
-                finalURL = url.deletingLastPathComponent().appendingPathComponent(uniqueFileName)
-                counter += 1
-            }
-
-            try FileManager.default.moveItem(at: url, to: finalURL)
-            return finalURL
+            try FileManager.default.moveItem(at: url, to: newURL)
+            return newURL
         } catch {
-            print("❌ 重命名失败: \(error.localizedDescription)")
+            LogManager.shared.error("重命名失败: \(error.localizedDescription)")
             return url
         }
     }
 
-    // MARK: - M4A 转 MP3（使用原生 AudioToolbox，无第三方依赖）
+    func uniqueRecordingURL(
+        in directory: URL,
+        baseFileName: String,
+        fileExtension: String,
+        conflictExtensions: [String]
+    ) -> URL {
+        var counter = 0
+
+        while true {
+            let suffix = counter == 0 ? "" : " (\(counter))"
+            let fileName = "\(baseFileName)\(suffix)"
+            let hasConflict = conflictExtensions.contains { ext in
+                let candidate = directory.appendingPathComponent("\(fileName).\(ext)")
+                return FileManager.default.fileExists(atPath: candidate.path)
+            }
+
+            if !hasConflict {
+                return directory.appendingPathComponent("\(fileName).\(fileExtension)")
+            }
+
+            counter += 1
+        }
+    }
+
+    // MARK: - M4A 转 MP3（使用 macOS 原生分块转码）
     func convertToMP3(from sourceURL: URL, completion: @escaping (URL?) -> Void) {
-        let mp3URL = sourceURL.deletingPathExtension().appendingPathExtension("mp3")
+        let directory = sourceURL.deletingLastPathComponent()
+        let baseFileName = sourceURL.deletingPathExtension().lastPathComponent
+        let mp3URL = uniqueRecordingURL(
+            in: directory,
+            baseFileName: baseFileName,
+            fileExtension: "mp3",
+            conflictExtensions: ["mp3"]
+        )
 
         LogManager.shared.info("开始转换 MP3 | 源文件: \(sourceURL.lastPathComponent)")
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let success = NativeMP3Encoder.convertToMP3(from: sourceURL, to: mp3URL)
+            let success = MP3Encoder.convertToMP3(from: sourceURL, to: mp3URL)
 
             if success {
                 try? FileManager.default.removeItem(at: sourceURL)

@@ -1,3 +1,172 @@
+# [2026-07-04 三模式可听录音验证]
+- **用户需求/反馈**: 用户希望单独听三种录音模式的实际结果：直录系统声音、直录麦克风、系统 + 麦克风。
+- **技术逻辑变更**:
+    - 新增可听专项 QA 场景 `audibleModeCheck`，使用指定源音频驱动三种录音模式。
+    - 新增 `scripts/run_audible_audio_modes_qa.sh`，自动生成系统源音频、麦克风源音频、三段原始录音、三段试听增益版和测试报告。
+    - 更新测试用例文档，补充可听三模式验证入口。
+- **涉及文件清单**:
+    - `SimpleRecorder/Services/QAAutomationRunner.swift`
+    - `scripts/run_audible_audio_modes_qa.sh` [NEW]
+    - `docs/test-cases.md`
+- **验证结果**: 专项报告位于 `qa-runs/audible-mode-check-20260704-171559/audible-report.md`；三项结果均通过。随后 `xcodebuild test` 和 `scripts/run_full_qa.sh` 均通过。
+
+# [2026-07-04 稳定交付标准固化]
+- **用户需求/反馈**: 用户希望未来新项目先设定稳定交付标准，再围绕标准迭代；当前项目需要把交付标准、功能清单、测试 case 和测试流程固化为项目文档。
+- **技术逻辑变更**:
+    - **项目规则入口**：新增 `AGENTS.md`，明确本项目先按稳定交付门槛执行，不用无限审查替代固定 QA。
+    - **标准文档补齐**：新增稳定交付标准、功能清单、测试用例与流程、发布检查清单。
+    - **文档口径修正**：README 增加交付标准入口；PRD 和架构文档对齐动态磁盘门槛、实际日志路径、默认快捷键和录音上限范围。
+    - **磁盘提示修正**：磁盘空间不足提示改为显示当前动态计算的最小可用空间，不再写死 100MB。
+- **涉及文件清单**:
+    - `AGENTS.md` [NEW]
+    - `docs/stable-delivery-standard.md` [NEW]
+    - `docs/feature-list.md` [NEW]
+    - `docs/test-cases.md` [NEW]
+    - `docs/release-checklist.md` [NEW]
+    - `README.md`
+    - `docs/prd.md`
+    - `docs/architecture.md`
+    - `docs/qa-regression.md`
+    - `SimpleRecorder/Managers/AudioRecorderManagerUI.swift`
+- **变更原因**: 把“什么时候算稳定、什么时候停止继续排查”变成项目可执行门禁，同时修复文档与实现不一致的问题。
+
+# [2026-07-04 继续三轮 subagent 检测修复]
+- **用户需求/反馈**: 再派出三个 subagent 分别检查项目，先分析可能风险，再确认项目是否存在类似问题，存在则修复。
+- **技术逻辑变更**:
+    - **录音收尾加固**：录音停止后立即停止接收新音频 buffer，避免停止流程中继续 append；普通停止后的 MP3 转码被纳入输出收尾状态，退出应用会等待转码完成。
+    - **系统音频流隔离**：SCStream 采集加入 generation 标记，异步停止后的旧回调不会进入新一轮系统音频队列。
+    - **设置状态校准**：最长录音时长最低 5 分钟；开机自启动从系统状态回读，注册失败时回滚 UI 状态；设备移除检测先刷新真实设备列表。
+    - **QA 与发布门禁**：完整 QA 默认把核心场景 skipped 视为失败；场景 JSON 改用安全序列化；`RELEASE=1` 打包必须通过 Developer ID、公证、stapler、Gatekeeper；DMG 根目录包含主项目和 LAME 许可文件。
+    - **UI 小修**：快捷键录制器避免双监听；星期按钮保持 36 视觉尺寸，同时保留更稳的点击热区。
+- **涉及文件清单**:
+    - `SimpleRecorder/Managers/AudioRecorderManagerCore.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerEngine.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerWriter.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerSystemAudio.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerDevice.swift`
+    - `SimpleRecorder/Models/AppSettingsCore.swift`
+    - `SimpleRecorder/Views/MainWindowSettingsView.swift`
+    - `SimpleRecorder/Views/TimerTaskViews.swift`
+    - `SimpleRecorder/NativeMP3Encoder.swift`
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `scripts/run_full_qa.sh`
+    - `build_dmg.sh`
+    - `docs/distribution.md`
+    - `docs/qa-regression.md`
+- **变更原因**: 优先修复可能导致丢录音、误判测试通过或公开分发包不合规的边界风险，保持项目短小但发布前证据更硬。
+
+# [2026-07-04 00:05]
+- **用户需求/反馈**: 很多转写服务不支持 MP4/M4A 上传，MP3 输出必须保留在默认能力里。
+- **技术逻辑变更**:
+    - **恢复 MP3 默认支持**：恢复 `MP3Encoder` 的 LAME 优先、系统原生兜底编码链路。
+    - **恢复工程链接**：重新加入 `SimpleRecorder/ThirdParty/lame` 静态库、头文件和 module map，并恢复 Xcode 工程搜索路径。
+    - **恢复 QA 覆盖**：`scripts/run_full_qa.sh` 默认重新执行 `5.2 output-format-mp3`。
+    - **同步分发说明**：README、PRD、架构、分发和回归测试文档重新写明 M4A/MP3 都是公开版能力；第三方声明补充 LAME 许可和分发注意事项。
+- **涉及文件清单**:
+    - `SimpleRecorder/MP3Encoder.swift`
+    - `SimpleRecorder/ThirdParty/lame/` [RESTORED]
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `scripts/run_full_qa.sh`
+    - `README.md`
+    - `THIRD_PARTY_NOTICES.md`
+    - `docs/distribution.md`
+    - `docs/architecture.md`
+    - `docs/prd.md`
+    - `docs/qa-regression.md`
+    - `docs/changelog.md`
+- **变更原因**: 转写上传兼容性优先；开源分发风险通过 LAME 许可说明和发布流程管理。
+
+# [2026-07-03 23:20]
+- **用户需求/反馈**: 继续优化剩余问题，完成开源独立 DMG 分发前的许可证、仓库卫生和定时录音稳定性修复。
+- **技术逻辑变更**:
+    - **开源许可说明**：新增 MIT `LICENSE` 与 `THIRD_PARTY_NOTICES.md`，并将应用版权文案改为 MIT Licensed。
+    - **移除内嵌 LAME**：删除静态链接的 `libmp3lame.a`、头文件和 module map，降低开源二进制分发许可复杂度。
+    - **收敛发布承诺**：当前系统无可用 MP3 编码器时，公开版只承诺 M4A 输出；MP3 作为可选扩展能力保留运行时保护，不进入默认 QA 场景。
+    - **定时自动录音确认加固**：自动录音触发后最多等待 30 秒确认录音进入 `recording`，避免首次授权或系统音频异步启动慢时被 0.5 秒检查误判。
+    - **开源仓库清理**：将 `.agent/` 本地规则从 Git 跟踪中移除；移除与录音软件无关的 Cooper 导出脚本。
+    - **测试覆盖补齐**：新增自动录音启动确认策略单元测试。
+- **涉及文件清单**:
+    - `LICENSE` [NEW]
+    - `THIRD_PARTY_NOTICES.md` [NEW]
+    - `SimpleRecorder/MP3Encoder.swift`
+    - `SimpleRecorder/Models/TimerTask.swift`
+    - `SimpleRecorder/Managers/TimerTaskManagerCore.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerWriter.swift`
+    - `SimpleRecorder/Info.plist`
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `SimpleRecorderTests/TimerTaskTests.swift`
+    - `README.md`
+    - `docs/distribution.md`
+    - `docs/architecture.md`
+    - `docs/prd.md`
+    - `docs/qa-regression.md`
+    - `docs/changelog.md`
+    - `scripts/run_full_qa.sh`
+    - `.agent/` [UNTRACKED]
+    - `scripts/export_cooper_knowledge.mjs` [REMOVED]
+    - `SimpleRecorder/ThirdParty/lame/` [REMOVED]
+- **变更原因**: 降低独立分发和开源发布风险，同时修复定时任务在异步录音启动路径上的漏触发边界问题。
+
+# [2026-06-29 23:35]
+- **用户需求/反馈**: 需要恢复 MP3 输出能力，不能因为系统原生 MP3 编码不可用而只剩 M4A。
+- **技术逻辑变更**:
+    - **恢复内嵌 LAME 编码链路**：新增 `MP3Encoder`，优先使用 LAME 转码，系统原生 `NativeMP3Encoder` 仅作为兜底。
+    - **分块流式转码**：每次读取 8192 帧 PCM 后立即编码并写入 MP3，避免旧实现一次性解码整段录音导致长会议内存暴涨。
+    - **工程链接恢复**：重新接入 `SimpleRecorder/ThirdParty/lame` 静态库、头文件和 module map，并将静态库重编为 `arm64 + macOS 13.0 minos`。
+    - **设置与 UI 回归**：保存格式选择重新展示 MP3；历史 MP3 偏好只有在编码器不可用时才回落 M4A。
+    - **QA 覆盖补齐**：自动化流程新增 `5.2 output-format-mp3`，录制一小段后等待异步转码并验证 `.mp3` 文件。
+- **涉及文件清单**:
+    - `SimpleRecorder/MP3Encoder.swift` [NEW]
+    - `SimpleRecorder/ThirdParty/lame/COPYING` [NEW]
+    - `SimpleRecorder/ThirdParty/lame/lame.h` [NEW]
+    - `SimpleRecorder/ThirdParty/lame/libmp3lame.a` [NEW]
+    - `SimpleRecorder/ThirdParty/lame/module.modulemap` [NEW]
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `SimpleRecorder/Models/AppSettingsCore.swift`
+    - `SimpleRecorder/Views/MainWindowSettingsView.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerCore.swift`
+    - `SimpleRecorder/Managers/AudioRecorderManagerWriter.swift`
+    - `SimpleRecorder/Services/QAAutomationRunner.swift`
+    - `scripts/run_full_qa.sh`
+    - `README.md`
+    - `docs/architecture.md`
+    - `docs/prd.md`
+    - `docs/qa-regression.md`
+    - `docs/changelog.md`
+- **变更原因**: 保留“先录 M4A、再转 MP3”的可靠录音链路，同时让 MP3 输出不再依赖不同 macOS 版本是否提供原生 MP3 写入能力。
+
+# [2026-06-29 23:05]
+- **用户需求/反馈**: 希望把大部分功能测试自动化，后续每次改动都能由 Agent 直接跑一遍。
+- **技术逻辑变更**:
+    - **新增 App 内置 QA runner**：通过 `--qa-scenario` 启动参数执行自动化，不影响普通用户启动路径。
+    - **覆盖核心功能路径**：自动验证设置回读、麦克风录音、暂停继续、连续录音、系统声音、混合音源和定时自动录音。
+    - **新增一键 QA 脚本**：`scripts/run_full_qa.sh` 自动打包 Release、运行 App 自动化、检查 DMG/签名/录音样本/日志，并输出 `qa-runs/*/report.md`。
+    - **系统音频判定加固**：QA 模式内置 880Hz 测试音，并设置最低文件大小阈值，避免系统音频静音文件被误判通过。
+    - **文档更新**：回归流程改为优先执行一键自动化，并明确剩余需要人工补测的强交互或系统授权场景。
+- **涉及文件清单**:
+    - `SimpleRecorder/Services/QAAutomationRunner.swift` [NEW]
+    - `SimpleRecorder/SimpleRecorderApp.swift`
+    - `SimpleRecorder.xcodeproj/project.pbxproj`
+    - `scripts/run_full_qa.sh` [NEW]
+    - `docs/qa-regression.md`
+    - `README.md`
+    - `.gitignore`
+    - `docs/changelog.md`
+- **变更原因**: 将可自动化的 80-90% 回归路径固化成脚本，减少后续迭代漏测录音、系统音频、定时任务和设置项的风险。
+
+# [2026-06-29 22:45]
+- **用户需求/反馈**: 将回归测试流程固化为项目规范，后续任何改动提交或打包前都必须完整跑一遍，覆盖 APP 内所有功能和设置项。
+- **技术逻辑变更**:
+    - **新增回归测试流程文档**：沉淀构建、打包、权限、录音源、快捷键、暂停恢复、存储路径、高级设置、定时计划、错误边界和收尾清理检查。
+    - **新增包体验证脚本**：提供 DMG 校验、签名校验、Gatekeeper 评估、录音样本 `afinfo` 元数据检查和最近日志关键字检查。
+    - **README 入口补充**：在开发章节加入回归测试入口，明确提交或打包前必须执行完整流程。
+- **涉及文件清单**:
+    - `README.md`
+    - `docs/qa-regression.md` [NEW]
+    - `scripts/qa_artifact_check.sh` [NEW]
+    - `docs/changelog.md`
+- **变更原因**: 避免后续优化只验证单点功能，确保录音、系统音频、定时计划和设置项在每次迭代后都能被系统性回归。
+
 # [2026-01-30 22:30]
 - **用户需求/反馈**: 每次更新应用程序时，系统都会提示默认存储目录没有权限。希望用户下载完 APP 后，默认存储目录自动有权限。
 - **技术逻辑变更**: 

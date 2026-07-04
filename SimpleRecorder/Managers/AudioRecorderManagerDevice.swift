@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager+Device.swift
-//  极简录音 - 设备监听与激活
+//  AudioRecorderManagerDevice.swift
+//  会议录音 Pro - 设备监听与激活
 //
 //  职责范围：
 //  - CoreAudio 设备变更监听（耳机插拔、设备列表变化）
@@ -70,6 +70,11 @@ extension AudioRecorderManager {
 
     /// 设置 AVAudioEngine 配置变更监听
     func setupEngineConfigurationChangeListener() {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .AVAudioEngineConfigurationChange,
+            object: nil
+        )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleAudioEngineConfigChange),
@@ -97,6 +102,7 @@ extension AudioRecorderManager {
         guard recordingState == .recording, currentAudioSource != .systemAudio else { return }
         guard let deviceID = recordingDeviceID, deviceID != "default" else { return }
 
+        // 先刷新真实设备列表，避免用旧缓存误判设备是否仍然存在。
         AppSettings.shared.refreshInputDevices()
 
         // 检查当前使用的设备是否还在列表中
@@ -112,6 +118,12 @@ extension AudioRecorderManager {
 
     /// 处理 AVAudioEngine 配置变更
     @objc func handleAudioEngineConfigChange(_ notification: Notification) {
+        if let changedEngine = notification.object as? AVAudioEngine,
+            changedEngine !== audioEngine
+        {
+            return
+        }
+
         // 只有在录音中时才处理
         guard recordingState == .recording else { return }
 
@@ -219,6 +231,7 @@ extension AudioRecorderManager {
 
                 // 重新创建 AVAudioEngine 以使用新设备
                 audioEngine = AVAudioEngine()
+                setupEngineConfigurationChangeListener()
             } else {
                 LogManager.shared.warning("无法添加设备输入 | 名称: \(targetDevice.localizedName)，将使用默认设备")
             }

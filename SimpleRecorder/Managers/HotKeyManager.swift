@@ -1,6 +1,6 @@
 //
 //  HotKeyManager.swift
-//  极简录音 - 全局快捷键管理器
+//  会议录音 Pro - 全局快捷键管理器
 //
 
 import AppKit

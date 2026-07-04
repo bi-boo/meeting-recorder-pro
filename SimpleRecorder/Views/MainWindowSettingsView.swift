@@ -2,6 +2,11 @@ import Carbon
 import PermissionFlow
 import SwiftUI
 
+enum SettingsWindowLayout {
+    static let contentTopPadding: CGFloat = 18
+    static let aboutTitleTopPadding: CGFloat = 34
+}
+
 // MARK: - onChange 兼容封装（macOS 13/14 双版本适配）
 private struct AudioSourceChangeModifier: ViewModifier {
     let value: AudioSource
@@ -51,21 +56,25 @@ struct MainWindowView: View {
 
 // MARK: - 核心功能
 struct AboutView: View {
+    private var versionText: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
-                // 应用名称
                 Text("会议录音 Pro")
-                    .font(.system(size: 32, weight: .semibold))  // 稍微放大标题
-                    .padding(.top, 60)  // 增加顶部边距填补 Logo 消失后的空白
+                    .font(.system(size: 30, weight: .semibold))
+                    .padding(.top, SettingsWindowLayout.aboutTitleTopPadding)
 
                 Text("专为办公、演讲、会议场景设计")
                     .font(.system(size: 15))
                     .foregroundColor(.secondary)
                     .padding(.top, 8)
 
-                // 特性列表
-                VStack(alignment: .leading, spacing: 28) {  // 增加条目间的间距
+                VStack(alignment: .leading, spacing: 18) {
                     FeatureItem(
                         title: "实时保存",
                         subtitle:
@@ -81,7 +90,7 @@ struct AboutView: View {
                         subtitle: "无论在使用什么应用程序，只需按下预设的快捷键，即可立即开始或结束录音，无需切换窗口。"
                     )
                     FeatureItem(
-                        title: "双声道同时录制",
+                        title: "麦克风 + 系统声音同时录制",
                         subtitle: "支持同时录制麦克风和系统声音。戴耳机参加线上会议时，也能完整录下对方发言和你自己的声音。"
                     )
                     FeatureItem(
@@ -89,9 +98,13 @@ struct AboutView: View {
                         subtitle: "支持设置定时计划，到点自动开始录音。不用担心忙碌时忘记开启录音，轻松捕捉每一场重要会议。"
                     )
                 }
-                .padding(.horizontal, 45)  // 增加水平间距，使行宽适中
-                .padding(.top, 45)
-                .padding(.bottom, 60)
+                .padding(.horizontal, 45)
+                .padding(.top, 32)
+
+                AboutMetadataView(versionText: versionText)
+                    .padding(.horizontal, 45)
+                    .padding(.top, 24)
+                    .padding(.bottom, 30)
             }
             .frame(maxWidth: .infinity)
         }
@@ -103,14 +116,49 @@ struct FeatureItem: View {
     let subtitle: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {  // 稍微增加标题和描述的间距
+        VStack(alignment: .leading, spacing: 5) {
             Text(title)
-                .font(.system(size: 14, weight: .semibold))  // 标题加粗一点
+                .font(.system(size: 14, weight: .semibold))
             Text(subtitle)
-                .font(.system(size: 13))  // 描述字体稍微大一点，更易读
-                .lineSpacing(4)  // 增加行间距，解决拥挤感
+                .font(.system(size: 13))
+                .lineSpacing(3)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+struct AboutMetadataView: View {
+    let versionText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+                .padding(.bottom, 6)
+
+            AboutInfoRow(title: "版本", value: versionText)
+            AboutInfoRow(title: "开源许可", value: "MIT License")
+            AboutInfoRow(title: "第三方组件", value: "PermissionFlow、LAME / libmp3lame")
+        }
+        .font(.system(size: 12))
+    }
+}
+
+struct AboutInfoRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .foregroundColor(.secondary)
+                .frame(width: 72, alignment: .leading)
+
+            Text(value)
+                .foregroundColor(.primary)
+                .textSelection(.enabled)
+
+            Spacer(minLength: 0)
         }
     }
 }
@@ -150,6 +198,9 @@ struct BasicSettingsView: View {
                             currentHotKey: hotKeyManager.recordHotKey,
                             conflictKey: hotKeyManager.pauseHotKey,
                             conflictKeyName: "暂停/继续录音",
+                            onBeginRecording: {
+                                isRecordingPauseShortcut = false
+                            },
                             onHotKeyRecorded: { config in
                                 hotKeyManager.saveRecordHotKey(config)
                             }
@@ -164,6 +215,9 @@ struct BasicSettingsView: View {
                             currentHotKey: hotKeyManager.pauseHotKey,
                             conflictKey: hotKeyManager.recordHotKey,
                             conflictKeyName: "开始/结束录音",
+                            onBeginRecording: {
+                                isRecordingShortcut = false
+                            },
                             onHotKeyRecorded: { config in
                                 hotKeyManager.savePauseHotKey(config)
                             }
@@ -279,7 +333,7 @@ struct BasicSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(.top, 10)
+        .padding(.top, SettingsWindowLayout.contentTopPadding)
     }
 
     private func selectFolder(for keyPath: ReferenceWritableKeyPath<AppSettings, URL>) {
@@ -299,6 +353,10 @@ struct BasicSettingsView: View {
 // MARK: - 高级设置
 struct AdvancedSettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
+    private var maxDurationMinuteOptions: [Int] {
+        let allOptions = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
+        return settings.maxDurationHours == 0 ? Array(allOptions.dropFirst()) : allOptions
+    }
 
     var body: some View {
         Form {
@@ -317,8 +375,7 @@ struct AdvancedSettingsView: View {
                             .frame(width: 85)
 
                             Picker("", selection: $settings.maxDurationMinutes) {
-                                ForEach([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], id: \.self)
-                                { minute in
+                                ForEach(maxDurationMinuteOptions, id: \.self) { minute in
                                     Text("\(minute) 分钟").tag(minute)
                                 }
                             }
@@ -328,7 +385,7 @@ struct AdvancedSettingsView: View {
                     }
 
                     Picker("保存格式", selection: $settings.outputFormat) {
-                        ForEach(OutputFormat.allCases, id: \.self) { format in
+                        ForEach(OutputFormat.availableCases, id: \.self) { format in
                             Text(format.displayName).tag(format)
                         }
                     }
@@ -349,13 +406,23 @@ struct AdvancedSettingsView: View {
                         Text("体积小、音质优，Apple 设备首选")
                     }
                     HStack(spacing: 6) {
-                        Text("MP3")
-                            .font(.system(size: 10, weight: .bold))
-                            .padding(.horizontal, 3)
-                            .padding(.vertical, 0.5)
-                            .background(Color.secondary.opacity(0.12))
-                            .cornerRadius(2)
-                        Text("兼容性极佳，适合跨平台自由分享")
+                        if MP3Encoder.isEncodingAvailable {
+                            Text("MP3")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 0.5)
+                                .background(Color.secondary.opacity(0.12))
+                                .cornerRadius(2)
+                            Text("兼容性极佳，适合跨平台自由分享")
+                        } else {
+                            Text("MP3")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 0.5)
+                                .background(Color.secondary.opacity(0.12))
+                                .cornerRadius(2)
+                            Text("MP3 编码器不可用，暂以 M4A 保存")
+                        }
                     }
                 }
                 .font(.system(size: 11))
@@ -394,7 +461,7 @@ struct AdvancedSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(.top, 10)  // 与基础设置保持一致
+        .padding(.top, SettingsWindowLayout.contentTopPadding)
     }
 }
 
@@ -404,17 +471,20 @@ struct ShortcutRecorderView: View {
     let currentHotKey: HotKeyManager.HotKeyConfiguration?
     var conflictKey: HotKeyManager.HotKeyConfiguration? = nil
     var conflictKeyName: String = "其他功能"
+    var onBeginRecording: () -> Void = {}
     let onHotKeyRecorded: (HotKeyManager.HotKeyConfiguration) -> Void
     @State private var eventMonitor: Any?
     @State private var showConflictAlert = false
 
     var body: some View {
         Button(action: {
-            isRecording.toggle()
             if isRecording {
-                startMonitoring()
-            } else {
+                isRecording = false
                 stopMonitoring()
+            } else {
+                onBeginRecording()
+                isRecording = true
+                startMonitoring()
             }
         }) {
             if isRecording {
@@ -431,6 +501,11 @@ struct ShortcutRecorderView: View {
             }
         }
         .buttonStyle(.bordered)
+        .onChange(of: isRecording) { newValue in
+            if !newValue {
+                stopMonitoring()
+            }
+        }
         .onDisappear {
             stopMonitoring()
         }

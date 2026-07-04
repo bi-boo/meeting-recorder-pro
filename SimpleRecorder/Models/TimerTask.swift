@@ -1,6 +1,6 @@
 //
 //  TimerTask.swift
-//  极简录音 - 定时任务数据模型
+//  会议录音 Pro - 定时任务数据模型
 //
 //  Created by AI Assistant
 //
@@ -20,6 +20,70 @@ enum RepeatType: String, Codable, CaseIterable {
         case .none: return "不循环"
         case .daily: return "每天"
         case .weekly: return "每周"
+        }
+    }
+}
+
+// MARK: - 定时行为类型枚举
+enum TimerActionType: String, CaseIterable, Codable {
+    case remind = "remind"  // 提前提醒模式
+    case autoStart = "auto_start"  // 自动开始录音模式
+
+    var displayName: String {
+        switch self {
+        case .remind: return "到时提醒我"
+        case .autoStart: return "自动录音"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .remind: return "提前弹窗询问是否开始录音"
+        case .autoStart: return "到时间自动开始录音"
+        }
+    }
+}
+
+// MARK: - 自动录音启动确认
+
+enum TimerRecordingStartObservation: Equatable {
+    case idle
+    case starting
+    case recording
+}
+
+enum TimerRecordingStartConfirmationDecision: Equatable {
+    case confirmed
+    case wait
+    case failed
+}
+
+struct TimerRecordingStartConfirmationPolicy {
+    static let retryInterval: TimeInterval = 0.5
+    static let maxAttempts = 60
+
+    static func decision(
+        for observation: TimerRecordingStartObservation,
+        remainingAttempts: Int
+    ) -> TimerRecordingStartConfirmationDecision {
+        switch observation {
+        case .recording:
+            return .confirmed
+        case .starting, .idle:
+            return remainingAttempts > 0 ? .wait : .failed
+        }
+    }
+}
+
+enum TimerTaskScheduleValidator {
+    static func hasTimeConflict(
+        tasks: [TimerTask],
+        hour: Int,
+        minute: Int,
+        excludingTaskID: UUID? = nil
+    ) -> Bool {
+        tasks.contains { task in
+            task.id != excludingTaskID && task.hour == hour && task.minute == minute
         }
     }
 }

@@ -1,6 +1,6 @@
 //
-//  AudioRecorderManager+SystemAudio.swift
-//  极简录音 - 系统音频采集
+//  AudioRecorderManagerSystemAudio.swift
+//  会议录音 Pro - 系统音频采集
 //
 //  职责范围：
 //  - 仅系统音 / 麦克风+系统音混合 录音通路搭建
@@ -90,6 +90,7 @@ extension AudioRecorderManager {
     // MARK: - 系统音频采集启动
     @available(macOS 13.0, *)
     func startSystemAudioCapture() async throws {
+        let captureGeneration = nextSystemAudioCaptureGeneration()
         let configuration = SCStreamConfiguration()
 
         // 【性能至上】配置精简，彻底解决外接鼠标卡顿问题
@@ -102,7 +103,8 @@ extension AudioRecorderManager {
         configuration.capturesAudio = true
         configuration.sampleRate = 48000
         configuration.channelCount = 1
-        configuration.excludesCurrentProcessAudio = true  // 排除自己的音频，避免回声
+        // 正常录音排除自己的音频，避免回声。QA 模式下需要捕获 runner 播放的测试音。
+        configuration.excludesCurrentProcessAudio = !QAAutomationRunner.isActive
 
         // 使用 macOS 14.2+ 的仅音频采集方式
         if #available(macOS 14.2, *) {
@@ -116,15 +118,22 @@ extension AudioRecorderManager {
                     userInfo: [NSLocalizedDescriptionKey: "无法获取显示器信息"])
             }
 
-            // 排除当前应用程序（SimpleRecorder）的音频，避免回声
+            // 排除当前应用程序（SimpleRecorder）的音频，避免回声；QA 模式需要捕获内置测试音。
+            let excludedApplications =
+                QAAutomationRunner.isActive
+                ? []
+                : content.applications.filter {
+                    $0.bundleIdentifier == Bundle.main.bundleIdentifier
+                }
+
             let filter = SCContentFilter(
                 display: display,
-                excludingApplications: content.applications.filter {
-                    $0.bundleIdentifier == Bundle.main.bundleIdentifier
-                }, exceptingWindows: [])
+                excludingApplications: excludedApplications,
+                exceptingWindows: [])
 
             systemAudioOutput = SystemAudioStreamOutput { [weak self] sampleBuffer in
-                self?.handleSystemAudioSampleBuffer(sampleBuffer)
+                self?.handleSystemAudioSampleBuffer(
+                    sampleBuffer, captureGeneration: captureGeneration)
             }
 
             systemAudioStream = SCStream(
@@ -143,7 +152,8 @@ extension AudioRecorderManager {
             let filter = SCContentFilter(display: display, excludingWindows: [])
 
             systemAudioOutput = SystemAudioStreamOutput { [weak self] sampleBuffer in
-                self?.handleSystemAudioSampleBuffer(sampleBuffer)
+                self?.handleSystemAudioSampleBuffer(
+                    sampleBuffer, captureGeneration: captureGeneration)
             }
 
             systemAudioStream = SCStream(
@@ -152,17 +162,77 @@ extension AudioRecorderManager {
 
         if let output = systemAudioOutput {
             try systemAudioStream?.addStreamOutput(
-                output, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
+                output, type: .audio, sampleHandlerQueue: systemAudioSampleQueue)
         }
 
         try await systemAudioStream?.startCapture()
         print("🔊 系统音频采集已启动")
     }
 
+    // MARK: - 系统音频缓存重置
+
+    func resetSystemAudioStateForResume() {
+        performOnSystemAudioSampleQueueSynchronously {
+            systemAudioQueueLock.lock()
+            for buffer in systemAudioBufferQueue {
+                returnBufferToPool(buffer)
+            }
+            systemAudioBufferQueue.removeAll()
+            systemAudioBufferHeadIndex = 0
+            systemAudioBufferReadOffset = 0
+            isSystemAudioBuffering = (currentAudioSource == .both)
+            cachedAudioConverter?.reset()
+            cachedAudioConverter = nil
+            lastSrcFormat = nil
+            lastDstFormat = nil
+            systemAudioQueueLock.unlock()
+        }
+    }
+
+    func resetSystemAudioConverterCacheSynchronously() {
+        performOnSystemAudioSampleQueueSynchronously {
+            systemAudioQueueLock.lock()
+            cachedAudioConverter?.reset()
+            cachedAudioConverter = nil
+            lastSrcFormat = nil
+            lastDstFormat = nil
+            systemAudioQueueLock.unlock()
+        }
+    }
+
+    private func performOnSystemAudioSampleQueueSynchronously(_ work: () -> Void) {
+        if DispatchQueue.getSpecific(key: systemAudioSampleQueueKey) == true {
+            work()
+        } else {
+            systemAudioSampleQueue.sync(execute: work)
+        }
+    }
+
+    func nextSystemAudioCaptureGeneration() -> Int {
+        systemAudioQueueLock.lock()
+        systemAudioCaptureGeneration += 1
+        let generation = systemAudioCaptureGeneration
+        systemAudioQueueLock.unlock()
+        return generation
+    }
+
+    func invalidateSystemAudioCaptureGeneration() {
+        systemAudioQueueLock.lock()
+        systemAudioCaptureGeneration += 1
+        systemAudioQueueLock.unlock()
+    }
+
+    func isCurrentSystemAudioGeneration(_ generation: Int) -> Bool {
+        systemAudioQueueLock.lock()
+        let isCurrent = generation == systemAudioCaptureGeneration
+        systemAudioQueueLock.unlock()
+        return isCurrent
+    }
+
     // MARK: - 处理系统音频样本
-    func handleSystemAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    func handleSystemAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, captureGeneration: Int) {
         // 如果已暂停，直接丢弃数据
-        guard !isPaused else { return }
+        guard isCurrentSystemAudioGeneration(captureGeneration), !isPaused else { return }
 
         guard CMSampleBufferIsValid(sampleBuffer),
             let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
@@ -247,15 +317,15 @@ extension AudioRecorderManager {
             }
         }
 
-        systemAudioQueueLock.lock()
+        guard systemAudioQueueLock.try() else {
+            return noErr
+        }
         defer { systemAudioQueueLock.unlock() }
-
-        // 【弹性滞后缓冲逻辑】
 
         // 【弹性滞后缓冲逻辑】
         if isSystemAudioBuffering {
             // 水位只要达到轻量级指标（3个包）就恢复输出，减少等待感
-            if systemAudioBufferQueue.count < systemAudioPreRollHighWaterMark {
+            if activeSystemAudioBufferCount() < systemAudioPreRollHighWaterMark {
                 return noErr
             } else {
                 isSystemAudioBuffering = false
@@ -265,15 +335,15 @@ extension AudioRecorderManager {
         // 队列耗尽时输出静音（已 memset 0），但不重新进入缓冲态
         // isSystemAudioBuffering = true 仅在首次启动和暂停恢复时设置，
         // 避免运行中因瞬时耗尽反复触发"缓冲→等 3 包→恢复"循环导致断续
-        if systemAudioBufferQueue.isEmpty {
+        if activeSystemAudioBufferCount() == 0 {
             return noErr
         }
 
         var framesCopied: AVAudioFrameCount = 0
         let sampleSize = MemoryLayout<Float>.size
 
-        while framesCopied < frameCount && !systemAudioBufferQueue.isEmpty {
-            let buffer = systemAudioBufferQueue[0]
+        while framesCopied < frameCount && systemAudioBufferHeadIndex < systemAudioBufferQueue.count {
+            let buffer = systemAudioBufferQueue[systemAudioBufferHeadIndex]
             let framesAvailable = buffer.frameLength - systemAudioBufferReadOffset
             let framesLeft = frameCount - framesCopied
             let framesToCopy = min(framesLeft, framesAvailable)
@@ -296,7 +366,7 @@ extension AudioRecorderManager {
             systemAudioBufferReadOffset += framesToCopy
 
             if systemAudioBufferReadOffset >= buffer.frameLength {
-                systemAudioBufferQueue.removeFirst()
+                systemAudioBufferHeadIndex += 1
                 systemAudioBufferReadOffset = 0
             }
         }
@@ -306,51 +376,50 @@ extension AudioRecorderManager {
 
     // MARK: - 缓冲队列入队/清空
     func enqueueSystemAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+        var didDropOldBuffer = false
+
         systemAudioQueueLock.lock()
-        defer { systemAudioQueueLock.unlock() }
+        compactSystemAudioBufferQueueIfNeeded()
 
         systemAudioBufferQueue.append(buffer)
-        if systemAudioBufferQueue.count > systemAudioQueueLimit {
-            systemAudioBufferQueue.removeFirst()
-            systemAudioOverflowDropCount += 1
-            // 如果删掉的是当前正在读的帧（理论不应发生），重置偏移
-            if systemAudioBufferReadOffset > 0 {
-                systemAudioBufferReadOffset = 0
-            }
-            let now = Date().timeIntervalSince1970
-            if now - lastSystemAudioOverflowLogTime >= systemAudioOverflowLogInterval {
-                lastSystemAudioOverflowLogTime = now
-                LogManager.shared.warning(
-                    "系统音频缓冲队列已满，丢弃旧数据 | 队列大小: \(systemAudioQueueLimit), 本轮丢弃: \(systemAudioOverflowDropCount)")
-                systemAudioOverflowDropCount = 0
-            }
+        let overflow = activeSystemAudioBufferCount() - systemAudioQueueLimit
+        if overflow > 0 {
+            systemAudioBufferHeadIndex = min(
+                systemAudioBufferQueue.count, systemAudioBufferHeadIndex + overflow)
+            systemAudioBufferReadOffset = 0
+            compactSystemAudioBufferQueueIfNeeded()
+            didDropOldBuffer = true
+        }
+        systemAudioQueueLock.unlock()
+
+        if didDropOldBuffer {
+            LogManager.shared.warning("系统音频缓冲队列已满，丢弃旧数据 | 队列大小: \(systemAudioQueueLimit)")
         }
     }
 
     func clearSystemAudioBufferQueue() {
         systemAudioQueueLock.lock()
         systemAudioBufferQueue.removeAll()
+        systemAudioBufferHeadIndex = 0
         systemAudioBufferReadOffset = 0
         systemAudioQueueLock.unlock()
     }
 
-    // MARK: - 直接处理系统音频并写入 AssetWriter（已废弃，保留以备参考）
-    func processSystemAudioDirectly(_ sampleBuffer: CMSampleBuffer) {
-        guard let writer = assetWriter, let input = assetWriterInput else { return }
-        guard writer.status == .writing || !isWriterStarted else { return }
-
-        // 初始化时间戳
-        if !isWriterStarted {
-            let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            writer.startSession(atSourceTime: presentationTime)
-            isWriterStarted = true
-            print("📝 系统音频 AssetWriter 会话已启动")
-        }
-
-        if input.isReadyForMoreMediaData {
-            input.append(sampleBuffer)
-        }
+    func activeSystemAudioBufferCount() -> Int {
+        max(0, systemAudioBufferQueue.count - systemAudioBufferHeadIndex)
     }
+
+    func compactSystemAudioBufferQueueIfNeeded() {
+        guard systemAudioBufferHeadIndex > 128,
+            systemAudioBufferHeadIndex * 2 >= systemAudioBufferQueue.count
+        else {
+            return
+        }
+
+        systemAudioBufferQueue.removeFirst(systemAudioBufferHeadIndex)
+        systemAudioBufferHeadIndex = 0
+    }
+
 }
 
 // MARK: - SCStreamOutput 实现（系统音频采集回调）

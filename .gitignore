@@ -28,6 +28,9 @@ xcuserdata/
 *.ipa
 *.dSYM.zip
 *.dSYM
+qa-runs/
+ui-audit-*/
+*.profraw
 
 # =====================================
 # 敏感配置（隐私保护）
@@ -58,6 +61,10 @@ test-results/
 
 # 临时备份文件（手动创建的快照，例如 *.bak-20260427-230538）
 *.bak-*
+
+# 文件同步工具生成的冲突副本
+*_[Cc]onflict.*
+*([Cc]onflicted copy*).*
 
 # Claude Code 本地配置
 .claude/
