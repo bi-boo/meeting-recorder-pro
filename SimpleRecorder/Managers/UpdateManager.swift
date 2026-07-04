@@ -30,9 +30,7 @@ final class UpdateManager: NSObject {
 
     var canSelectMenuItem: Bool {
         guard didStart else { return false }
-        return !AudioRecorderManager.shared.isRecording
-            && updater.canCheckForUpdates
-            && !isChecking
+        return !AudioRecorderManager.shared.isRecording && !isChecking
     }
 
     func start(onStatusChanged: @escaping () -> Void) {
@@ -60,14 +58,21 @@ final class UpdateManager: NSObject {
         }
 
         if availableVersion != nil {
+            guard updater.canCheckForUpdates else {
+                LogManager.shared.warning("当前无法安装更新 | Sparkle 暂不可接收用户触发的更新检查")
+                NSSound.beep()
+                return
+            }
+
             LogManager.shared.info("用户点击安装可用更新 | 版本: \(availableVersion ?? "未知")")
             setChecking(true)
             updater.checkForUpdates()
             return
         }
 
-        guard updater.canCheckForUpdates else {
-            LogManager.shared.warning("当前无法检查更新 | Sparkle 会话可能正在进行")
+        guard !updater.sessionInProgress else {
+            LogManager.shared.warning("当前无法检查更新 | Sparkle 会话正在进行")
+            NSSound.beep()
             return
         }
 
