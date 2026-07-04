@@ -1,3 +1,15 @@
+# [2026-07-04 三模式可听录音验证]
+- **用户需求/反馈**: 用户希望单独听三种录音模式的实际结果：直录系统声音、直录麦克风、系统 + 麦克风。
+- **技术逻辑变更**:
+    - 新增可听专项 QA 场景 `audibleModeCheck`，使用指定源音频驱动三种录音模式。
+    - 新增 `scripts/run_audible_audio_modes_qa.sh`，自动生成系统源音频、麦克风源音频、三段原始录音、三段试听增益版和测试报告。
+    - 更新测试用例文档，补充可听三模式验证入口。
+- **涉及文件清单**:
+    - `SimpleRecorder/Services/QAAutomationRunner.swift`
+    - `scripts/run_audible_audio_modes_qa.sh` [NEW]
+    - `docs/test-cases.md`
+- **验证结果**: 专项报告位于 `qa-runs/audible-mode-check-20260704-171559/audible-report.md`；三项结果均通过。随后 `xcodebuild test` 和 `scripts/run_full_qa.sh` 均通过。
+
 # [2026-07-04 稳定交付标准固化]
 - **用户需求/反馈**: 用户希望未来新项目先设定稳定交付标准，再围绕标准迭代；当前项目需要把交付标准、功能清单、测试 case 和测试流程固化为项目文档。
 - **技术逻辑变更**:

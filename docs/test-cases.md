@@ -67,6 +67,27 @@
 | A8 | 定时自动录音 | `6.2 timer-auto-start` | 到点触发并保存有效文件 |
 | A9 | 包体验证 | `scripts/qa_artifact_check.sh` | DMG、签名、音频元数据、日志检查通过 |
 
+## 可听三模式验证
+
+当需要人工听感确认三种音源都录进去时，运行：
+
+```bash
+scripts/run_audible_audio_modes_qa.sh
+```
+
+脚本会生成两段源音频：
+
+- 系统播放源：口播“系统声音测试。system source. 一二三四五。”
+- 麦克风播放源：口播“麦克风测试。microphone source. 六七八九十。”
+
+脚本会输出三段录音结果：
+
+- 直录系统声音。
+- 直录麦克风。
+- 系统 + 麦克风。
+
+结果位于 `qa-runs/audible-mode-check-YYYYMMDD-HHMMSS/`，其中 `audible-report.md` 是测试报告，`results/*-raw.m4a` 是 App 原始录音复制件，`results/*-listen.m4a` 是便于试听的增益版。
+
 ## 人工冒烟用例
 
 | 编号 | 用例 | 操作 | 通过标准 |

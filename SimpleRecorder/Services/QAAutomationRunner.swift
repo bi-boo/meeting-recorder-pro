@@ -17,6 +17,7 @@ final class QAAutomationRunner {
     private let fileManager = FileManager.default
     private let isoFormatter = ISO8601DateFormatter()
     private var qaAudioPlayer: AVAudioPlayer?
+    private var qaAudioPlayers: [AVAudioPlayer] = []
 
     static func fromCommandLine() -> QAAutomationRunner? {
         let args = CommandLine.arguments
@@ -60,69 +61,73 @@ final class QAAutomationRunner {
 
             TimerTaskManager.shared.stopScheduler()
 
-            if scenario.includeSettings {
-                report.steps.append(runSettingsRoundTrip())
-            }
+            if scenario.audibleModeCheck {
+                report.steps.append(contentsOf: await runAudibleModeCheck(for: scenario))
+            } else {
+                if scenario.includeSettings {
+                    report.steps.append(runSettingsRoundTrip())
+                }
 
-            report.steps.append(
-                await runRecordingStep(
-                    name: "4.1 microphone-basic",
-                    source: .microphone,
-                    duration: scenario.recordDuration,
-                    playSystemAudio: false
-                )
-            )
-
-            report.steps.append(
-                await runPauseResumeStep(
-                    durationBeforePause: max(1.0, scenario.recordDuration / 2),
-                    pauseDuration: scenario.pauseDuration,
-                    durationAfterResume: max(1.0, scenario.recordDuration / 2)
-                )
-            )
-
-            report.steps.append(
-                await runRecordingStep(
-                    name: "4.5 microphone-second-pass",
-                    source: .microphone,
-                    duration: max(2.0, scenario.recordDuration / 2),
-                    playSystemAudio: false
-                )
-            )
-
-            if scenario.includeMP3 {
                 report.steps.append(
-                    await runMP3OutputStep(duration: max(2.0, scenario.recordDuration / 2))
-                )
-            }
-
-            if scenario.includeSystemAudio {
-                report.steps.append(
-                    await runSystemAudioStep(
-                        name: "4.3 system-audio",
-                        source: .systemAudio,
-                        duration: scenario.recordDuration
+                    await runRecordingStep(
+                        name: "4.1 microphone-basic",
+                        source: .microphone,
+                        duration: scenario.recordDuration,
+                        playSystemAudio: false
                     )
                 )
-            }
 
-            if scenario.includeMixedAudio {
                 report.steps.append(
-                    await runSystemAudioStep(
-                        name: "4.4 mixed-audio",
-                        source: .both,
-                        duration: scenario.recordDuration
+                    await runPauseResumeStep(
+                        durationBeforePause: max(1.0, scenario.recordDuration / 2),
+                        pauseDuration: scenario.pauseDuration,
+                        durationAfterResume: max(1.0, scenario.recordDuration / 2)
                     )
                 )
-            }
 
-            if scenario.includeTimer {
                 report.steps.append(
-                    await runTimerAutoStartStep(duration: scenario.recordDuration)
+                    await runRecordingStep(
+                        name: "4.5 microphone-second-pass",
+                        source: .microphone,
+                        duration: max(2.0, scenario.recordDuration / 2),
+                        playSystemAudio: false
+                    )
                 )
-            }
 
-            report.steps.append(runManualCoverageNotice())
+                if scenario.includeMP3 {
+                    report.steps.append(
+                        await runMP3OutputStep(duration: max(2.0, scenario.recordDuration / 2))
+                    )
+                }
+
+                if scenario.includeSystemAudio {
+                    report.steps.append(
+                        await runSystemAudioStep(
+                            name: "4.3 system-audio",
+                            source: .systemAudio,
+                            duration: scenario.recordDuration
+                        )
+                    )
+                }
+
+                if scenario.includeMixedAudio {
+                    report.steps.append(
+                        await runSystemAudioStep(
+                            name: "4.4 mixed-audio",
+                            source: .both,
+                            duration: scenario.recordDuration
+                        )
+                    )
+                }
+
+                if scenario.includeTimer {
+                    report.steps.append(
+                        await runTimerAutoStartStep(duration: scenario.recordDuration)
+                    )
+                }
+
+                report.steps.append(runManualCoverageNotice())
+            }
         } catch {
             report.steps.append(
                 QAStepResult(
@@ -143,6 +148,7 @@ final class QAAutomationRunner {
         }
 
         snapshot?.restore()
+        qaAudioPlayers.removeAll()
 
         report.finishedAt = Date()
         report.summary = QASummary(steps: report.steps)
@@ -385,6 +391,144 @@ final class QAAutomationRunner {
     }
 
     @MainActor
+    private func runAudibleModeCheck(for scenario: QAScenario) async -> [QAStepResult] {
+        [
+            await runAudibleSystemAudioStep(
+                name: "audible-4.3-system-audio",
+                source: .systemAudio,
+                duration: scenario.recordDuration,
+                promptURLs: [scenario.requiredSystemSourceURL]
+            ),
+            await runAudibleRecordingStep(
+                name: "audible-4.1-microphone",
+                source: .microphone,
+                duration: scenario.recordDuration,
+                promptURLs: [scenario.requiredMicrophoneSourceURL]
+            ),
+            await runAudibleSystemAudioStep(
+                name: "audible-4.4-mixed-audio",
+                source: .both,
+                duration: scenario.recordDuration,
+                promptURLs: [
+                    scenario.requiredSystemSourceURL,
+                    scenario.requiredMicrophoneSourceURL,
+                ]
+            ),
+        ]
+    }
+
+    @MainActor
+    private func runAudibleSystemAudioStep(
+        name: String,
+        source: AudioSource,
+        duration: TimeInterval,
+        promptURLs: [URL]
+    ) async -> QAStepResult {
+        let startedAt = Date()
+        guard AppSettings.isSystemAudioSupported else {
+            return skippedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "当前 macOS 不支持 ScreenCaptureKit 系统音频采集"
+            )
+        }
+
+        guard AppSettings.hasScreenCapturePermission else {
+            AppSettings.requestScreenCapturePermission()
+            return skippedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "缺少屏幕录制权限，已触发系统权限申请；授权后重新运行脚本可自动验证",
+                details: ["permission": "screen_capture_missing"]
+            )
+        }
+
+        let availability = await screenCaptureDisplayAvailability()
+        guard availability.isAvailable else {
+            return skippedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "当前自动化进程无法枚举可录制显示器，系统音频场景留待有 display 的环境验证",
+                details: availability.details
+            )
+        }
+
+        return await runAudibleRecordingStep(
+            name: name,
+            source: source,
+            duration: duration,
+            promptURLs: promptURLs
+        )
+    }
+
+    @MainActor
+    private func runAudibleRecordingStep(
+        name: String,
+        source: AudioSource,
+        duration: TimeInterval,
+        promptURLs: [URL]
+    ) async -> QAStepResult {
+        let startedAt = Date()
+        let before = audioFiles()
+
+        for url in promptURLs {
+            guard fileManager.fileExists(atPath: url.path) else {
+                return failedStep(
+                    name: name,
+                    startedAt: startedAt,
+                    message: "测试源音频不存在",
+                    details: ["missingSource": url.path]
+                )
+            }
+        }
+
+        AppSettings.shared.audioSource = source
+        AppSettings.shared.outputFormat = .m4a
+        AppSettings.shared.openFolderAfterRecording = false
+
+        guard AudioRecorderManager.shared.startRecording() else {
+            return failedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "录音启动 API 返回失败",
+                details: ["source": source.rawValue]
+            )
+        }
+
+        guard await waitForState(.recording, timeout: 12.0) else {
+            await stopCurrentRecording()
+            return failedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "录音未在超时时间内进入 recording 状态",
+                details: currentRecorderDetails(source: source)
+            )
+        }
+
+        playAudioPrompts(promptURLs, label: name)
+        await sleep(seconds: duration)
+        await stopCurrentRecording()
+
+        let recordings = newRecordings(since: before)
+        let minimumBytes = minimumRecordingBytes(for: source)
+        let passed = recordings.contains { $0.bytes >= minimumBytes }
+        return QAStepResult(
+            name: name,
+            status: passed ? .passed : .failed,
+            startedAt: startedAt,
+            finishedAt: Date(),
+            message: passed ? "可听测试录音已生成有效文件" : "未发现达到有效阈值的可听测试录音文件",
+            details: currentRecorderDetails(source: source).merging(
+                [
+                    "minimumFileBytes": "\(minimumBytes)",
+                    "playbackSources": promptURLs.map(\.lastPathComponent).joined(separator: ", "),
+                ],
+                uniquingKeysWith: { _, new in new }),
+            recordings: recordings
+        )
+    }
+
+    @MainActor
     private func screenCaptureDisplayAvailability() async -> (
         isAvailable: Bool, details: [String: String]
     ) {
@@ -591,11 +735,30 @@ final class QAAutomationRunner {
 
         do {
             try writeToneFile(to: url)
-            let player = try AVAudioPlayer(contentsOf: url)
-            player.volume = 0.8
-            player.prepareToPlay()
-            player.play()
-            qaAudioPlayer = player
+            playAudioPrompts([url], label: label, volume: 0.8)
+        } catch {
+            LogManager.shared.warning("QA 测试音播放失败 | 场景: \(label), 错误: \(error.localizedDescription)")
+        }
+    }
+
+    private func playAudioPrompts(
+        _ urls: [URL],
+        label: String,
+        volume: Float = 1.0
+    ) {
+        var players: [AVAudioPlayer] = []
+
+        do {
+            for url in urls {
+                let player = try AVAudioPlayer(contentsOf: url)
+                player.volume = volume
+                player.prepareToPlay()
+                players.append(player)
+            }
+
+            players.forEach { $0.play() }
+            qaAudioPlayers.append(contentsOf: players)
+            qaAudioPlayer = players.last
         } catch {
             LogManager.shared.warning("QA 测试音播放失败 | 场景: \(label), 错误: \(error.localizedDescription)")
         }
@@ -747,6 +910,9 @@ private struct QAScenario: Decodable {
     let recordingsPath: String
     let recordSeconds: Double?
     let pauseSeconds: Double?
+    let systemSourcePath: String?
+    let microphoneSourcePath: String?
+    private let audibleModeCheckValue: Bool?
     private let includeSettingsValue: Bool?
     private let includeMP3Value: Bool?
     private let includeSystemAudioValue: Bool?
@@ -758,6 +924,9 @@ private struct QAScenario: Decodable {
         case recordingsPath
         case recordSeconds
         case pauseSeconds
+        case systemSourcePath
+        case microphoneSourcePath
+        case audibleModeCheckValue = "audibleModeCheck"
         case includeSettingsValue = "includeSettings"
         case includeMP3Value = "includeMP3"
         case includeSystemAudioValue = "includeSystemAudio"
@@ -775,6 +944,18 @@ private struct QAScenario: Decodable {
 
     var pauseDuration: TimeInterval {
         max(1.0, pauseSeconds ?? 1.0)
+    }
+
+    var audibleModeCheck: Bool {
+        audibleModeCheckValue ?? false
+    }
+
+    var requiredSystemSourceURL: URL {
+        URL(fileURLWithPath: systemSourcePath ?? "").standardizedFileURL
+    }
+
+    var requiredMicrophoneSourceURL: URL {
+        URL(fileURLWithPath: microphoneSourcePath ?? "").standardizedFileURL
     }
 
     var includeSettings: Bool {
