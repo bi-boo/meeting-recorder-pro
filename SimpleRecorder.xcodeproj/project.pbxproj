@@ -28,7 +28,9 @@
 		025 /* QAAutomationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145; };
 		026 /* MP3Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146; };
 		027 /* libmp3lame.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 147; };
+		028 /* UpdateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 126; };
 		030 /* PermissionFlow in Frameworks */ = {isa = PBXBuildFile; productRef = 060 /* PermissionFlow */; };
+		033 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 061 /* Sparkle */; };
 		031 /* TimerTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130; };
 		032 /* TimerTaskTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150; };
 /* End PBXBuildFile section */
@@ -46,6 +48,7 @@
 		114 /* MainWindowSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowSettingsView.swift; sourceTree = "<group>"; };
 		124 /* NativeMP3Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMP3Encoder.swift; sourceTree = "<group>"; };
 		125 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		126 /* UpdateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateManager.swift; sourceTree = "<group>"; };
 		130 /* TimerTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTask.swift; sourceTree = "<group>"; };
 		131 /* TimerTaskManagerCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskManagerCore.swift; sourceTree = "<group>"; };
 		132 /* ReminderWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderWindowController.swift; sourceTree = "<group>"; };
@@ -69,6 +72,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				033 /* Sparkle in Frameworks */,
 				030 /* PermissionFlow in Frameworks */,
 				027 /* libmp3lame.a in Frameworks */,
 			);
@@ -133,6 +137,7 @@
 				103 /* HotKeyManager.swift */,
 				104 /* LogManager.swift */,
 				131 /* TimerTaskManagerCore.swift */,
+				126 /* UpdateManager.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -216,6 +221,7 @@
 			name = SimpleRecorder;
 			packageProductDependencies = (
 				060 /* PermissionFlow */,
+				061 /* Sparkle */,
 			);
 			productName = SimpleRecorder;
 			productReference = 100 /* SimpleRecorder.app */;
@@ -268,6 +274,7 @@
 			mainGroup = 300;
 			packageReferences = (
 				800 /* XCRemoteSwiftPackageReference "PermissionFlow" */,
+				801 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			productRefGroup = 302 /* Products */;
 			projectDirPath = "";
@@ -321,6 +328,7 @@
 				016 /* TimerTaskViews.swift in Sources */,
 				025 /* QAAutomationRunner.swift in Sources */,
 				026 /* MP3Encoder.swift in Sources */,
+				028 /* UpdateManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -593,6 +601,14 @@
 				minimumVersion = 2.1.0;
 			};
 		};
+		801 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -600,6 +616,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 800 /* XCRemoteSwiftPackageReference "PermissionFlow" */;
 			productName = PermissionFlow;
+		};
+		061 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 801 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

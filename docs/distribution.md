@@ -14,6 +14,7 @@
 | 分发产物 | `MeetingRecorderPro_YYYYMMDD.dmg` |
 | DMG 内应用名 | `会议录音 Pro.app` |
 | 分发渠道 | GitHub Releases 或项目主页下载链接 |
+| 自动更新 | Sparkle 2 + GitHub Releases `appcast.xml` |
 | 上架状态 | 不提交 Mac App Store |
 
 ## 签名策略
@@ -43,6 +44,14 @@ RELEASE=1 ./build_dmg.sh
 
 严格模式会要求 Developer ID Application 证书和 `NOTARY_PROFILE`，并强制通过 notarization、stapler validation、`codesign`、`hdiutil verify` 与 Gatekeeper 校验。
 
+正式发布并同步自动更新源：
+
+```bash
+RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh
+```
+
+该命令会在本地发布包校验通过后，把 DMG 和 `appcast.xml` 上传到 GitHub Releases。
+
 ## 权限说明
 
 - 麦克风权限：用于录制本机麦克风输入。
@@ -51,10 +60,21 @@ RELEASE=1 ./build_dmg.sh
 
 当前独立分发版本不启用 App Sandbox，原因是 PermissionFlow 的系统设置拖拽授权引导需要跨进程跟踪系统设置窗口。由于不提交 Mac App Store，这个取舍与当前分发策略一致。
 
+## 自动更新
+
+应用通过 Sparkle 2 检查更新，不依赖自建服务器。
+
+- Appcast：`https://github.com/bi-boo/meeting-recorder-pro/releases/latest/download/appcast.xml`
+- 更新包：GitHub Release asset 中的 `MeetingRecorderPro_YYYYMMDD.dmg`
+- 检查频率：每天一次
+- 菜单栏默认显示“检查更新...”，发现更新后显示“有新版本 x.y.z...”
+- 录音中禁止检查更新，避免安装流程影响录音保存
+- 用户点击可用更新后，不展示更新窗口和版本说明，Sparkle 负责下载、验签、替换应用并重启安装；系统权限授权提示除外
+
 ## 隐私承诺
 
 - 不需要账号登录。
-- 不联网，不上传录音。
+- 仅访问 GitHub Releases 检查更新，不上传录音。
 - 不收集遥测、联系人、日历、位置或设备标识。
 - 录音文件只保存在用户本地选择的目录。
 

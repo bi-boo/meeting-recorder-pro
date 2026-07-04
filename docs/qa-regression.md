@@ -113,6 +113,7 @@ QA_INCLUDE_SYSTEM_AUDIO=false QA_INCLUDE_MIXED_AUDIO=false scripts/run_full_qa.s
 | 2.3 | 麦克风权限 | 首次或已授权环境启动麦克风录音 | 未授权时出现系统权限请求；已授权时录音可直接开始 |
 | 2.4 | 系统声音权限 | 切到“仅系统声音”或“麦克风 + 系统声音” | 只在选择系统音频相关来源时触发屏幕录制权限 |
 | 2.5 | 日志初始化 | 查看 `~/Library/Application Support/Logs/MeetingRecorderPro_YYYY-MM-DD.log` | 启动、权限、设备、快捷键注册均有日志，无 `ERROR` / `CRITICAL` |
+| 2.6 | 更新菜单 | 非录音状态和录音状态分别打开菜单 | 非录音状态显示“检查更新...”或“有新版本 x.y.z...”；录音中更新项禁用 |
 
 ## 三、基础设置全量检查
 

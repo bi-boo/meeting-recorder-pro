@@ -12,6 +12,7 @@
 - **热键管理**：Carbon (全局快捷键注册)
 - **存储**：UserDefaults (配置与状态持久化)
 - **日志系统**：自研 LogManager (5级日志、文件存储、7天轮转)
+- **自动更新**：Sparkle 2 (GitHub Releases appcast + Ed25519 更新签名)
 
 ## 模块说明
 
@@ -130,6 +131,21 @@ MP3 输出统一入口，录音阶段仍先写入 M4A，停止后按用户设置
 - **多级签名**：依次处理 `.app` 二进制和生成的 `.dmg` 文件
 - **隔离清理**：强制执行 `xattr -cr` 移除 `com.apple.quarantine` 属性，确保下载后双击即可运行
 - **运行时选项**：指定 `--options runtime` 启用 Hardened Runtime，满足系统安全性要求
+
+---
+
+# H1 自动更新模块
+
+## H2 UpdateManager
+
+自动更新管理器，封装 Sparkle 2，并把更新状态同步到菜单栏。
+
+- **更新源**：`SUFeedURL` 指向 GitHub Releases 的 `appcast.xml`，不依赖自建服务器。
+- **检查频率**：`SUScheduledCheckInterval=86400`，每天检查一次。
+- **菜单状态**：默认“检查更新...”，发现更新后显示“有新版本 x.y.z...”。
+- **录音保护**：通过 Sparkle delegate 在录音中阻止所有更新检查，菜单项同步禁用。
+- **安装边界**：后台检查只更新菜单状态；用户点击可用更新后，Sparkle 才下载、验签、替换应用并重启安装。
+- **发布签名**：`SUPublicEDKey` 保存在 `Info.plist`，私钥只保存在本机忽略文件，用于生成 appcast 中的 `sparkle:edSignature`。
 
 ---
 

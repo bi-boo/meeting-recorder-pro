@@ -7,8 +7,9 @@
 - P0/P1 问题为 0。
 - README、PRD、架构、分发说明和功能清单没有过期承诺。
 - `THIRD_PARTY_NOTICES.md` 和 `SimpleRecorder/ThirdParty/lame/COPYING` 保留。
+- `CFBundleShortVersionString` 和 `CFBundleVersion` 已更新，且 `CFBundleVersion` 大于上一版。
 - Git 工作区没有未提交的相关改动。
-- 没有 `_Conflict.swift`、`.env`、证书、DMG、build、qa-runs 被暂存。
+- 没有 `_Conflict.swift`、`.env`、证书、Sparkle 私钥、DMG、build、qa-runs 被暂存。
 
 检查命令：
 
@@ -16,7 +17,7 @@
 git status --short
 git diff --check
 find SimpleRecorder -name '*Conflict.swift' -print
-git check-ignore -v .env MeetingRecorderPro_*.dmg qa-runs/ build/ || true
+git check-ignore -v .env config/sparkle_ed25519_private.pem MeetingRecorderPro_*.dmg qa-runs/ build/ || true
 ```
 
 ## 本机验证包
@@ -65,6 +66,12 @@ source=Unnotarized Developer ID
 RELEASE=1 ./build_dmg.sh
 ```
 
+正式发布并同步自动更新源：
+
+```bash
+RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh
+```
+
 环境变量：
 
 ```bash
@@ -79,6 +86,8 @@ NOTARY_PROFILE="notarytool-profile"
 - stapler staple 成功。
 - `xcrun stapler validate` 成功。
 - Gatekeeper accepted。
+- GitHub Release 包含 `MeetingRecorderPro_YYYYMMDD.dmg` 和 `appcast.xml` 两个资产。
+- `appcast.xml` 的 `sparkle:version` 与当前 `CFBundleVersion` 一致，且 `enclosure url` 指向同一 tag 的 DMG。
 
 额外检查：
 
@@ -112,7 +121,7 @@ Release Notes 至少包含：
 - 架构：Apple Silicon (`arm64`)。
 - 核心功能：麦克风、系统声音、混合录音、定时录音、M4A/MP3。
 - 权限说明：麦克风、屏幕与系统音频录制。
-- 本地隐私说明：不联网、不上传、不收集数据。
+- 隐私说明：仅访问 GitHub Releases 检查更新，不上传录音或遥测。
 - 第三方组件说明：PermissionFlow、LAME。
 - SHA256。
 
@@ -123,6 +132,7 @@ Release Notes 至少包含：
 ```bash
 spctl --assess --type open --context context:primary-signature --verbose=4 MeetingRecorderPro_YYYYMMDD.dmg
 hdiutil verify MeetingRecorderPro_YYYYMMDD.dmg
+curl -I https://github.com/bi-boo/meeting-recorder-pro/releases/latest/download/appcast.xml
 ```
 
 打开 DMG，将 `会议录音 Pro.app` 拖入 Applications，启动后完成一次短录音。发布后如果用户反馈丢录音、打不开、权限异常、MP3 转码失败，按 P0/P1 处理并暂停继续分发。

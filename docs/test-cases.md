@@ -102,6 +102,7 @@ scripts/run_audible_audio_modes_qa.sh
 | M8 | 保存目录 | 改到测试目录并重启 | 新录音落在测试目录 |
 | M9 | 开机自动启动 | 切换开关并查看系统登录项 | UI 与系统状态一致，测试后恢复 |
 | M10 | 权限引导 | 重置麦克风或屏幕录制权限后操作 | 给出系统设置引导，不生成空文件 |
+| M11 | 更新菜单 | 非录音状态打开菜单，再开始录音后打开菜单 | 非录音状态显示“检查更新...”或“有新版本 x.y.z...”；录音中更新项禁用 |
 
 ## 长录音用例
 
@@ -134,3 +135,4 @@ scripts/run_audible_audio_modes_qa.sh
 - macOS 版本。
 - 失败项和未执行项说明。
 - 如果是正式发布，保留 notarization、stapler、Gatekeeper 结果。
+- 如果是正式发布，保留 GitHub Release 中 DMG 与 `appcast.xml` 的下载链接和 appcast 内容摘要。

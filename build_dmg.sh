@@ -168,5 +168,10 @@ else
     echo "Gatekeeper: not accepted（通常是未公证或 ad-hoc 签名）。"
 fi
 
+if [ "${PUBLISH_GITHUB_RELEASE:-0}" = "1" ]; then
+    echo "--- 发布到 GitHub Releases 并更新 Sparkle appcast ---"
+    "${PROJECT_DIR}/scripts/publish_github_release.sh" "${DMG_PATH}"
+fi
+
 echo "--- 打包完成! ---"
 echo "生成文件: ${DMG_PATH}"

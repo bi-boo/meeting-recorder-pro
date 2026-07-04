@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var recordingManager = AudioRecorderManager.shared
     private var hotKeyManager = HotKeyManager.shared
+    private var updateManager = UpdateManager.shared
     private var animationTimer: Timer?
     private var lastToggleTime: Date = .distantPast  // 用于防抖
     private var lastTimeString: String = ""
@@ -52,6 +53,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusItem()
         setupHotKey()
+        updateManager.start { [weak self] in
+            self?.setupMenu()
+        }
 
         // 监听录音状态变化
         NotificationCenter.default.addObserver(
@@ -279,6 +283,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let updateItem = NSMenuItem(
+            title: updateManager.menuTitle,
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        updateItem.isEnabled = updateManager.canSelectMenuItem
+        menu.addItem(updateItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // 退出
@@ -395,6 +408,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
+    }
+
+    @objc private func checkForUpdates() {
+        updateManager.handleMenuSelection()
     }
 
     @objc private func handleHotKeyChanged() {

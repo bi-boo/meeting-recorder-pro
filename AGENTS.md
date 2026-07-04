@@ -23,6 +23,7 @@
 - 功能清单：[docs/feature-list.md](docs/feature-list.md)
 - 测试用例与流程：[docs/test-cases.md](docs/test-cases.md)
 - 发布检查清单：[docs/release-checklist.md](docs/release-checklist.md)
+- 自动更新说明：[docs/auto-update.md](docs/auto-update.md)
 - 回归测试细则：[docs/qa-regression.md](docs/qa-regression.md)
 - 独立分发说明：[docs/distribution.md](docs/distribution.md)
 - 产品需求：[docs/prd.md](docs/prd.md)
@@ -37,6 +38,7 @@
 - `xcodebuild test` 通过。
 - `./build_dmg.sh` 通过，DMG 能被 `hdiutil verify` 校验。
 - 正式公开分发时，`RELEASE=1 ./build_dmg.sh` 必须通过 notarization、stapler validation 和 Gatekeeper。
+- 版本迭代正式发布时，`PUBLISH_GITHUB_RELEASE=1` 必须同步上传 DMG 和 `appcast.xml` 到 GitHub Releases。
 - 人工冒烟测试没有阻断项；无法自动化的项目必须记录未执行原因。
 - 文档中的功能承诺和实际代码一致。
 
@@ -107,8 +109,19 @@ RELEASE=1 ./build_dmg.sh
 - 录音、停止、转码、退出、权限和打包属于高风险路径，改动后必须跑完整 QA。
 - 不新增不必要的依赖。
 - 不把构建产物、DMG、QA 目录、日志、`.env`、证书或同步冲突文件提交进 Git。
+- 不把 Sparkle 更新私钥提交进 Git；私钥默认保存在已忽略的 `config/sparkle_ed25519_private.pem`。
 - `SimpleRecorder/ThirdParty/lame/` 是 MP3 输出能力的一部分，改动时同步检查许可证和分发文档。
 - 文档更新必须和代码能力一致；不能在 README、PRD、架构或分发说明里保留旧承诺。
+
+## 自动更新与发布规则
+
+- 自动更新使用 Sparkle 2，更新源固定为 GitHub Releases 的 `appcast.xml`，不维护额外服务器。
+- `CFBundleVersion` 是 Sparkle 判断新旧版本的依据，每次发布必须递增。
+- 菜单栏默认显示“检查更新...”；后台发现更新后显示“有新版本 x.y.z...”。
+- 录音中禁止检查更新，菜单项必须禁用，避免更新流程影响录音。
+- 后台每日检查只更新菜单状态，不主动弹出更新窗口。
+- 用户点击可用更新后，不展示更新窗口和版本说明，直接进入 Sparkle 的下载、验签、重启安装流程；系统权限授权提示除外。
+- 每次正式版本迭代必须执行 `RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh`，确保 GitHub Release 同时包含 DMG 和 `appcast.xml`。
 
 ## Git 规则
 

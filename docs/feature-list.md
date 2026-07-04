@@ -71,3 +71,4 @@
 | LAME 许可 | 必须可用 | 保留 `SimpleRecorder/ThirdParty/lame/COPYING`，DMG 根目录包含 `LAME-COPYING.txt` |
 | 本机 DMG | 必须可用 | `./build_dmg.sh` 通过 |
 | 正式 DMG | 发布前必须可用 | `RELEASE=1 ./build_dmg.sh` 通过 |
+| 自动更新 | 必须可用 | Sparkle 每天检查 GitHub Releases appcast；录音中禁用检查；发布时同步上传 DMG 和 `appcast.xml` |
