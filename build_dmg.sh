@@ -120,6 +120,25 @@ if [ "${SIGNING_IS_ADHOC}" = false ]; then
     codesign_args+=(--timestamp)
 fi
 
+sign_component_args=(--force --strict --options runtime --preserve-metadata=identifier,entitlements --sign "${SIGNING_IDENTITY}")
+if [ "${SIGNING_IS_ADHOC}" = false ]; then
+    sign_component_args+=(--timestamp)
+fi
+
+SPARKLE_FRAMEWORK_PATH="${RELEASE_APP_PATH}/Contents/Frameworks/Sparkle.framework"
+if [ -d "${SPARKLE_FRAMEWORK_PATH}" ]; then
+    for component in \
+        "${SPARKLE_FRAMEWORK_PATH}/Versions/Current/XPCServices/Downloader.xpc" \
+        "${SPARKLE_FRAMEWORK_PATH}/Versions/Current/XPCServices/Installer.xpc" \
+        "${SPARKLE_FRAMEWORK_PATH}/Versions/Current/Updater.app" \
+        "${SPARKLE_FRAMEWORK_PATH}/Versions/Current/Autoupdate" \
+        "${SPARKLE_FRAMEWORK_PATH}"; do
+        if [ -e "${component}" ]; then
+            codesign "${sign_component_args[@]}" "${component}"
+        fi
+    done
+fi
+
 codesign "${codesign_args[@]}" "${RELEASE_APP_PATH}"
 
 xattr -cr "${RELEASE_APP_PATH}"
@@ -151,8 +170,8 @@ if [ -n "${NOTARY_PROFILE:-}" ] && [ "${SIGNING_IS_ADHOC}" = false ]; then
 fi
 
 echo "--- 校验产物 ---"
-codesign --verify --strict --verbose=2 "${RELEASE_APP_PATH}"
-codesign --verify --strict --verbose=2 "${STAGED_APP_PATH}"
+codesign --verify --deep --strict --verbose=2 "${RELEASE_APP_PATH}"
+codesign --verify --deep --strict --verbose=2 "${STAGED_APP_PATH}"
 codesign --verify --verbose=2 "${DMG_PATH}"
 hdiutil verify "${DMG_PATH}"
 if [ "${RELEASE_BUILD}" = true ]; then
