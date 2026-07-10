@@ -10,12 +10,12 @@ if [[ ! -x "$APP_BIN" ]]; then
   exit 1
 fi
 
-if nm -j "$APP_BIN" | xcrun swift-demangle | rg 'QAAutomationRunner' >/dev/null; then
+if nm -j "$APP_BIN" | xcrun swift-demangle | grep -F 'QAAutomationRunner' >/dev/null; then
   echo "Public Release contains QAAutomationRunner symbols." >&2
   exit 1
 fi
 
-if strings -a "$APP_BIN" | rg -- '--qa-scenario' >/dev/null; then
+if strings -a "$APP_BIN" | grep -F -- '--qa-scenario' >/dev/null; then
   echo "Public Release contains the --qa-scenario command-line entry." >&2
   exit 1
 fi

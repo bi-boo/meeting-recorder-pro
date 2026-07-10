@@ -28,7 +28,7 @@ if [[ ! -x "$APP_BIN" ]]; then
   exit 1
 fi
 
-if ! nm -j "$APP_BIN" | xcrun swift-demangle | rg 'QAAutomationRunner' >/dev/null; then
+if ! nm -j "$APP_BIN" | xcrun swift-demangle | grep -F 'QAAutomationRunner' >/dev/null; then
   echo "QA build does not contain QAAutomationRunner; check QA_AUTOMATION configuration." >&2
   exit 1
 fi
