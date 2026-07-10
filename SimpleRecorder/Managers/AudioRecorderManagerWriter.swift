@@ -16,85 +16,245 @@ import AudioToolbox
 import CoreMedia
 import Foundation
 
+enum RecordingValidationError: LocalizedError {
+    case missingOrEmptyFile
+    case notPlayable
+    case missingAudioTrack
+    case invalidDuration
+
+    var errorDescription: String? {
+        switch self {
+        case .missingOrEmptyFile:
+            return "录音文件不存在或内容为空"
+        case .notPlayable:
+            return "录音文件无法播放"
+        case .missingAudioTrack:
+            return "录音文件不包含有效音轨"
+        case .invalidDuration:
+            return "录音文件时长无效"
+        }
+    }
+}
+
+/// AVFoundation 写入对象只在 `writingQueue` 串行访问。该载荷把非 Sendable 的
+/// AVFoundation 引用封装在明确的队列边界内，避免把它们误传给其他并发执行器。
+private final class QueuedAudioBufferWrite: @unchecked Sendable {
+    weak var manager: AudioRecorderManager?
+    let buffer: AVAudioPCMBuffer
+    let pts: CMTime
+    let writer: AVAssetWriter
+    let input: AVAssetWriterInput
+
+    init(
+        manager: AudioRecorderManager,
+        buffer: AVAudioPCMBuffer,
+        pts: CMTime,
+        writer: AVAssetWriter,
+        input: AVAssetWriterInput
+    ) {
+        self.manager = manager
+        self.buffer = buffer
+        self.pts = pts
+        self.writer = writer
+        self.input = input
+    }
+}
+
 extension AudioRecorderManager {
 
     // MARK: - 核心写入逻辑（带 PTS 时间戳）
     func processAudioBufferWithPTS(_ buffer: AVAudioPCMBuffer, pts: CMTime) {
-        guard canAcceptAudioBuffers() else {
-            incrementDroppedFrameCount()
-            return
-        }
+        // acceptance lock 不只保护布尔值，还负责确定 enqueue 与 stop 的先后顺序：
+        // - buffer 先拿到锁：必须在锁内排进 writingQueue，stop 随后才能排 finishWriting；
+        // - stop 先拿到锁：关闭门禁后，后续 buffer 直接拒绝。
+        // 这样不会出现“已通过门禁但尚未入队”的尾帧被 finishWriting 超车。
+        let didEnqueue = audioBufferAcceptanceLock.withLock { accepting -> Bool in
+            guard accepting else { return false }
 
-        // 1. 实现 Buffer 池化复用
-        let bufferCopy: AVAudioPCMBuffer
-        bufferPoolLock.lock()
-        var pooledBuffer = audioBufferPool.popLast()
+            let bufferCopy: AVAudioPCMBuffer
+            bufferPoolLock.lock()
+            var pooledBuffer = audioBufferPool.popLast()
 
-        // 如果格式不匹配或容量不足，直接丢弃池中过期的 buffer
-        if let pb = pooledBuffer,
-            !pb.format.isEqual(buffer.format) || pb.frameCapacity < buffer.frameLength
-        {
-            pooledBuffer = nil
-        }
+            // 如果格式不匹配或容量不足，直接丢弃池中过期的 buffer
+            if let candidate = pooledBuffer,
+                !candidate.format.isEqual(buffer.format)
+                    || candidate.frameCapacity < buffer.frameLength
+            {
+                pooledBuffer = nil
+            }
 
-        if let pb = pooledBuffer {
-            // 池中有合法的 Buffer，复用之
-            let channels = min(Int(buffer.format.channelCount), Int(pb.format.channelCount))
-            if let src = buffer.floatChannelData, let dstChannels = pb.floatChannelData {
-                for i in 0..<channels {
-                    let framesToCopy = min(buffer.frameLength, pb.frameCapacity)
-                    memcpy(dstChannels[i], src[i], Int(framesToCopy) * MemoryLayout<Float>.size)
+            if let pooledBuffer {
+                let channels = min(
+                    Int(buffer.format.channelCount),
+                    Int(pooledBuffer.format.channelCount)
+                )
+                if let sourceChannels = buffer.floatChannelData,
+                    let destinationChannels = pooledBuffer.floatChannelData
+                {
+                    for channel in 0..<channels {
+                        let framesToCopy = min(buffer.frameLength, pooledBuffer.frameCapacity)
+                        memcpy(
+                            destinationChannels[channel],
+                            sourceChannels[channel],
+                            Int(framesToCopy) * MemoryLayout<Float>.size
+                        )
+                    }
                 }
-            }
-            pb.frameLength = buffer.frameLength
-            bufferCopy = pb
-        } else {
-            // 池空或不匹配，深拷贝
-            bufferCopy = buffer.deepCopy() ?? buffer
-        }
-        bufferPoolLock.unlock()
-
-        writingQueue.async { [weak self] in
-            guard let self = self, let currentWriter = self.assetWriter,
-                let currentInput = self.assetWriterInput, self.isRecording,
-                self.canAcceptAudioBuffers()
-            else {
-                self?.returnBufferToPool(bufferCopy)
-                return
+                pooledBuffer.frameLength = buffer.frameLength
+                bufferCopy = pooledBuffer
+                bufferPoolLock.unlock()
+            } else {
+                bufferPoolLock.unlock()
+                guard let copiedBuffer = buffer.deepCopy() else { return false }
+                bufferCopy = copiedBuffer
             }
 
-            defer {
-                self.returnBufferToPool(bufferCopy)
+            guard let enqueuedWriter = assetWriter, let enqueuedInput = assetWriterInput else {
+                returnBufferToPool(bufferCopy)
+                return false
             }
 
-            // 【重磅加固】：确保在首次写入前启动 Session
-            if !self.isWriterStarted {
-                currentWriter.startSession(atSourceTime: .zero)
-                self.isWriterStarted = true
-            }
+            let payload = QueuedAudioBufferWrite(
+                manager: self,
+                buffer: bufferCopy,
+                pts: pts,
+                writer: enqueuedWriter,
+                input: enqueuedInput
+            )
+            writingQueue.async {
+                guard let self = payload.manager else { return }
 
-            if currentInput.isReadyForMoreMediaData {
-                if let sampleBuffer = self.createSampleBuffer(from: bufferCopy, pts: pts) {
-                    if !currentInput.append(sampleBuffer) {
+                defer {
+                    self.returnBufferToPool(payload.buffer)
+                }
+
+                if !self.isWriterStarted {
+                    payload.writer.startSession(atSourceTime: .zero)
+                    self.isWriterStarted = true
+                }
+
+                guard payload.writer.status == .writing else {
+                    self.incrementDroppedFrameCount()
+                    return
+                }
+
+                if payload.input.isReadyForMoreMediaData {
+                    if let sampleBuffer = self.createSampleBuffer(
+                        from: payload.buffer,
+                        pts: payload.pts
+                    ), !payload.input.append(sampleBuffer)
+                    {
                         LogManager.shared.error("追加采样数据失败")
                     }
-                }
-            } else {
-                // 写入繁忙：短暂等待后重试一次，而不是直接丢弃
-                usleep(2000)  // 2ms，远小于 43ms 的 buffer 间隔
-                if currentInput.isReadyForMoreMediaData {
-                    if let sampleBuffer = self.createSampleBuffer(from: bufferCopy, pts: pts) {
-                        if !currentInput.append(sampleBuffer) {
+                } else {
+                    usleep(2000)
+                    if payload.input.isReadyForMoreMediaData {
+                        if let sampleBuffer = self.createSampleBuffer(
+                            from: payload.buffer,
+                            pts: payload.pts
+                        ), !payload.input.append(sampleBuffer)
+                        {
                             LogManager.shared.error("追加采样数据失败（重试后）")
                         }
+                    } else {
+                        let droppedFrames = self.incrementDroppedFrameCount()
+                        LogManager.shared.warning(
+                            "写入队列繁忙，丢弃采样 | 累计丢帧: \(droppedFrames)"
+                        )
                     }
-                } else {
-                    // 重试后仍写不进去，记录并丢弃
-                    let droppedFrames = self.incrementDroppedFrameCount()
-                    LogManager.shared.warning("写入队列繁忙，丢弃采样 | 累计丢帧: \(droppedFrames)")
                 }
             }
+            return true
         }
+
+        if !didEnqueue {
+            incrementDroppedFrameCount()
+        }
+    }
+
+    // MARK: - 写入完成验证与统一清理
+
+    /// AVAssetWriter 的 `.completed` 只代表容器完成写入；清除崩溃恢复标记前，
+    /// 还要确认文件存在、可播放、含音轨且时长有效。
+    func validateFinalizedRecording(
+        at url: URL,
+        completion: @escaping (Result<TimeInterval, Error>) -> Void
+    ) {
+        Task { @MainActor in
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                guard let size = attributes[.size] as? NSNumber, size.int64Value > 0 else {
+                    throw RecordingValidationError.missingOrEmptyFile
+                }
+
+                let asset = AVURLAsset(url: url)
+                async let playable = asset.load(.isPlayable)
+                async let duration = asset.load(.duration)
+                let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+
+                guard try await playable else {
+                    throw RecordingValidationError.notPlayable
+                }
+                guard !audioTracks.isEmpty else {
+                    throw RecordingValidationError.missingAudioTrack
+                }
+
+                let seconds = CMTimeGetSeconds(try await duration)
+                guard seconds.isFinite, seconds > 0 else {
+                    throw RecordingValidationError.invalidDuration
+                }
+
+                completion(.success(seconds))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+    }
+
+    func completeSuccessfulWriterCleanup(
+        writer: AVAssetWriter,
+        input: AVAssetWriterInput?
+    ) {
+        if assetWriter === writer { assetWriter = nil }
+        if assetWriterInput === input { assetWriterInput = nil }
+        isWriterStarted = false
+        currentRecordingURL = nil
+        recordingDeviceID = nil
+        recordingDeviceName = nil
+        recordingInputSampleRate = nil
+        recordingInputChannelCount = nil
+        audioStallBeganAt = nil
+        activeInputDeviceID = nil
+        activeInputDeviceName = nil
+        expectedDefaultInputDeviceID = nil
+        startupConfigurationChanged = false
+        startupCaptureRetryCount = 0
+        isHandlingInterruption = false
+        engineConfigurationEvaluationWorkItem?.cancel()
+        engineConfigurationEvaluationWorkItem = nil
+        engineConfigurationEvaluationGeneration += 1
+        engineConfigurationRecoveryAttempts = 0
+        releaseSleepPrevention()
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+    }
+
+    func completeFailedWriterFinalization(
+        writer: AVAssetWriter,
+        input: AVAssetWriterInput?,
+        message: String
+    ) {
+        if let path = currentRecordingURL?.path
+            ?? UserDefaults.standard.string(forKey: recordingFilePathKey)
+        {
+            archiveFailedRecordingRecovery(path: path)
+        }
+        clearRecordingState()
+        recordingState = .idle
+        LogManager.shared.error("录音文件固化验证失败 | 错误: \(message)")
+        LogManager.shared.endRecordingSession()
+        completeSuccessfulWriterCleanup(writer: writer, input: input)
+        showRecordingSaveFailedAlert(
+            message: "录音文件未能确认完整，独立恢复记录和现有文件已保留。\n\n原因：\(message)")
     }
 
     // 将使用完的 Buffer 归还给池以便重用

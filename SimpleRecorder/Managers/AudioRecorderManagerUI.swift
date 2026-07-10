@@ -140,6 +140,29 @@ extension AudioRecorderManager {
         }
     }
 
+    func showRecordingSaveFailedAlert(message: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "录音文件保存失败"
+            alert.informativeText = message
+            alert.alertStyle = .critical
+            alert.addButton(withTitle: "知道了")
+            alert.runModal()
+        }
+    }
+
+    func showMP3ConversionFailedAlert(m4aURL: URL) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "MP3 转换失败"
+            alert.informativeText =
+                "录音没有丢失，已保留为可播放的 M4A 文件：\n\(m4aURL.lastPathComponent)"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "知道了")
+            alert.runModal()
+        }
+    }
+
     func showAudioEngineResumeFailedAlert() {
         DispatchQueue.main.async {
             let alert = NSAlert()

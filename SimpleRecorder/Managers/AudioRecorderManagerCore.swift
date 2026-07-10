@@ -79,11 +79,15 @@ class AudioRecorderManager: NSObject, ObservableObject {
     @Published var currentRecordingURL: URL?
     @Published var recordingDuration: TimeInterval = 0
     @Published var isFinalizingOutput = false
+    @Published private(set) var isRecoveringInterruptedRecording =
+        UserDefaults.standard.bool(forKey: "recording_in_progress")
 
     /// 对外兼容属性，外部代码（AppDelegate、Views）无需改动
     var isRecording: Bool { recordingState == .recording || recordingState == .paused || recordingState == .stopping }
     var isStarting: Bool { recordingState == .starting }
-    var isRecordingOrStarting: Bool { isStarting || isRecording }
+    var isRecordingOrStarting: Bool {
+        isStarting || isRecording || isRecoveringInterruptedRecording
+    }
     var isPaused: Bool { recordingState == .paused }
 
     // Core Audio & Asset Writer
@@ -102,10 +106,19 @@ class AudioRecorderManager: NSObject, ObservableObject {
     // 状态管理
     var isWriterStarted = false
     private var outputFinalizationCompletions: [() -> Void] = []
+    private var outputFinalizationCount = 0
     // 使用 OSAllocatedUnfairLock 保护 totalFramesWritten（realtime 音频线程与主线程共同访问）
     let framesCounter = OSAllocatedUnfairLock<Int64>(initialState: 0)
     let audioBufferAcceptanceLock = OSAllocatedUnfairLock<Bool>(initialState: false)
     var isAutoStoppedByLimit = false  // 标记是否因为达到时长上限而停止
+
+    // 录音启动稳定性：蓝牙输入设备常在 AVAudioEngine 首次启动后切换采样率。
+    // 在有限的稳定窗口内只允许重建一次采集链路，避免无限重试。
+    var recordingStartupGeneration = 0
+    var startupConfigurationChanged = false
+    var startupCaptureRetryCount = 0
+    let startupStabilizationDelay: TimeInterval = 0.6
+    let maximumStartupCaptureRetries = 1
 
     // 当前录音使用的音频源（录音开始时锁定）
     var currentAudioSource: AudioSource = .microphone
@@ -175,12 +188,19 @@ class AudioRecorderManager: NSObject, ObservableObject {
     let recordingInProgressKey = "recording_in_progress"
     let recordingFilePathKey = "recording_file_path"
     let recordingStartTimeKey = "recording_start_time"
+    let failedRecordingRecoveryPathsKey = "failed_recording_recovery_paths"
 
     // 录音中断检测相关
     var recordingDeviceID: String?  // 录音开始时使用的设备 ID
     var recordingDeviceName: String?  // 录音开始时使用的设备名称
     var activeInputDeviceID: String?
     var activeInputDeviceName: String?
+    var recordingInputSampleRate: Double?
+    var recordingInputChannelCount: AVAudioChannelCount?
+    var expectedDefaultInputDeviceID: String?
+    var engineConfigurationEvaluationWorkItem: DispatchWorkItem?
+    var engineConfigurationEvaluationGeneration = 0
+    var engineConfigurationRecoveryAttempts = 0
     var lastDiskCheckTime: TimeInterval = 0  // 上次磁盘空间检查时间
     let diskCheckInterval: TimeInterval = 30  // 磁盘空间检查间隔（秒）
     var lastStatsLogTime: TimeInterval = 0  // 上次统计日志时间
@@ -230,23 +250,92 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // MARK: - 中断状态重置
 
-    /// 应用启动时调用，检查上次是否因意外中断（如崩溃），并清理状态标记
-    func resetStatusAfterInterruption() {
+    /// 应用启动时调用，检查上次是否因意外中断（如崩溃）。
+    /// 只有媒体文件通过完整性验证后才清除恢复标记；损坏文件保留给后续人工恢复。
+    func resetStatusAfterInterruption(completion: (() -> Void)? = nil) {
         let wasInterrupted = UserDefaults.standard.bool(forKey: recordingInProgressKey)
         let filePath = UserDefaults.standard.string(forKey: recordingFilePathKey)
+        let savedStartTime = UserDefaults.standard.double(forKey: recordingStartTimeKey)
+        isRecoveringInterruptedRecording = wasInterrupted
 
-        if wasInterrupted {
-            if let path = filePath, FileManager.default.fileExists(atPath: path) {
-                LogManager.shared.warning("检测到上次录音非正常结束，文件已自动固化保存 | 路径: \(path)")
-            } else {
-                LogManager.shared.info("检测到上次录音曾被标记开始，但未找到对应的物理文件")
-            }
-            // 发送通知，允许 UI 刷新录音列表
-            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+        guard wasInterrupted else {
+            clearRecordingState()
+            isRecoveringInterruptedRecording = false
+            cleanupLegacyTempDirectories()
+            completion?()
+            return
         }
 
-        // 核心动作：无论是否发现中断，都重置标记
-        clearRecordingState()
+        guard let path = filePath, FileManager.default.fileExists(atPath: path) else {
+            LogManager.shared.error("检测到未完成录音标记，但对应文件不存在")
+            clearRecordingState()
+            isRecoveringInterruptedRecording = false
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+            cleanupLegacyTempDirectories()
+            completion?()
+            return
+        }
+
+        let interruptedURL = URL(fileURLWithPath: path)
+        validateFinalizedRecording(at: interruptedURL) { [weak self] result in
+            guard let self = self else { return }
+            guard self.isRecoveringInterruptedRecording,
+                RecordingFinalizationPolicy.canApplyInterruptedRecovery(
+                    expectedPath: path,
+                    recordingStateIsIdle: self.recordingState == .idle,
+                    markerIsActive: UserDefaults.standard.bool(
+                        forKey: self.recordingInProgressKey
+                    ),
+                    currentMarkerPath: UserDefaults.standard.string(
+                        forKey: self.recordingFilePathKey
+                    )
+                )
+            else {
+                LogManager.shared.warning("旧录音恢复回调已失效，未修改当前录音状态 | 路径: \(path)")
+                return
+            }
+
+            switch result {
+            case .success(let duration):
+                if savedStartTime > 0 {
+                    self.actualStartTime = Date(timeIntervalSince1970: savedStartTime)
+                }
+                self.recordingDuration = duration
+                let finalURL = self.renameToFinalFormat(url: interruptedURL)
+                guard FileManager.default.fileExists(atPath: finalURL.path) else {
+                    self.archiveFailedRecordingRecovery(path: path)
+                    self.clearRecordingState()
+                    self.actualStartTime = nil
+                    self.recordingDuration = 0
+                    self.isRecoveringInterruptedRecording = false
+                    LogManager.shared.error("恢复录音通过验证，但重命名后文件不存在 | 原路径: \(path)")
+                    self.showRecordingSaveFailedAlert(
+                        message: "上次录音通过媒体验证，但整理文件名失败。独立恢复记录已保留：\n\(path)"
+                    )
+                    NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+                    completion?()
+                    return
+                }
+                self.clearRecordingState()
+                LogManager.shared.warning(
+                    "检测到上次录音非正常结束，已验证并恢复 | 路径: \(finalURL.path)"
+                )
+            case .failure(let error):
+                self.archiveFailedRecordingRecovery(path: path)
+                self.clearRecordingState()
+                LogManager.shared.error(
+                    "检测到上次录音文件损坏，已转入独立恢复记录 | 路径: \(path) | 错误: \(error.localizedDescription)"
+                )
+                self.showRecordingSaveFailedAlert(
+                    message: "上次异常中断的录音未通过完整性验证。恢复记录和原文件已保留，请不要删除：\n\(path)\n\n原因：\(error.localizedDescription)"
+                )
+            }
+            self.actualStartTime = nil
+            self.recordingDuration = 0
+            self.isRecoveringInterruptedRecording = false
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+            completion?()
+        }
 
         // 清理旧版本（分段方案）遗留的临时目录
         cleanupLegacyTempDirectories()
@@ -274,6 +363,15 @@ class AudioRecorderManager: NSObject, ObservableObject {
         UserDefaults.standard.removeObject(forKey: recordingFilePathKey)
         UserDefaults.standard.removeObject(forKey: recordingStartTimeKey)
         UserDefaults.standard.synchronize()
+    }
+
+    func archiveFailedRecordingRecovery(path: String) {
+        var paths = UserDefaults.standard.stringArray(forKey: failedRecordingRecoveryPathsKey) ?? []
+        if !paths.contains(path) {
+            paths.append(path)
+            UserDefaults.standard.set(paths, forKey: failedRecordingRecoveryPathsKey)
+            UserDefaults.standard.synchronize()
+        }
     }
 
     func resetFrameDropStats() {
@@ -312,16 +410,21 @@ class AudioRecorderManager: NSObject, ObservableObject {
         audioBufferAcceptanceLock.withLock { $0 = accepting }
     }
 
-    func canAcceptAudioBuffers() -> Bool {
-        audioBufferAcceptanceLock.withLock { $0 }
-    }
-
     func beginOutputFinalization() {
-        guard !isFinalizingOutput else { return }
-        isFinalizingOutput = true
+        outputFinalizationCount += 1
+        if outputFinalizationCount == 1 {
+            isFinalizingOutput = true
+        }
     }
 
     func endOutputFinalization() {
+        guard outputFinalizationCount > 0 else {
+            LogManager.shared.warning("忽略不匹配的输出转码完成回调")
+            return
+        }
+        outputFinalizationCount -= 1
+        guard outputFinalizationCount == 0 else { return }
+
         let completions = outputFinalizationCompletions
         outputFinalizationCompletions.removeAll()
         isFinalizingOutput = false
@@ -340,6 +443,17 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     @discardableResult
     func startRecording() -> Bool {
+        guard !UpdateManager.shared.blocksRecordingStart else {
+            LogManager.shared.warning("更新已进入安装阶段，拒绝启动录音以避免安装过程损坏录音文件")
+            NSSound.beep()
+            return false
+        }
+        guard !isRecoveringInterruptedRecording else {
+            LogManager.shared.warning("正在验证上次异常中断的录音，暂不接受新的录音请求")
+            NSSound.beep()
+            return false
+        }
+
         // 防止在非空闲状态下重复启动
         guard recordingState == .idle else {
             LogManager.shared.warning("忽略启动请求 | 当前状态: \(recordingState)")
@@ -350,7 +464,17 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 提前进入 starting 状态，防止并发调用
         recordingState = .starting
         recordingDuration = 0
+        currentAudioSource = effectiveAudioSource(for: AppSettings.shared.audioSource)
+        recordingStartupGeneration += 1
+        startupConfigurationChanged = false
+        startupCaptureRetryCount = 0
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+
+        // 仅系统声音不读取麦克风，不能被麦克风 TCC 状态阻断。
+        guard Self.requiresMicrophonePermission(for: currentAudioSource) else {
+            LogManager.shared.info("仅系统声音模式不需要麦克风权限，继续启动")
+            return beginRecording()
+        }
 
         // 检查权限
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -361,13 +485,22 @@ class AudioRecorderManager: NSObject, ObservableObject {
             return beginRecording()
         case .notDetermined:
             LogManager.shared.info("权限状态未确定，正在请求访问...")
+            let startupGeneration = recordingStartupGeneration
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 LogManager.shared.info("权限请求结果: \(granted ? "用户已授权" : "用户已拒绝")")
-                if granted {
-                    DispatchQueue.main.async { self?.beginRecording() }
-                } else {
-                    DispatchQueue.main.async {
-                        self?.recordingState = .idle
+                DispatchQueue.main.async {
+                    guard let self = self,
+                        self.recordingState == .starting,
+                        self.recordingStartupGeneration == startupGeneration
+                    else {
+                        LogManager.shared.info("忽略已失效的麦克风权限回调")
+                        return
+                    }
+
+                    if granted {
+                        _ = self.beginRecording()
+                    } else {
+                        self.recordingState = .idle
                         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
                     }
                 }
@@ -387,6 +520,20 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
     }
 
+    static func requiresMicrophonePermission(for source: AudioSource) -> Bool {
+        RecordingPermissionPolicy.requiresMicrophonePermission(
+            isSystemAudioOnly: source == .systemAudio
+        )
+    }
+
+    func effectiveAudioSource(for requestedSource: AudioSource) -> AudioSource {
+        guard AppSettings.isSystemAudioSupported || requestedSource == .microphone else {
+            LogManager.shared.warning("系统版本不支持系统音频采集，已降级为麦克风模式")
+            return .microphone
+        }
+        return requestedSource
+    }
+
     // MARK: - 公开 API：停止录音
 
     func stopRecording() {
@@ -396,6 +543,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
         recordingState = .stopping
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+        // 只阻止新的音频回调入队；已经进入 writingQueue 的 buffer 必须继续排空。
         setAcceptingAudioBuffers(false)
 
         let finalDuration = recordingDuration
@@ -418,6 +566,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
             guard let self = self else { return }
             guard let currentWriter = currentWriter else {
                 DispatchQueue.main.async {
+                    if let path = self.currentRecordingURL?.path
+                        ?? UserDefaults.standard.string(forKey: self.recordingFilePathKey)
+                    {
+                        self.archiveFailedRecordingRecovery(path: path)
+                    }
+                    self.clearRecordingState()
                     self.recordingState = .idle
                     self.isWriterStarted = false
                     self.isHandlingInterruption = false
@@ -426,9 +580,19 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     self.currentRecordingURL = nil
                     self.recordingDeviceID = nil
                     self.recordingDeviceName = nil
-                    self.clearRecordingState()
+                    self.recordingInputSampleRate = nil
+                    self.recordingInputChannelCount = nil
+                    self.activeInputDeviceID = nil
+                    self.activeInputDeviceName = nil
+                    self.expectedDefaultInputDeviceID = nil
+                    self.engineConfigurationEvaluationWorkItem?.cancel()
+                    self.engineConfigurationEvaluationWorkItem = nil
+                    self.engineConfigurationEvaluationGeneration += 1
+                    self.engineConfigurationRecoveryAttempts = 0
                     self.releaseSleepPrevention()
                     LogManager.shared.endRecordingSession()
+                    self.showRecordingSaveFailedAlert(
+                        message: "录音写入器意外丢失，已保留独立恢复记录和现有文件，请勿删除文件名带 ing 的录音。")
                     NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
                 }
                 return
@@ -441,69 +605,90 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 guard let self = self else { return }
 
                 DispatchQueue.main.async {
-                    self.recordingState = .idle
-                    self.clearRecordingState()
-
-                    // 结束录音会话
-                    LogManager.shared.endRecordingSession()
-
-                    if currentWriter.status == .completed, let url = outputURL {
-                        let finalURL = self.renameToFinalFormat(url: url)
-                        let fileSize =
-                            (try? FileManager.default.attributesOfItem(atPath: finalURL.path)[.size]
-                                as? Int64) ?? 0
-                        let fileSizeMB = Double(fileSize) / (1024 * 1024)
-                        LogManager.shared.info(
-                            "录音已保存 | 时长: \(String(format: "%.1f", finalDuration))s, 文件大小: \(String(format: "%.2f", fileSizeMB))MB, 路径: \(finalURL.path)"
+                    guard currentWriter.status == .completed, let url = outputURL else {
+                        let message = currentWriter.error?.localizedDescription
+                            ?? "写入器未正常完成（状态码：\(currentWriter.status.rawValue)）"
+                        self.completeFailedWriterFinalization(
+                            writer: currentWriter,
+                            input: currentInput,
+                            message: message
                         )
+                        return
+                    }
+
+                    self.validateFinalizedRecording(at: url) { result in
+                        switch result {
+                        case .success:
+                            let finalURL = self.renameToFinalFormat(url: url)
+                            guard RecordingFinalizationPolicy.shouldClearRecoveryState(
+                                writerCompleted: currentWriter.status == .completed,
+                                mediaValidationSucceeded: true,
+                                finalFileExists: FileManager.default.fileExists(atPath: finalURL.path)
+                            ) else {
+                                self.completeFailedWriterFinalization(
+                                    writer: currentWriter,
+                                    input: currentInput,
+                                    message: "验证后的录音在重命名阶段丢失"
+                                )
+                                return
+                            }
+                            self.recordingState = .idle
+                            self.clearRecordingState()
+                            LogManager.shared.endRecordingSession()
+
+                            let fileSize =
+                                ((try? FileManager.default.attributesOfItem(atPath: finalURL.path)[.size])
+                                    as? NSNumber)?.int64Value ?? 0
+                            let fileSizeMB = Double(fileSize) / (1024 * 1024)
+                            LogManager.shared.info(
+                                "录音已保存 | 时长: \(String(format: "%.1f", finalDuration))s, 文件大小: \(String(format: "%.2f", fileSizeMB))MB, 路径: \(finalURL.path)"
+                            )
 
                         // 如果是因为达到上限停止的，给予弹窗提示
-                        if self.isAutoStoppedByLimit {
-                            self.showRecordingLimitReachedAlert(duration: finalDuration)
-                            self.isAutoStoppedByLimit = false
-                        }
+                            if self.isAutoStoppedByLimit {
+                                self.showRecordingLimitReachedAlert(duration: finalDuration)
+                                self.isAutoStoppedByLimit = false
+                            }
 
-                        let shouldOpenFolder = AppSettings.shared.openFolderAfterRecording
+                            let shouldOpenFolder = AppSettings.shared.openFolderAfterRecording
 
                         // 检查是否需要转换为 MP3。转码延迟到当前收尾闭包返回后启动，
                         // 确保 AVAssetWriter 已释放刚写完的 M4A 文件。
-                        if AppSettings.shared.outputFormat == .mp3 && MP3Encoder.isEncodingAvailable {
-                            self.beginOutputFinalization()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                                guard let self = self else { return }
-                                self.convertToMP3(from: finalURL) { mp3URL in
-                                    if shouldOpenFolder {
-                                        if let mp3URL = mp3URL {
-                                            NSWorkspace.shared.activateFileViewerSelecting([mp3URL])
-                                        } else {
-                                            NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+                            if AppSettings.shared.outputFormat == .mp3 && MP3Encoder.isEncodingAvailable {
+                                self.beginOutputFinalization()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                                    guard let self = self else { return }
+                                    self.convertToMP3(from: finalURL) { mp3URL in
+                                        if shouldOpenFolder {
+                                            if let mp3URL = mp3URL {
+                                                NSWorkspace.shared.activateFileViewerSelecting([mp3URL])
+                                            } else {
+                                                NSWorkspace.shared.activateFileViewerSelecting([finalURL])
+                                            }
                                         }
+                                        if mp3URL == nil {
+                                            self.showMP3ConversionFailedAlert(m4aURL: finalURL)
+                                        }
+                                        self.endOutputFinalization()
                                     }
-                                    self.endOutputFinalization()
+                                }
+                            } else {
+                                if shouldOpenFolder {
+                                    NSWorkspace.shared.activateFileViewerSelecting([finalURL])
                                 }
                             }
-                        } else {
-                            if shouldOpenFolder {
-                                NSWorkspace.shared.activateFileViewerSelecting([finalURL])
-                            }
+                            self.completeSuccessfulWriterCleanup(
+                                writer: currentWriter,
+                                input: currentInput
+                            )
+                        case .failure(let error):
+                            self.completeFailedWriterFinalization(
+                                writer: currentWriter,
+                                input: currentInput,
+                                message: error.localizedDescription
+                            )
                         }
-                    } else if let err = currentWriter.error {
-                        LogManager.shared.error("写入结束时出错 | 错误: \(err.localizedDescription)")
-                    } else {
-                        LogManager.shared.warning(
-                            "写入可能未正常完成 | 状态: \(currentWriter.status.rawValue)")
                     }
-
-                    // 3. 后续清理
-                    if self.assetWriter === currentWriter { self.assetWriter = nil }
-                    if self.assetWriterInput === currentInput { self.assetWriterInput = nil }
-                    self.currentRecordingURL = nil
-                    self.audioStallBeganAt = nil
-                    self.activeInputDeviceID = nil
-                    self.activeInputDeviceName = nil
-
-                    self.releaseSleepPrevention()
-                    NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
                 }
             }
         }
@@ -594,6 +779,22 @@ class AudioRecorderManager: NSObject, ObservableObject {
             }
 
             let currentTime = Date().timeIntervalSince1970
+            if currentTime - self.lastDiskCheckTime >= self.diskCheckInterval {
+                self.lastDiskCheckTime = currentTime
+                let activeRecordingDirectory =
+                    self.currentRecordingURL?.deletingLastPathComponent()
+                    ?? AppSettings.shared.recordingsPath
+                if !self.checkDiskSpace(at: activeRecordingDirectory) {
+                    self.handleRecordingInterruption(reason: .diskSpaceFull)
+                    return
+                }
+            }
+
+            if let writer = self.assetWriter, writer.status == .failed {
+                self.handleRecordingInterruption(reason: .writerFailed(writer.error))
+                return
+            }
+
             if self.checkAudioCaptureProgress(currentTime: currentTime) {
                 return
             }
@@ -608,6 +809,38 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     /// 立即保存当前录音（异步，完成后在主线程回调）
     func saveRecordingImmediately(completion: (() -> Void)? = nil) {
+        // 启动稳定窗口内尚未接收音频 buffer，也未写入恢复标记。
+        // 退出应用时应取消这次启动并删除空容器，不能让异步启动回调在退出过程中继续运行。
+        if recordingState == .starting {
+            recordingStartupGeneration += 1
+            setAcceptingAudioBuffers(false)
+            cleanupAudioCapture()
+            assetWriter?.cancelWriting()
+            assetWriter = nil
+            assetWriterInput = nil
+            isWriterStarted = false
+            if let url = currentRecordingURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+            currentRecordingURL = nil
+            recordingDeviceID = nil
+            recordingDeviceName = nil
+            recordingInputSampleRate = nil
+            recordingInputChannelCount = nil
+            activeInputDeviceID = nil
+            activeInputDeviceName = nil
+            expectedDefaultInputDeviceID = nil
+            startupConfigurationChanged = false
+            startupCaptureRetryCount = 0
+            clearRecordingState()
+            releaseSleepPrevention()
+            recordingState = .idle
+            LogManager.shared.info("应用退出时取消尚未完成的录音启动")
+            NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+            completion?()
+            return
+        }
+
         // 若已进入 stopping 状态（finishWriting 正在异步执行），
         // 不重复调用 finishWriting（会导致 crash），而是等待现有流程完成后触发 completion
         if recordingState == .stopping {
@@ -632,6 +865,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         recordingState = .stopping
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+        // 与正常停止一致：只关闭新入队，保留 writingQueue 中已经排队的尾部音频。
         setAcceptingAudioBuffers(false)
 
         recordingTimer?.invalidate()
@@ -648,6 +882,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
             guard let currentWriter = currentWriter else {
                 DispatchQueue.main.async {
                     guard let self = self else { completion?(); return }
+                    if let path = self.currentRecordingURL?.path
+                        ?? UserDefaults.standard.string(forKey: self.recordingFilePathKey)
+                    {
+                        self.archiveFailedRecordingRecovery(path: path)
+                    }
+                    self.clearRecordingState()
                     self.recordingState = .idle
                     self.isWriterStarted = false
                     self.isHandlingInterruption = false
@@ -656,8 +896,19 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     self.currentRecordingURL = nil
                     self.recordingDeviceID = nil
                     self.recordingDeviceName = nil
-                    self.clearRecordingState()
+                    self.recordingInputSampleRate = nil
+                    self.recordingInputChannelCount = nil
+                    self.activeInputDeviceID = nil
+                    self.activeInputDeviceName = nil
+                    self.expectedDefaultInputDeviceID = nil
+                    self.engineConfigurationEvaluationWorkItem?.cancel()
+                    self.engineConfigurationEvaluationWorkItem = nil
+                    self.engineConfigurationEvaluationGeneration += 1
+                    self.engineConfigurationRecoveryAttempts = 0
                     self.releaseSleepPrevention()
+                    LogManager.shared.endRecordingSession()
+                    self.showRecordingSaveFailedAlert(
+                        message: "录音写入器意外丢失，已保留独立恢复记录和现有文件。")
                     NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
                     completion?()
                 }
@@ -669,45 +920,73 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     guard let self = self else { completion?(); return }
 
-                    self.recordingState = .idle
-                    self.isWriterStarted = false
-                    self.isHandlingInterruption = false
-                    self.audioStallBeganAt = nil
-
-                    self.assetWriter = nil
-                    self.assetWriterInput = nil
-                    self.currentRecordingURL = nil
-                    self.recordingDeviceID = nil
-                    self.recordingDeviceName = nil
-                    self.activeInputDeviceID = nil
-                    self.activeInputDeviceName = nil
-
-                    self.clearRecordingState()
-                    self.releaseSleepPrevention()
-
-                    let completeSave: () -> Void = {
-                        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+                    guard currentWriter.status == .completed, let url = outputURL else {
+                        let message = currentWriter.error?.localizedDescription
+                            ?? "写入器未正常完成（状态码：\(currentWriter.status.rawValue)）"
+                        self.completeFailedWriterFinalization(
+                            writer: currentWriter,
+                            input: currentInput,
+                            message: message
+                        )
                         completion?()
+                        return
                     }
 
-                    if let url = outputURL, FileManager.default.fileExists(atPath: url.path) {
-                        let finalURL = self.renameToFinalFormat(url: url)
-                        LogManager.shared.info("录音已紧急保存并重命名 | 文件: \(finalURL.lastPathComponent)")
-
-                        if AppSettings.shared.outputFormat == .mp3 && MP3Encoder.isEncodingAvailable {
-                            self.beginOutputFinalization()
-                            self.convertToMP3(from: finalURL) { _ in
-                                self.endOutputFinalization()
-                                completeSave()
+                    self.validateFinalizedRecording(at: url) { result in
+                        switch result {
+                        case .success:
+                            let finalURL = self.renameToFinalFormat(url: url)
+                            guard RecordingFinalizationPolicy.shouldClearRecoveryState(
+                                writerCompleted: currentWriter.status == .completed,
+                                mediaValidationSucceeded: true,
+                                finalFileExists: FileManager.default.fileExists(atPath: finalURL.path)
+                            ) else {
+                                self.completeFailedWriterFinalization(
+                                    writer: currentWriter,
+                                    input: currentInput,
+                                    message: "验证后的录音在重命名阶段丢失"
+                                )
+                                completion?()
+                                return
                             }
-                            return
-                        }
-                    } else {
-                        LogManager.shared.info("录音已紧急保存")
-                    }
+                            self.recordingState = .idle
+                            self.clearRecordingState()
+                            LogManager.shared.info(
+                                "录音已紧急保存并验证 | 文件: \(finalURL.lastPathComponent)")
 
-                    LogManager.shared.endRecordingSession()
-                    completeSave()
+                            LogManager.shared.endRecordingSession()
+                            self.completeSuccessfulWriterCleanup(
+                                writer: currentWriter,
+                                input: currentInput
+                            )
+
+                            let completeSave: () -> Void = {
+                                completion?()
+                            }
+
+                            if AppSettings.shared.outputFormat == .mp3
+                                && MP3Encoder.isEncodingAvailable
+                            {
+                                self.beginOutputFinalization()
+                                self.convertToMP3(from: finalURL) { mp3URL in
+                                    if mp3URL == nil {
+                                        self.showMP3ConversionFailedAlert(m4aURL: finalURL)
+                                    }
+                                    self.endOutputFinalization()
+                                    completeSave()
+                                }
+                                return
+                            }
+                            completeSave()
+                        case .failure(let error):
+                            self.completeFailedWriterFinalization(
+                                writer: currentWriter,
+                                input: currentInput,
+                                message: error.localizedDescription
+                            )
+                            completion?()
+                        }
+                    }
                 }
             }
         }

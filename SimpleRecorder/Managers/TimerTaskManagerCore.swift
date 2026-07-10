@@ -35,11 +35,29 @@ class TimerTaskManager: ObservableObject {
     private let storageKey = "timerTasks"
     private var reminderController: ReminderWindowController?
 
-    // 防止同一任务重复触发的集合
-    private var triggeredTaskIDs: Set<UUID> = []
+    // 按“任务 + 本次计划时间”去重，编辑任务后不会让旧回调阻塞或推进新计划。
+    private var triggeredTaskOccurrences: Set<TimerTaskOccurrence> = []
 
     // 睡眠防止断言 ID
     private var sleepAssertionID: IOPMAssertionID = 0
+
+    private func isTriggered(_ task: TimerTask) -> Bool {
+        guard let occurrence = TimerTaskOccurrence(task: task) else { return false }
+        return triggeredTaskOccurrences.contains(occurrence)
+    }
+
+    private func clearTriggeredOccurrences(for taskID: UUID) {
+        triggeredTaskOccurrences = triggeredTaskOccurrences.filter { $0.taskID != taskID }
+    }
+
+    private func clearTriggeredOccurrence(_ occurrence: TimerTaskOccurrence) {
+        triggeredTaskOccurrences.remove(occurrence)
+    }
+
+    private func isCurrentOccurrence(_ occurrence: TimerTaskOccurrence) -> Bool {
+        guard let task = tasks.first(where: { $0.id == occurrence.taskID }) else { return false }
+        return TimerTaskOccurrence(task: task) == occurrence
+    }
 
     // MARK: - 初始化
 
@@ -103,7 +121,7 @@ class TimerTaskManager: ObservableObject {
         saveTasks()
 
         // 移除触发记录，允许重新触发
-        triggeredTaskIDs.remove(task.id)
+        clearTriggeredOccurrences(for: task.id)
 
         LogManager.shared.info("更新定时任务 | ID: \(task.id) | 时间: \(task.timeDisplay)")
 
@@ -124,7 +142,7 @@ class TimerTaskManager: ObservableObject {
     /// 删除任务
     func deleteTask(id: UUID) {
         tasks = tasks.filter { $0.id != id }
-        triggeredTaskIDs.remove(id)
+        clearTriggeredOccurrences(for: id)
         saveTasks()
 
         LogManager.shared.info("删除定时任务 | ID: \(id)")
@@ -145,7 +163,7 @@ class TimerTaskManager: ObservableObject {
             // 清除上次触发时间，让单次任务可以重新使用
             updatedTasks[index].lastTriggerTime = nil
             updatedTasks[index].calculateNextTriggerTime()
-            triggeredTaskIDs.remove(id)
+            clearTriggeredOccurrences(for: id)
         } else {
             updatedTasks[index].nextTriggerTime = nil
         }
@@ -193,10 +211,11 @@ class TimerTaskManager: ObservableObject {
         precisionTimer = nil
 
         let now = Date()
+        updateSleepPreventionState()
 
         // 如果某个任务已经进入触发窗口，立即检查，避免因为睡眠/启动延迟漏触发。
         let hasDueTask = tasks.contains { task in
-            task.enabled && !triggeredTaskIDs.contains(task.id) && task.shouldTriggerReminder(at: now)
+            task.enabled && !isTriggered(task) && task.shouldTriggerReminder(at: now)
         }
 
         if hasDueTask {
@@ -210,14 +229,14 @@ class TimerTaskManager: ObservableObject {
 
         // 找出所有启用且未触发的任务中，最近的下一个实际检查时间。
         // 提醒模式需要提前 reminderMinutes 分钟触发，自动录音则在计划时间触发。
-        let nextTriggerDate =
+        let nextActionDate =
             tasks
-            .filter { $0.enabled && !triggeredTaskIDs.contains($0.id) }
+                .filter { $0.enabled && !isTriggered($0) }
             .compactMap { scheduledCheckTime(for: $0) }
             .filter { $0 > now }
             .min()
 
-        guard let targetDate = nextTriggerDate else {
+        guard let targetDate = nextActionDate else {
             LogManager.shared.info("没有待触发的定时任务")
             return
         }
@@ -249,6 +268,7 @@ class TimerTaskManager: ObservableObject {
         timer.setEventHandler { [weak self] in
             DispatchQueue.main.async {
                 self?.checkAndTriggerReminders()
+                self?.updateSleepPreventionState()
                 // 触发后重新调度下一个任务
                 self?.scheduleNextTrigger()
             }
@@ -275,21 +295,22 @@ class TimerTaskManager: ObservableObject {
 
             // 跳过已禁用或本轮已触发的任务
             guard task.enabled,
-                !triggeredTaskIDs.contains(task.id),
+                !isTriggered(task),
                 task.shouldTriggerReminder(at: now)
             else {
                 continue
             }
 
-            // 标记为已触发
-            triggeredTaskIDs.insert(task.id)
+            // 标记本次计划为已触发；任务后续被编辑时，新计划仍可独立触发。
+            guard let occurrence = TimerTaskOccurrence(task: task) else { continue }
+            triggeredTaskOccurrences.insert(occurrence)
 
             if task.actionType == .autoStart {
                 // 自动录音模式：直接开始录音并显示通知弹窗
                 LogManager.shared.info("自动启动录音 | ID: \(task.id) | 时间: \(task.timeDisplay)")
 
                 DispatchQueue.main.async { [weak self] in
-                    self?.handleAutoStartRecording(task: task)
+                    self?.handleAutoStartRecording(task: task, occurrence: occurrence)
                 }
             } else {
                 // 提醒模式：显示提醒弹窗
@@ -306,17 +327,31 @@ class TimerTaskManager: ObservableObject {
     }
 
     /// 自动开始录音
-    private func handleAutoStartRecording(task: TimerTask) {
+    private func handleAutoStartRecording(task: TimerTask, occurrence: TimerTaskOccurrence) {
+        guard isCurrentOccurrence(occurrence) else {
+            clearTriggeredOccurrence(occurrence)
+            LogManager.shared.info("自动录音触发前任务已更新，丢弃旧计划 | ID: \(task.id)")
+            scheduleNextTrigger()
+            return
+        }
         let startResult = startRecordingForTimerTask(taskID: task.id, taskDisplay: task.timeDisplay)
 
         switch startResult {
         case .requested:
-            confirmAutoStartRecording(for: task)
+            confirmAutoStartRecording(for: task, occurrence: occurrence)
         case .alreadyRecording:
-            markTaskAsTriggered(taskID: task.id)
+            guard isCurrentOccurrence(occurrence) else {
+                clearTriggeredOccurrence(occurrence)
+                scheduleNextTrigger()
+                return
+            }
+            markTaskAsTriggered(taskID: occurrence.taskID)
             scheduleNextTrigger()
         case .rejected:
-            markAutoStartTaskAsMissed(taskID: task.id, reason: "录音启动请求被拒绝")
+            markAutoStartTaskAsMissed(
+                occurrence: occurrence,
+                reason: "录音启动请求被拒绝"
+            )
         }
     }
 
@@ -350,28 +385,39 @@ class TimerTaskManager: ObservableObject {
     /// 系统音频启动和首次授权都是异步路径，必须给启动过程足够时间完成。
     private func confirmAutoStartRecording(
         for task: TimerTask,
+        occurrence: TimerTaskOccurrence,
         remainingAttempts: Int = TimerRecordingStartConfirmationPolicy.maxAttempts
     ) {
         DispatchQueue.main.asyncAfter(
             deadline: .now() + TimerRecordingStartConfirmationPolicy.retryInterval
         ) { [weak self] in
             guard let self = self else { return }
+            guard self.isCurrentOccurrence(occurrence) else {
+                self.clearTriggeredOccurrence(occurrence)
+                LogManager.shared.info("自动录音启动确认对应的任务已更新，丢弃旧计划 | ID: \(task.id)")
+                self.scheduleNextTrigger()
+                return
+            }
 
             switch TimerRecordingStartConfirmationPolicy.decision(
                 for: self.currentRecordingStartObservation(),
                 remainingAttempts: remainingAttempts
             ) {
             case .confirmed:
-                _ = self.markTaskAsTriggered(taskID: task.id)
+                _ = self.markTaskAsTriggered(taskID: occurrence.taskID)
                 self.showAutoStartNotification(for: task)
                 self.scheduleNextTrigger()
             case .wait:
                 self.confirmAutoStartRecording(
                     for: task,
+                    occurrence: occurrence,
                     remainingAttempts: remainingAttempts - 1
                 )
             case .failed:
-                self.markAutoStartTaskAsMissed(taskID: task.id, reason: "等待录音进入 recording 超时")
+                self.markAutoStartTaskAsMissed(
+                    occurrence: occurrence,
+                    reason: "等待录音进入 recording 超时"
+                )
             }
         }
     }
@@ -387,14 +433,25 @@ class TimerTaskManager: ObservableObject {
         }
     }
 
-    private func markAutoStartTaskAsMissed(taskID: UUID, reason: String) {
-        if let task = markTaskAsTriggered(taskID: taskID) {
+    private func markAutoStartTaskAsMissed(
+        occurrence: TimerTaskOccurrence,
+        reason: String
+    ) {
+        guard isCurrentOccurrence(occurrence) else {
+            clearTriggeredOccurrence(occurrence)
+            LogManager.shared.info("自动录音失败回调对应的任务已更新，未推进新计划 | ID: \(occurrence.taskID)")
+            scheduleNextTrigger()
+            return
+        }
+
+        if let task = markTaskAsTriggered(taskID: occurrence.taskID) {
             LogManager.shared.warning(
                 "自动录音未能启动，本次计划已跳过并推进到下一次 | ID: \(task.id) | 原因: \(reason)"
             )
         } else {
-            triggeredTaskIDs.remove(taskID)
-            LogManager.shared.warning("自动录音未能启动，任务已不存在 | ID: \(taskID) | 原因: \(reason)")
+            clearTriggeredOccurrence(occurrence)
+            LogManager.shared.warning(
+                "自动录音未能启动，任务已不存在 | ID: \(occurrence.taskID) | 原因: \(reason)")
         }
 
         scheduleNextTrigger()
@@ -411,6 +468,7 @@ class TimerTaskManager: ObservableObject {
 
     /// 显示提醒弹窗
     private func showReminder(for task: TimerTask) {
+        guard let occurrence = TimerTaskOccurrence(task: task) else { return }
         if reminderController == nil {
             reminderController = ReminderWindowController()
         }
@@ -418,36 +476,91 @@ class TimerTaskManager: ObservableObject {
         reminderController?.showReminder(
             for: task,
             onIgnore: { [weak self] in
-                self?.handleIgnore(taskID: task.id)
+                self?.handleIgnore(occurrence: occurrence)
             },
             onStartRecording: { [weak self] in
-                self?.handleStartRecording(taskID: task.id)
+                self?.handleStartRecording(occurrence: occurrence)
             }
         )
     }
 
     /// 处理忽略
-    private func handleIgnore(taskID: UUID) {
-        guard markTaskAsTriggered(taskID: taskID) != nil else { return }
+    private func handleIgnore(occurrence: TimerTaskOccurrence) {
+        guard isCurrentOccurrence(occurrence) else {
+            clearTriggeredOccurrence(occurrence)
+            LogManager.shared.info("忽略已失效的旧定时提醒 | ID: \(occurrence.taskID)")
+            scheduleNextTrigger()
+            return
+        }
+        guard markTaskAsTriggered(taskID: occurrence.taskID) != nil else { return }
 
-        LogManager.shared.info("用户忽略定时提醒 | ID: \(taskID)")
+        LogManager.shared.info("用户忽略定时提醒 | ID: \(occurrence.taskID)")
         scheduleNextTrigger()
     }
 
     /// 处理开始录音
-    private func handleStartRecording(taskID: UUID) {
+    private func handleStartRecording(occurrence: TimerTaskOccurrence) {
+        guard isCurrentOccurrence(occurrence) else {
+            clearTriggeredOccurrence(occurrence)
+            LogManager.shared.info("忽略已失效旧提醒的启动操作 | ID: \(occurrence.taskID)")
+            scheduleNextTrigger()
+            return
+        }
+        let taskID = occurrence.taskID
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         let taskDisplay = tasks[index].timeDisplay
 
         let startResult = startRecordingForTimerTask(taskID: taskID, taskDisplay: taskDisplay)
 
         switch startResult {
-        case .requested, .alreadyRecording:
+        case .requested:
+            confirmReminderStartRecording(occurrence: occurrence)
+        case .alreadyRecording:
             _ = markTaskAsTriggered(taskID: taskID)
             scheduleNextTrigger()
         case .rejected:
             LogManager.shared.warning("用户点击开始录音但启动失败，任务保留为未完成 | ID: \(taskID)")
+            clearTriggeredOccurrences(for: taskID)
             scheduleNextTrigger()
+        }
+    }
+
+    /// 提醒窗口的“开始录音”也可能走首次授权或系统音频的异步启动路径。
+    /// 只在录音真正进入 recording 后才完成计划；失败时释放触发标记，让用户在窗口期内重试。
+    private func confirmReminderStartRecording(
+        occurrence: TimerTaskOccurrence,
+        remainingAttempts: Int = TimerRecordingStartConfirmationPolicy.maxAttempts
+    ) {
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + TimerRecordingStartConfirmationPolicy.retryInterval
+        ) { [weak self] in
+            guard let self = self else { return }
+            guard self.isCurrentOccurrence(occurrence) else {
+                self.clearTriggeredOccurrence(occurrence)
+                LogManager.shared.info("录音启动确认对应的提醒已失效 | ID: \(occurrence.taskID)")
+                self.scheduleNextTrigger()
+                return
+            }
+
+            switch TimerRecordingStartConfirmationPolicy.decision(
+                for: self.currentRecordingStartObservation(),
+                remainingAttempts: remainingAttempts
+            ) {
+            case .confirmed:
+                _ = self.markTaskAsTriggered(taskID: occurrence.taskID)
+                self.scheduleNextTrigger()
+            case .wait:
+                self.confirmReminderStartRecording(
+                    occurrence: occurrence,
+                    remainingAttempts: remainingAttempts - 1
+                )
+            case .failed:
+                self.clearTriggeredOccurrences(for: occurrence.taskID)
+                LogManager.shared.warning(
+                    "用户点击开始录音后未能进入 recording，任务未完成 | ID: \(occurrence.taskID)"
+                )
+                self.scheduleNextTrigger()
+            }
         }
     }
 
@@ -459,7 +572,7 @@ class TimerTaskManager: ObservableObject {
         updatedTasks[index].markAsTriggered()
         let updatedTask = updatedTasks[index]
         tasks = updatedTasks
-        triggeredTaskIDs.remove(taskID)
+        clearTriggeredOccurrences(for: taskID)
         saveTasks()
         return updatedTask
     }
@@ -468,14 +581,14 @@ class TimerTaskManager: ObservableObject {
     private func cleanupTriggeredRecords() {
         let now = Date()
 
-        triggeredTaskIDs = triggeredTaskIDs.filter { taskID in
-            guard let task = tasks.first(where: { $0.id == taskID }),
-                let nextTime = task.nextTriggerTime
+        triggeredTaskOccurrences = triggeredTaskOccurrences.filter { occurrence in
+            guard let task = tasks.first(where: { $0.id == occurrence.taskID }),
+                TimerTaskOccurrence(task: task) == occurrence
             else {
                 return false
             }
             // 保留5分钟窗口内的记录
-            return now.timeIntervalSince(nextTime) < 5 * 60
+            return now.timeIntervalSince(occurrence.scheduledTime) < 5 * 60
         }
     }
 
@@ -562,6 +675,13 @@ class TimerTaskManager: ObservableObject {
             object: nil
         )
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTimeChange),
+            name: .NSSystemTimeZoneDidChange,
+            object: nil
+        )
+
         // 监听系统从休眠恢复
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -579,8 +699,6 @@ class TimerTaskManager: ObservableObject {
         refreshTaskSchedules(&updatedTasks, preservingDueTriggersAt: Date())
         tasks = updatedTasks
 
-        // 清空触发记录，重新检查
-        triggeredTaskIDs.removeAll()
         saveTasks()
         checkAndTriggerReminders()
         scheduleNextTrigger()
@@ -594,7 +712,6 @@ class TimerTaskManager: ObservableObject {
         refreshTaskSchedules(&updatedTasks, preservingDueTriggersAt: Date())
         tasks = updatedTasks
 
-        triggeredTaskIDs.removeAll()
         saveTasks()
         checkAndTriggerReminders()
         scheduleNextTrigger()
@@ -620,12 +737,13 @@ class TimerTaskManager: ObservableObject {
 
     @objc private func handleScheduleSettingsChanged() {
         updateSleepPreventionState()
+        scheduleNextTrigger()
     }
 
     /// 更新睡眠防止状态
     func updateSleepPreventionState() {
         let settings = AppSettings.shared
-        let hasEnabledTasks = tasks.contains { $0.enabled }
+        let hasEnabledTasks = TimerTaskSleepPreventionPolicy.shouldPreventSleep(tasks: tasks)
 
         if settings.preventSleepWithSchedule && hasEnabledTasks {
             setupSleepPrevention()
@@ -639,7 +757,7 @@ class TimerTaskManager: ObservableObject {
         // 已经有断言时不重复创建
         guard sleepAssertionID == 0 else { return }
 
-        let reason = "有已启用的定时录音计划，保持系统唤醒以确保计划触发。" as CFString
+        let reason = "存在已启用的定时录音计划，保持系统唤醒以确保准点触发。" as CFString
         let result = IOPMAssertionCreateWithDescription(
             kIOPMAssertionTypeNoIdleSleep as CFString,
             "MeetingRecorderProScheduledTask" as CFString,

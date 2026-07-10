@@ -33,6 +33,9 @@
 		033 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 061 /* Sparkle */; };
 		031 /* TimerTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130; };
 		032 /* TimerTaskTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150; };
+		034 /* RecordingFinalizationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 152; };
+		035 /* RecordingFinalizationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 152; };
+		036 /* RecordingCorePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -65,6 +68,8 @@
 		149 /* module.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; path = module.modulemap; sourceTree = "<group>"; };
 		150 /* TimerTaskTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTaskTests.swift; sourceTree = "<group>"; };
 		151 /* SimpleRecorderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimpleRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		152 /* RecordingFinalizationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFinalizationPolicy.swift; sourceTree = "<group>"; };
+		153 /* RecordingCorePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingCorePolicyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -129,6 +134,7 @@
 			isa = PBXGroup;
 			children = (
 				102 /* AudioRecorderManagerCore.swift */,
+				152 /* RecordingFinalizationPolicy.swift */,
 				140 /* AudioRecorderManagerEngine.swift */,
 				141 /* AudioRecorderManagerSystemAudio.swift */,
 				142 /* AudioRecorderManagerWriter.swift */,
@@ -199,6 +205,7 @@
 			isa = PBXGroup;
 			children = (
 				150 /* TimerTaskTests.swift */,
+				153 /* RecordingCorePolicyTests.swift */,
 			);
 			path = SimpleRecorderTests;
 			sourceTree = "<group>";
@@ -312,6 +319,7 @@
 			files = (
 				001 /* SimpleRecorderApp.swift in Sources */,
 				002 /* AudioRecorderManagerCore.swift in Sources */,
+				034 /* RecordingFinalizationPolicy.swift in Sources */,
 				020 /* AudioRecorderManagerEngine.swift in Sources */,
 				021 /* AudioRecorderManagerSystemAudio.swift in Sources */,
 				022 /* AudioRecorderManagerWriter.swift in Sources */,
@@ -337,7 +345,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				031 /* TimerTask.swift in Sources */,
+				035 /* RecordingFinalizationPolicy.swift in Sources */,
 				032 /* TimerTaskTests.swift in Sources */,
+				036 /* RecordingCorePolicyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

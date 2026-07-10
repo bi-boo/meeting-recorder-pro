@@ -311,6 +311,7 @@ struct BasicSettingsView: View {
                             Button("更改位置...") {
                                 selectFolder(for: \.recordingsPath)
                             }
+                            .disabled(isRecordingBusy)
                         }
                     }
 
@@ -331,6 +332,16 @@ struct BasicSettingsView: View {
             } header: {
                 Text("存储位置").padding(.bottom, 4)
             }
+        }
+        .onChange(of: isRecordingShortcut || isRecordingPauseShortcut) { isCapturingShortcut in
+            if isCapturingShortcut {
+                HotKeyManager.shared.unregisterHotKey()
+            } else {
+                HotKeyManager.shared.registerHotKey()
+            }
+        }
+        .onDisappear {
+            HotKeyManager.shared.registerHotKey()
         }
         .formStyle(.grouped)
         .padding(.top, SettingsWindowLayout.contentTopPadding)
@@ -517,9 +528,8 @@ struct ShortcutRecorderView: View {
     }
 
     private func startMonitoring() {
-        HotKeyManager.shared.unregisterHotKey()
+        removeEventMonitor()
 
-        stopMonitoring()
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             recordHotKey(from: event)
             isRecording = false
@@ -529,11 +539,16 @@ struct ShortcutRecorderView: View {
     }
 
     private func stopMonitoring() {
+        removeEventMonitor()
+    }
+
+    /// 全局快捷键由父视图根据两个录制器的合并状态统一启停，
+    /// 子视图只管理自己的本地事件监听，避免切换录制器时互相抢注册状态。
+    private func removeEventMonitor() {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
         }
-        HotKeyManager.shared.registerHotKey()
     }
 
     private func recordHotKey(from event: NSEvent) {
@@ -557,7 +572,6 @@ struct ShortcutRecorderView: View {
         }
 
         onHotKeyRecorded(config)
-        HotKeyManager.shared.registerHotKey()
     }
 }
 

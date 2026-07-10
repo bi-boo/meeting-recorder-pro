@@ -32,7 +32,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastToggleTime: Date = .distantPast  // 用于防抖
     private var lastTimeString: String = ""
     private var startingIndicatorStep: Int = 0
+    #if QA_AUTOMATION
     private var qaAutomationRunner: QAAutomationRunner?
+    #endif
 
     // 动态获取当前配置的图标
     private func getStatusImage() -> NSImage? {
@@ -99,6 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 仅当用户在录制来源中选择"系统声音"或"同时录制"时才触发权限申请
         // 用户首次启动应用时不再自动弹出权限请求
 
+        #if QA_AUTOMATION
         if let runner = QAAutomationRunner.fromCommandLine() {
             qaAutomationRunner = runner
             LogManager.shared.info("检测到 QA 自动化参数，跳过真实定时任务调度")
@@ -107,19 +110,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        #endif
+
+        // 在开放定时任务前立即锁定并开始验证上次异常中断的录音。
+        // AudioRecorderManager 初始化时已同步读取 marker，因此菜单/快捷键即使更早创建，
+        // startRecording 也会在恢复完成前拒绝新请求。
+        recordingManager.resetStatusAfterInterruption {
+            TimerTaskManager.shared.startScheduler()
+        }
 
         // 【新增】启动时检查录音目录权限，尽早发现问题
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let _ = AudioRecorderManager.shared.checkRecordingDirectoryPermission()
         }
 
-        // 启动定时任务调度器
-        TimerTaskManager.shared.startScheduler()
-
-        // 延迟检查中断状态（确保 UI 完全加载）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.recordingManager.resetStatusAfterInterruption()
-        }
     }
 
     /// 强制触发麦克风权限检查
@@ -146,19 +150,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 退出前检查是否正在录音，确保保存（异步，不阻塞主线程）
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // 如果正在录音，先保存
-        if recordingManager.isRecording {
+        // 录音启动窗口也必须先安全取消，避免退出后异步启动继续运行。
+        if recordingManager.isRecordingOrStarting {
+            let isStarting = recordingManager.isStarting
+            let isRecovering = recordingManager.isRecoveringInterruptedRecording
             // 弹出确认对话框
             let alert = NSAlert()
-            alert.messageText = "正在录音中"
-            alert.informativeText = "退出应用将自动保存当前录音。确定要退出吗？"
+            if isRecovering {
+                alert.messageText = "正在检查上次异常中断的录音"
+                alert.informativeText = "现在退出不会删除原文件，恢复记录会保留到下次启动。确定要退出吗？"
+            } else {
+                alert.messageText = isStarting ? "正在准备录音" : "正在录音中"
+                alert.informativeText =
+                    isStarting
+                    ? "退出应用将取消本次录音启动。确定要退出吗？"
+                    : "退出应用将自动保存当前录音。确定要退出吗？"
+            }
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "保存并退出")
+            alert.addButton(
+                withTitle: isRecovering
+                    ? "保留恢复记录并退出"
+                    : (isStarting ? "取消启动并退出" : "保存并退出")
+            )
             alert.addButton(withTitle: "取消")
 
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
-                LogManager.shared.info("应用退出 | 正在保存录音...")
+                LogManager.shared.info(
+                    isRecovering
+                        ? "应用退出 | 保留未完成的恢复记录"
+                        : (isStarting ? "应用退出 | 正在取消录音启动..." : "应用退出 | 正在保存录音...")
+                )
                 TimerTaskManager.shared.stopScheduler()
                 // 异步保存，保存完成后通知系统继续退出（不阻塞主线程）
                 recordingManager.saveRecordingImmediately {
@@ -202,11 +224,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let recordingState = recordingManager.recordingState
         let isRecording = recordingManager.isRecording
         let isStarting = recordingManager.isStarting
+        let isRecovering = recordingManager.isRecoveringInterruptedRecording
         let isStopping = recordingState == .stopping
         let isSessionBusy = recordingManager.isRecordingOrStarting
         let isPaused = recordingManager.isPaused
         let recordTitle: String
-        if isStarting {
+        if isRecovering {
+            recordTitle = "正在恢复上次录音..."
+        } else if isStarting {
             recordTitle = "正在启动录音..."
         } else if isStopping {
             recordTitle = "正在保存录音..."
@@ -227,7 +252,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             recordItem.keyEquivalentModifierMask = [.command, .option, .control]
         }
         recordItem.target = self
-        recordItem.isEnabled = !isStarting && !isStopping
+        recordItem.isEnabled = !isRecovering && !isStarting && !isStopping
         menu.addItem(recordItem)
 
         // 暂停/继续控制
