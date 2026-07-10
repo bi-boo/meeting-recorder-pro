@@ -111,7 +111,7 @@ if [ "${RELEASE_BUILD}" = true ] && [ "${PUBLISH_RELEASE}" != true ]; then
         exit 1
     fi
     if [ -z "${DEVELOPER_ID_CERT:-}" ] \
-        && ! security find-identity -p codesigning -v | grep -q "Developer ID Application"; then
+        && ! security find-identity -p codesigning -v | grep "Developer ID Application" >/dev/null; then
         echo "RELEASE=1 要求 Developer ID Application 证书，不能使用 ad-hoc 签名。" >&2
         exit 1
     fi
@@ -129,7 +129,7 @@ if [ "${PUBLISH_RELEASE}" = true ]; then
     echo "--- 校验待发布的现成 App/DMG（不会重新构建） ---"
     "${PROJECT_DIR}/scripts/verify_public_release.sh" "${RELEASE_APP_PATH}"
     codesign --verify --deep --strict --verbose=2 "${RELEASE_APP_PATH}"
-    if ! codesign -dv --verbose=4 "${RELEASE_APP_PATH}" 2>&1 | grep -q '^Authority=Developer ID Application:'; then
+    if ! codesign -dv --verbose=4 "${RELEASE_APP_PATH}" 2>&1 | grep '^Authority=Developer ID Application:' >/dev/null; then
         echo "待发布 App 不是 Developer ID Application 签名。" >&2
         exit 1
     fi
@@ -185,8 +185,8 @@ if [ -n "${DEVELOPER_ID_CERT:-}" ]; then
     SIGNING_IDENTITY="$DEVELOPER_ID_CERT"
     SIGNING_IS_ADHOC=false
     echo "使用环境变量中的证书: ${SIGNING_IDENTITY}"
-elif security find-identity -p codesigning -v | grep -q "Developer ID Application"; then
-    SIGNING_IDENTITY=$(security find-identity -p codesigning -v | grep "Developer ID Application" | head -1 | awk '{print $2}')
+elif security find-identity -p codesigning -v | grep "Developer ID Application" >/dev/null; then
+    SIGNING_IDENTITY=$(security find-identity -p codesigning -v | awk '/Developer ID Application/ && !found {print $2; found=1}')
     SIGNING_IS_ADHOC=false
     echo "使用检测到的系统证书: ${SIGNING_IDENTITY}"
 else
