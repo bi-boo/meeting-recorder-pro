@@ -289,7 +289,7 @@ def quit_app(bundle_id: str, app_path: Path, timeout: float = 8.0) -> None:
     pids = assert_only_expected_app_is_running(app_path)
     if not pids:
         return
-    if recording_flag(bundle_id) or log_recording_active():
+    if recording_is_active(bundle_id):
         raise RuntimeError(
             "Refusing to quit SimpleRecorder because a recording appears to be active. "
             "Stop and save it before running QA."
@@ -397,10 +397,10 @@ def trigger_record_hotkey(key_code: int) -> None:
         ) from exc
 
 
-def wait_for_recording_flag(domain: str, expected: bool, timeout: float) -> bool:
+def wait_for_recording_state(domain: str, expected: bool, timeout: float) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if recording_flag(domain) == expected:
+        if recording_is_active(domain) == expected:
             return True
         time.sleep(0.25)
     return False
@@ -488,6 +488,14 @@ def log_recording_active() -> bool:
         ):
             active = False
     return active
+
+
+def recording_is_active(domain: str) -> bool:
+    # 集成测试在启动录音前会等待应用写入日志，因此当日志存在时，
+    # 最近一条录音生命周期事件比尚未同步的 UserDefaults 更可靠。
+    if current_log_path().exists():
+        return log_recording_active()
+    return recording_flag(domain)
 
 
 def list_recording_files(recordings_dir: Path, since: float) -> list[Path]:
@@ -578,9 +586,25 @@ def stop_recording(
     *,
     assume_recording: bool = False,
 ) -> Path | None:
-    if assume_recording or recording_flag(domain):
+    stop_requested = assume_recording or recording_is_active(domain)
+    if stop_requested:
         trigger_record_hotkey(hotkey_code)
-    return wait_for_new_recording(recordings_dir, since, timeout)
+    path = wait_for_new_recording(recordings_dir, since, timeout)
+
+    # 文件出现时，UserDefaults 中的录音标记可能还没来得及落盘。
+    # 等待应用与日志都进入空闲态，避免下一个用例误判为“仍在录音”。
+    if stop_requested:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not recording_is_active(domain):
+                return path
+            time.sleep(0.25)
+        raise RuntimeError(
+            "Recording file was saved, but the app did not reach an idle state "
+            "before the stop timeout."
+        )
+
+    return path
 
 
 def ffprobe_duration(path: Path) -> float | None:
@@ -994,7 +1018,7 @@ def run_input_switch_case(
             )
             return [result]
 
-    interrupted = wait_for_recording_flag(args.bundle_id, False, args.switch_observe_seconds)
+    interrupted = wait_for_recording_state(args.bundle_id, False, args.switch_observe_seconds)
     path = wait_for_new_recording(recordings_dir, since_wall, args.stop_timeout)
     if interrupted:
         result.note("Recording stopped after input-device change, as expected.")
@@ -1081,7 +1105,7 @@ def run_output_switch_case(
             return result
     time.sleep(args.switch_after_seconds)
 
-    if not recording_flag(args.bundle_id):
+    if not recording_is_active(args.bundle_id):
         result.fail("Recording stopped after output-device change; it should have continued.")
         path = wait_for_new_recording(recordings_dir, since_wall, args.stop_timeout)
         assert_audio_file(result, path, [], 1.0)
