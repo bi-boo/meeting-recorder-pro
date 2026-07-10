@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+import binascii
 import plistlib
 from datetime import datetime, timezone
 from email.utils import format_datetime
@@ -8,7 +9,14 @@ from pathlib import Path
 from urllib.parse import quote
 from xml.sax.saxutils import escape, quoteattr
 
-from cryptography.hazmat.primitives import serialization
+try:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+except ModuleNotFoundError as error:
+    raise SystemExit(
+        "Missing pinned release dependency. Run scripts/setup_release_python.sh, "
+        "then use build/release-venv/bin/python to run this script."
+    ) from error
 
 
 def parse_args():
@@ -23,18 +31,41 @@ def parse_args():
     return parser.parse_args()
 
 
-def read_app_versions(app_path):
+def read_app_metadata(app_path):
     info_path = Path(app_path) / "Contents" / "Info.plist"
     with info_path.open("rb") as file:
         info = plistlib.load(file)
     short_version = info["CFBundleShortVersionString"]
     build_version = info["CFBundleVersion"]
-    return short_version, build_version
+    public_key = info.get("SUPublicEDKey")
+    if not isinstance(public_key, str) or not public_key.strip():
+        raise SystemExit("Release app is missing SUPublicEDKey in Info.plist.")
+    try:
+        public_key_bytes = base64.b64decode(public_key.strip(), validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise SystemExit("Release app SUPublicEDKey is not valid base64.") from error
+    if len(public_key_bytes) != 32:
+        raise SystemExit("Release app SUPublicEDKey must decode to 32 raw Ed25519 bytes.")
+    return short_version, build_version, public_key_bytes
 
 
-def sign_archive(dmg_path, private_key_path):
+def sign_archive(dmg_path, private_key_path, expected_public_key):
     private_key = serialization.load_pem_private_key(Path(private_key_path).read_bytes(), password=None)
-    signature = private_key.sign(Path(dmg_path).read_bytes())
+    if not isinstance(private_key, Ed25519PrivateKey):
+        raise SystemExit("Sparkle private key must be an Ed25519 private key.")
+    public_key = private_key.public_key()
+    raw_public_key = public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    if raw_public_key != expected_public_key:
+        raise SystemExit(
+            "Sparkle private key does not match SUPublicEDKey in the Release app. "
+            "Refusing to generate an unusable update feed."
+        )
+    archive = Path(dmg_path).read_bytes()
+    signature = private_key.sign(archive)
+    public_key.verify(signature, archive)
     return base64.b64encode(signature).decode("ascii")
 
 
@@ -93,9 +124,9 @@ def main():
             f"{private_key_path}. Keep this key private; the app contains only the public key."
         )
 
-    short_version, build_version = read_app_versions(args.app)
+    short_version, build_version, public_key = read_app_metadata(args.app)
     tag = args.tag or f"v{short_version}"
-    signature = sign_archive(dmg_path, private_key_path)
+    signature = sign_archive(dmg_path, private_key_path, public_key)
     output, asset_url = write_appcast(
         args.output,
         args.repo,

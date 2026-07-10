@@ -5,7 +5,8 @@ set -euo pipefail
 DMG_PATH=""
 APP_PATH="build/Release/SimpleRecorder.app"
 RECORDINGS_DIR=""
-LOG_FILE="$HOME/Library/Application Support/Logs/MeetingRecorderPro_$(date +%Y-%m-%d).log"
+LOG_FILE="$HOME/Library/Application Support/com.meetingrecorderpro.app/Logs/MeetingRecorderPro_$(date +%Y-%m-%d).log"
+MINIMUM_AUDIO_DURATION_SECONDS="${QA_MINIMUM_AUDIO_DURATION_SECONDS:-1.0}"
 
 usage() {
   cat <<'USAGE'
@@ -16,7 +17,7 @@ Checks:
   - DMG checksum and hdiutil verification
   - .app and DMG code signature
   - Gatekeeper assessment, reported but not treated as fatal when unnotarized
-  - afinfo summary for generated recording files
+  - recording files must decode, meet minimum duration, and contain non-silent audio
   - recent log warnings/errors relevant to recording
 USAGE
 }
@@ -67,6 +68,13 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
+for tool in afinfo afconvert python3; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "Missing required command: $tool" >&2
+    exit 2
+  fi
+done
+
 echo "== Package =="
 ls -lh "$DMG_PATH"
 shasum -a 256 "$DMG_PATH"
@@ -99,16 +107,25 @@ if [[ -n "$RECORDINGS_DIR" ]]; then
   fi
 
   echo
-  echo "== Recording metadata =="
+  echo "== Recording validation =="
   found=0
+  invalid=0
   while IFS= read -r -d '' file; do
     found=1
     echo "-- $file"
-    afinfo "$file" | rg 'Data format|estimated duration|audio bytes|bit rate|valid frames' || true
+    if ! scripts/verify_audio_file.py \
+      --minimum-duration "$MINIMUM_AUDIO_DURATION_SECONDS" \
+      "$file"; then
+      invalid=$((invalid + 1))
+    fi
   done < <(find "$RECORDINGS_DIR" -maxdepth 1 -type f \( -name '*.m4a' -o -name '*.mp3' \) -print0 | sort -z)
 
   if [[ "$found" -eq 0 ]]; then
     echo "No .m4a or .mp3 files found in $RECORDINGS_DIR" >&2
+    exit 1
+  fi
+  if [[ "$invalid" -gt 0 ]]; then
+    echo "$invalid recording file(s) failed decode/duration/non-silence validation." >&2
     exit 1
   fi
 fi

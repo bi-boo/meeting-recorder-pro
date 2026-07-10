@@ -22,10 +22,10 @@ scripts/run_full_qa.sh
 脚本会完成以下动作：
 
 - 生成本轮 `qa-runs/YYYYMMDD-HHMMSS/` 目录。
-- 执行 `./build_dmg.sh`，以 Release 打包产物为准测试。
-- 通过 `--qa-scenario` 启动 App 内置 QA runner。
+- 执行 `./build_dmg.sh`，构建不含自动化入口的公开 Release 包。
+- 单独构建定义 `QA_AUTOMATION` 的本机 QA App，只有该构建接受 `--qa-scenario`。
 - 自动覆盖设置回读、麦克风录音、暂停继续、连续录音、系统声音、混合音源和定时自动录音。
-- 运行 `scripts/qa_artifact_check.sh` 校验 DMG、签名、录音文件和最近日志。
+- 运行 `scripts/qa_artifact_check.sh` 校验 DMG、签名，并强制确认录音可解码、时长达标且非静音。
 - 输出 `qa-result.json`、`report.md`、构建日志、应用 stdout/stderr 和包校验日志。
 
 可选环境变量：
@@ -108,11 +108,11 @@ QA_INCLUDE_SYSTEM_AUDIO=false QA_INCLUDE_MIXED_AUDIO=false scripts/run_full_qa.s
 
 | 编号 | 测试项 | 操作 | 通过标准 |
 |---|---|---|---|
-| 2.1 | 旧进程清理 | 退出或杀掉所有 `SimpleRecorder` 进程，再从 DMG 或 Release app 启动 | 只有当前测试版本在运行 |
+| 2.1 | 旧进程清理 | 先停止并保存真实录音，再优雅退出旧版本 | QA 脚本遇到安装版或活动录音时直接拒绝，不执行 `pkill` |
 | 2.2 | 菜单栏启动 | 启动应用 | 菜单栏出现图标，无 Dock 图标，无崩溃 |
 | 2.3 | 麦克风权限 | 首次或已授权环境启动麦克风录音 | 未授权时出现系统权限请求；已授权时录音可直接开始 |
 | 2.4 | 系统声音权限 | 切到“仅系统声音”或“麦克风 + 系统声音” | 只在选择系统音频相关来源时触发屏幕录制权限 |
-| 2.5 | 日志初始化 | 查看 `~/Library/Application Support/Logs/MeetingRecorderPro_YYYY-MM-DD.log` | 启动、权限、设备、快捷键注册均有日志，无 `ERROR` / `CRITICAL` |
+| 2.5 | 日志初始化 | 查看 `~/Library/Application Support/com.meetingrecorderpro.app/Logs/MeetingRecorderPro_YYYY-MM-DD.log` | 启动、权限、设备、快捷键注册均有日志，无 `ERROR` / `CRITICAL` |
 | 2.6 | 更新菜单 | 非录音状态和录音状态分别打开菜单 | 非录音状态显示“当前版本 x.y.z”或“下载并安装 x.y.z...”；录音中更新项禁用 |
 
 ## 三、基础设置全量检查
@@ -207,7 +207,7 @@ QA_INCLUDE_SYSTEM_AUDIO=false QA_INCLUDE_MIXED_AUDIO=false scripts/run_full_qa.s
 5. 查看最近日志：
 
    ```bash
-   tail -n 240 "$HOME/Library/Application Support/Logs/MeetingRecorderPro_$(date +%Y-%m-%d).log" \
+   tail -n 240 "$HOME/Library/Application Support/com.meetingrecorderpro.app/Logs/MeetingRecorderPro_$(date +%Y-%m-%d).log" \
      | rg 'ERROR|CRITICAL|启动失败|写入失败|录音中断|录音已保存|丢帧'
    ```
 

@@ -13,11 +13,13 @@ RESULTS_DIR="$QA_DIR/results"
 SCENARIO_PATH="$QA_DIR/scenario.json"
 RESULT_PATH="$QA_DIR/qa-result.json"
 REPORT_PATH="$QA_DIR/audible-report.md"
-APP_PATH="$ROOT_DIR/build/Release/SimpleRecorder.app"
+APP_PATH="$ROOT_DIR/build/QA/Release/SimpleRecorder.app"
 APP_BIN="$APP_PATH/Contents/MacOS/SimpleRecorder"
 RECORD_SECONDS="${QA_AUDIBLE_RECORD_SECONDS:-8}"
 TIMEOUT_SECONDS="${QA_AUDIBLE_TIMEOUT_SECONDS:-120}"
 USE_LARK_DEVICE="${QA_AUDIBLE_USE_LARK:-auto}"
+
+source "$ROOT_DIR/scripts/qa_process_guard.sh"
 
 mkdir -p "$SOURCES_DIR" "$RECORDINGS_DIR" "$RESULTS_DIR"
 
@@ -88,6 +90,10 @@ echo "== Build package =="
 ./build_dmg.sh | tee "$QA_DIR/build.log"
 
 echo
+echo "== Build QA-only app =="
+scripts/build_qa_app.sh | tee "$QA_DIR/qa-app-build.log"
+
+echo
 echo "== Audio route =="
 ORIGINAL_INPUT="$(SwitchAudioSource -c -t input 2>/dev/null || true)"
 ORIGINAL_OUTPUT="$(SwitchAudioSource -c -t output 2>/dev/null || true)"
@@ -123,8 +129,7 @@ echo "本轮路由: $ROUTE_NOTE"
 
 echo
 echo "== Run app automation =="
-pkill -x SimpleRecorder >/dev/null 2>&1 || true
-sleep 1
+qa_prepare_for_run "$APP_BIN"
 
 if [[ ! -x "$APP_BIN" ]]; then
   echo "App binary not found: $APP_BIN" >&2
@@ -139,9 +144,12 @@ deadline=$((SECONDS + TIMEOUT_SECONDS))
 
 while kill -0 "$APP_PID" >/dev/null 2>&1; do
   if (( SECONDS >= deadline )); then
-    echo "可听音频 QA 超时，终止进程: $APP_PID" >&2
-    kill "$APP_PID" >/dev/null 2>&1 || true
-    wait "$APP_PID" >/dev/null 2>&1 || true
+    echo "可听音频 QA 超时，请求 App 优雅退出: $APP_PID" >&2
+    if qa_gracefully_quit_pid "$APP_PID" "$APP_BIN"; then
+      wait "$APP_PID" >/dev/null 2>&1 || true
+    else
+      echo "QA App 仍在运行，为避免丢失录音，脚本未强制终止它。" >&2
+    fi
     APP_EXIT=124
     break
   fi

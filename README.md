@@ -89,7 +89,7 @@ RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh
 scripts/run_full_qa.sh
 ```
 
-自动化会打包 Release 产物，覆盖设置回读、麦克风录音、暂停继续、连续录音、MP3 输出、系统声音、混合音源和定时自动录音，并输出 `qa-runs/*/report.md`。剩余强交互或系统授权场景按回归测试流程人工补测。
+自动化会同时构建不含 QA 入口的公开 Release 产物，以及只在本机测试时启用 `QA_AUTOMATION` 的 QA App。录音文件必须可解码、达到最小时长且不是静音，结果写入 `qa-runs/*/report.md`。
 
 ### 项目文档
 
@@ -125,7 +125,7 @@ SimpleRecorder/
 │   ├── TimerTaskManagerCore.swift   # 定时任务调度
 │   └── LogManager.swift             # 运行日志
 ├── Services/
-│   └── QAAutomationRunner.swift     # 自动化 QA 入口
+│   └── QAAutomationRunner.swift     # 仅 QA_AUTOMATION 构建启用
 ├── Views/
 │   ├── MainWindowSettingsView.swift # 设置窗口（TabView）
 │   ├── TimerTaskViews.swift         # 定时计划列表 & 编辑 Sheet
@@ -139,4 +139,4 @@ SimpleRecorder/
 
 ## License
 
-本项目使用 [MIT License](LICENSE)。第三方组件和 LAME 许可声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+本项目使用 [MIT License](LICENSE)。第三方组件声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，LAME 源码获取和重链接方法见 [LAME 源码与重链接说明](docs/lame-relinking.md)。

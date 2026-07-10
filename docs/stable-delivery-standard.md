@@ -63,7 +63,7 @@ scripts/run_full_qa.sh
 - 系统声音。
 - 混合音源。
 - 定时自动录音。
-- DMG、签名、录音文件和日志校验。
+- DMG、签名、录音可解码/有效时长/非静音和日志校验。
 
 核心场景被 skipped 时，默认视为失败。只有本机权限不完整的烟测可以临时使用 `QA_ALLOW_SKIPS=true`，但这种结果不能作为正式交付证据。
 
@@ -95,7 +95,7 @@ scripts/run_full_qa.sh
 - Release 构建成功。
 - `.app` 和 `.dmg` codesign verify 通过。
 - `hdiutil verify` 通过。
-- DMG 根目录包含 `会议录音 Pro.app`、`LICENSE.txt`、`THIRD_PARTY_NOTICES.md`、`LAME-COPYING.txt`。
+- DMG 根目录包含应用、项目许可证、第三方声明、PermissionFlow/Sparkle 完整许可证，以及 LAME 许可证、完整 `lame-3.100.tar.gz` 源码包和源码/重链接说明。
 
 正式公开分发包：
 
@@ -109,6 +109,7 @@ RELEASE=1 ./build_dmg.sh
 - notarytool 通过。
 - stapler staple 和 stapler validate 通过。
 - Gatekeeper accepted。
+- 正式发布消费的完整 QA 证据必须绑定当前 HEAD、版本和最终 DMG SHA-256；真实录音集成报告必须匹配当前 HEAD、版本和最终 Release App 可执行文件 SHA-256，DMG 内 App 必须是同一二进制。
 
 ## 代码质量门槛
 

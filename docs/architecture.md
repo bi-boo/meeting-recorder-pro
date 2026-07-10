@@ -103,7 +103,7 @@
 日志管理器，采用单例模式 (`shared`)。
 
 - **5 级日志**：debug / info / warning / error / critical
-- **文件路径**：`~/Library/Application Support/Logs/MeetingRecorderPro_YYYY-MM-DD.log`
+- **文件路径**：`~/Library/Application Support/com.meetingrecorderpro.app/Logs/MeetingRecorderPro_YYYY-MM-DD.log`
 - **7 天轮转**：启动时自动清理过期日志
 - **崩溃安全**：使用 `FileHandle.synchronize()` 确保写入
 
@@ -166,7 +166,7 @@ MP3 输出统一入口，录音阶段仍先写入 M4A，停止后按用户设置
 - **精准触发调度**：使用 `DispatchSourceTimer` 实现精准时间触发，在用户设置的时间点（误差 ≤100ms）准确触发录音或提醒，任务增删改时自动重新调度。
 - **睡眠控制 (增强)**：
     - 集成 `IOKit` 电源管理 API。
-    - **原理**：监听设置变更及任务列表状态，若存在**已启用**的任务且开启了“有定时计划时禁止系统睡眠”，则启动 `kIOPMAssertionTypeNoIdleSleep` 电源断言，防止计划因系统休眠而漏触发。
+    - **原理**：监听设置变更及任务列表状态。新安装默认关闭定时计划防休眠；用户开启后，若存在**已启用**的任务，则持续持有 `kIOPMAssertionTypeNoIdleSleep` 电源断言，防止计划因系统休眠而漏触发。关闭时只在系统唤醒后补检查到期任务。
 - **防重复触发**：使用 `triggeredTaskIDs` 集合记录已触发任务。
 - **通知系统**：监听 `NSSystemClockDidChange`、`NSWorkspace.didWakeNotification` 以及 `scheduleSettingsChanged` 通知。
 

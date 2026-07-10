@@ -60,7 +60,7 @@
 | 屏幕与系统音频录制权限 | 必须可用 | 仅选择系统音频相关模式时触发 |
 | 录音期间防休眠 | 必须可用 | 录音中持有防休眠断言 |
 | 有定时计划时防休眠 | 可选能力 | 有启用计划时按用户设置持有断言 |
-| 日志 | 必须可用 | 写入 `~/Library/Application Support/Logs/MeetingRecorderPro_YYYY-MM-DD.log` |
+| 日志 | 必须可用 | 写入 `~/Library/Application Support/com.meetingrecorderpro.app/Logs/MeetingRecorderPro_YYYY-MM-DD.log` |
 
 ## 分发能力
 
@@ -68,7 +68,7 @@
 |---|---|---|
 | 开源许可 | 必须可用 | 根目录保留 MIT `LICENSE` |
 | 第三方声明 | 必须可用 | 根目录保留 `THIRD_PARTY_NOTICES.md` |
-| LAME 许可 | 必须可用 | 保留 `SimpleRecorder/ThirdParty/lame/COPYING`，DMG 根目录包含 `LAME-COPYING.txt` |
+| LAME 许可 | 必须可用 | 保留许可证、准确源码地址与校验值；DMG 包含许可证和替换/重链接说明 |
 | 本机 DMG | 必须可用 | `./build_dmg.sh` 通过 |
 | 正式 DMG | 发布前必须可用 | `RELEASE=1 ./build_dmg.sh` 通过 |
 | 自动更新 | 必须可用 | Sparkle 每天检查 GitHub Releases appcast；录音中禁用检查；发布时同步上传 DMG 和 `appcast.xml` |

@@ -28,21 +28,25 @@ Sparkle 不能直接读取 GitHub Release JSON；它读取的是 `appcast.xml`�
 
 1. `CFBundleShortVersionString`：用户可见版本号，例如 `1.0.1`
 2. `CFBundleVersion`：Sparkle 比较用构建号，必须递增
-3. GitHub Release assets：同一 tag 下必须同时包含 DMG 和 `appcast.xml`
+3. GitHub Release assets：同一 tag 下必须同时包含 DMG、`appcast.xml` 和 `lame-3.100.tar.gz`
 
 默认正式发布命令：
 
+先执行 `RELEASE=1 ./build_dmg.sh`，安装生成的 App 并取得通过的真实录音集成报告。然后发布同一份现成 App/DMG：
+
 ```bash
-RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh
+RELEASE=1 PUBLISH_GITHUB_RELEASE=1 \
+RELEASE_INTEGRATION_REPORT="test-results/recording-integration/<timestamp>/report.json" \
+./build_dmg.sh
 ```
 
-该命令会在打包、公证和 Gatekeeper 校验通过后执行：
+该命令不会重新构建；它会先校验现成 App/DMG 的签名、公证、Gatekeeper，以及真实录音报告中的可执行文件 SHA-256，再执行：
 
 ```bash
 scripts/publish_github_release.sh MeetingRecorderPro_YYYYMMDD.dmg
 ```
 
-发布脚本会生成 `build/appcast.xml`，并通过 `gh release upload --clobber` 覆盖 GitHub Release 上的同名资产。
+发布脚本会先核对 Sparkle 私钥派生出的 Ed25519 公钥与 App 内 `SUPublicEDKey`，并立即验签生成的签名；随后使用锁定的独立 Python 环境生成 `build/appcast.xml`。已有 tag 必须是正式 Release，draft/prerelease 会被拒绝，避免 `/releases/latest/` 保持旧版本。
 
 ## 签名密钥
 
@@ -61,9 +65,13 @@ Sparkle 更新包必须使用 Ed25519 签名。
 ```bash
 git status --short
 git check-ignore -v config/sparkle_ed25519_private.pem
-RELEASE=1 ./build_dmg.sh
-scripts/publish_github_release.sh MeetingRecorderPro_YYYYMMDD.dmg
+git tag --points-at HEAD
+RELEASE=1 PUBLISH_GITHUB_RELEASE=1 \
+RELEASE_INTEGRATION_REPORT="test-results/recording-integration/<timestamp>/report.json" \
+./build_dmg.sh
 ```
+
+发布前要先创建并推送与版本号一致的 tag。脚本不会替用户创建 tag，也不会在 tag 与当前 HEAD 不一致时上传资产。
 
 发布后必须验证：
 
