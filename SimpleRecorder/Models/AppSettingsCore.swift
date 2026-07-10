@@ -370,7 +370,7 @@ class AppSettings: ObservableObject {
         self.preventSleepDuringRecording =
             UserDefaults.standard.object(forKey: "preventSleepDuringRecording") as? Bool ?? true  // 默认开启
         self.preventSleepWithSchedule =
-            UserDefaults.standard.object(forKey: "preventSleepWithSchedule") as? Bool ?? true  // 默认开启
+            UserDefaults.standard.object(forKey: "preventSleepWithSchedule") as? Bool ?? false  // 新安装默认关闭；已有用户沿用原值
 
         normalizeAndPersistMaxDuration()
         refreshLaunchAtLoginStatus()

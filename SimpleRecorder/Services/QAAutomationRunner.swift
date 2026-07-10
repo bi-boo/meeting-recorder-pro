@@ -5,6 +5,8 @@
 //  仅在通过 --qa-scenario 启动时运行，用于打包产物的自动回归验证。
 //
 
+#if QA_AUTOMATION
+
 import AppKit
 import AVFoundation
 import Foundation
@@ -280,7 +282,12 @@ final class QAAutomationRunner {
 
         let recordings = newRecordings(since: before)
         let minimumBytes = minimumRecordingBytes(for: source)
-        let passed = recordings.contains { $0.bytes >= minimumBytes }
+        let passed = recordings.contains {
+            $0.isValid(
+                minimumBytes: minimumBytes,
+                minimumDuration: minimumRecordingDuration(expected: duration)
+            )
+        }
         return QAStepResult(
             name: name,
             status: passed ? .passed : .failed,
@@ -334,7 +341,13 @@ final class QAAutomationRunner {
 
         let recordings = newRecordings(since: before)
         let minimumBytes = minimumRecordingBytes(for: .microphone)
-        let passed = recordings.contains { $0.bytes >= minimumBytes }
+        let expectedDuration = durationBeforePause + durationAfterResume
+        let passed = recordings.contains {
+            $0.isValid(
+                minimumBytes: minimumBytes,
+                minimumDuration: minimumRecordingDuration(expected: expectedDuration)
+            )
+        }
         return QAStepResult(
             name: name,
             status: passed ? .passed : .failed,
@@ -511,7 +524,12 @@ final class QAAutomationRunner {
 
         let recordings = newRecordings(since: before)
         let minimumBytes = minimumRecordingBytes(for: source)
-        let passed = recordings.contains { $0.bytes >= minimumBytes }
+        let passed = recordings.contains {
+            $0.isValid(
+                minimumBytes: minimumBytes,
+                minimumDuration: minimumRecordingDuration(expected: duration)
+            )
+        }
         return QAStepResult(
             name: name,
             status: passed ? .passed : .failed,
@@ -608,12 +626,17 @@ final class QAAutomationRunner {
             since: before,
             extensionName: "mp3",
             minimumBytes: minimumBytes,
+            minimumDuration: minimumRecordingDuration(expected: duration),
             timeout: 20.0
         )
         settings.outputFormat = .m4a
 
         let passed = recordings.contains {
-            $0.extensionName == "mp3" && $0.bytes >= minimumBytes
+            $0.extensionName == "mp3"
+                && $0.isValid(
+                    minimumBytes: minimumBytes,
+                    minimumDuration: minimumRecordingDuration(expected: duration)
+                )
         }
         return QAStepResult(
             name: name,
@@ -676,7 +699,12 @@ final class QAAutomationRunner {
 
         let recordings = newRecordings(since: before)
         let minimumBytes = minimumRecordingBytes(for: .microphone)
-        let passed = recordings.contains { $0.bytes >= minimumBytes }
+        let passed = recordings.contains {
+            $0.isValid(
+                minimumBytes: minimumBytes,
+                minimumDuration: minimumRecordingDuration(expected: duration)
+            )
+        }
         return QAStepResult(
             name: name,
             status: passed ? .passed : .failed,
@@ -801,6 +829,10 @@ final class QAAutomationRunner {
         }
     }
 
+    private func minimumRecordingDuration(expected: TimeInterval) -> TimeInterval {
+        max(1.0, expected * 0.5)
+    }
+
     private func audioFiles() -> Set<URL> {
         let directory = AppSettings.shared.recordingsPath
         let urls =
@@ -825,19 +857,75 @@ final class QAAutomationRunner {
                 let attributes = try? fileManager.attributesOfItem(atPath: url.path)
                 let bytes = attributes?[.size] as? Int64 ?? 0
                 let modifiedAt = attributes?[.modificationDate] as? Date
+                let metrics = audioMetrics(for: url)
                 return QARecording(
                     path: url.path,
                     bytes: bytes,
                     modifiedAt: modifiedAt,
-                    extensionName: url.pathExtension.lowercased()
+                    extensionName: url.pathExtension.lowercased(),
+                    durationSeconds: metrics.durationSeconds,
+                    peakAmplitude: metrics.peakAmplitude,
+                    rmsAmplitude: metrics.rmsAmplitude,
+                    validationError: metrics.validationError
                 )
             }
+    }
+
+    private func audioMetrics(for url: URL) -> QAAudioMetrics {
+        do {
+            let file = try AVAudioFile(
+                forReading: url,
+                commonFormat: .pcmFormatFloat32,
+                interleaved: false
+            )
+            let format = file.processingFormat
+            guard format.sampleRate > 0, format.channelCount > 0 else {
+                return QAAudioMetrics(validationError: "音频格式缺少有效采样率或声道")
+            }
+
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8_192)!
+            var sampleCount = 0
+            var sumSquares = 0.0
+            var peak = Float.zero
+
+            while file.framePosition < file.length {
+                buffer.frameLength = 0
+                try file.read(into: buffer)
+                guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
+                    break
+                }
+
+                for channelIndex in 0..<Int(format.channelCount) {
+                    let channel = channels[channelIndex]
+                    for frameIndex in 0..<Int(buffer.frameLength) {
+                        let value = channel[frameIndex]
+                        peak = max(peak, abs(value))
+                        sumSquares += Double(value * value)
+                        sampleCount += 1
+                    }
+                }
+            }
+
+            guard sampleCount > 0 else {
+                return QAAudioMetrics(validationError: "音频可解码，但没有 PCM 样本")
+            }
+
+            return QAAudioMetrics(
+                durationSeconds: Double(file.length) / format.sampleRate,
+                peakAmplitude: Double(peak),
+                rmsAmplitude: sqrt(sumSquares / Double(sampleCount)),
+                validationError: nil
+            )
+        } catch {
+            return QAAudioMetrics(validationError: "音频解码失败: \(error.localizedDescription)")
+        }
     }
 
     private func waitForNewRecordings(
         since before: Set<URL>,
         extensionName: String,
         minimumBytes: Int64,
+        minimumDuration: TimeInterval,
         timeout: TimeInterval
     ) async -> [QARecording] {
         let deadline = Date().addingTimeInterval(timeout)
@@ -845,7 +933,11 @@ final class QAAutomationRunner {
 
         while Date() < deadline {
             if recordings.contains(where: {
-                $0.extensionName == extensionName && $0.bytes >= minimumBytes
+                $0.extensionName == extensionName
+                    && $0.isValid(
+                        minimumBytes: minimumBytes,
+                        minimumDuration: minimumDuration
+                    )
             }) {
                 return recordings
             }
@@ -1143,6 +1235,32 @@ private struct QARecording: Codable {
     var bytes: Int64
     var modifiedAt: Date?
     var extensionName: String
+    var durationSeconds: Double?
+    var peakAmplitude: Double?
+    var rmsAmplitude: Double?
+    var validationError: String?
+
+    func isValid(minimumBytes: Int64, minimumDuration: TimeInterval) -> Bool {
+        guard validationError == nil,
+            bytes >= minimumBytes,
+            let durationSeconds,
+            durationSeconds >= minimumDuration,
+            let peakAmplitude,
+            peakAmplitude >= 0.001,
+            let rmsAmplitude,
+            rmsAmplitude >= 0.0001
+        else {
+            return false
+        }
+        return true
+    }
+}
+
+private struct QAAudioMetrics {
+    var durationSeconds: Double? = nil
+    var peakAmplitude: Double? = nil
+    var rmsAmplitude: Double? = nil
+    var validationError: String? = nil
 }
 
 private extension RecordingState {
@@ -1156,3 +1274,5 @@ private extension RecordingState {
         }
     }
 }
+
+#endif

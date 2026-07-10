@@ -67,10 +67,6 @@ final class TimerTaskTests: XCTestCase {
             TimerRecordingStartConfirmationPolicy.decision(for: .starting, remainingAttempts: 1),
             .wait
         )
-        XCTAssertEqual(
-            TimerRecordingStartConfirmationPolicy.decision(for: .idle, remainingAttempts: 1),
-            .wait
-        )
     }
 
     func testAutoStartConfirmationPolicyConfirmsOnlyAfterRecording() {
@@ -80,6 +76,10 @@ final class TimerTaskTests: XCTestCase {
         )
         XCTAssertEqual(
             TimerRecordingStartConfirmationPolicy.decision(for: .starting, remainingAttempts: 0),
+            .failed
+        )
+        XCTAssertEqual(
+            TimerRecordingStartConfirmationPolicy.decision(for: .idle, remainingAttempts: 60),
             .failed
         )
     }
@@ -107,5 +107,49 @@ final class TimerTaskTests: XCTestCase {
                 excludingTaskID: existing.id
             )
         )
+    }
+
+    func testReminderPresentationTimeoutDoesNotExtendPastScheduledTime() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var task = TimerTask(actionType: .remind, reminderMinutes: 2)
+        task.nextTriggerTime = now.addingTimeInterval(30)
+
+        XCTAssertEqual(TimerReminderPresentationPolicy.timeout(for: task, at: now), 30)
+
+        task.nextTriggerTime = now.addingTimeInterval(-1)
+        XCTAssertEqual(TimerReminderPresentationPolicy.timeout(for: task, at: now), 0)
+    }
+
+    func testEnabledScheduledTaskRequestsContinuousSleepPrevention() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var task = TimerTask(actionType: .autoStart)
+        task.nextTriggerTime = now.addingTimeInterval(60 * 60)
+
+        XCTAssertTrue(TimerTaskSleepPreventionPolicy.shouldPreventSleep(tasks: [task]))
+    }
+
+    func testDisabledOrUnscheduledTaskDoesNotRequestSleepPrevention() {
+        var disabledTask = TimerTask(enabled: false, actionType: .autoStart)
+        disabledTask.nextTriggerTime = Date().addingTimeInterval(60)
+        var unscheduledTask = TimerTask(enabled: true, actionType: .autoStart)
+        unscheduledTask.nextTriggerTime = nil
+
+        XCTAssertFalse(
+            TimerTaskSleepPreventionPolicy.shouldPreventSleep(
+                tasks: [disabledTask, unscheduledTask]
+            )
+        )
+    }
+
+    func testTaskOccurrenceChangesWhenSameTaskIsRescheduled() throws {
+        var task = TimerTask(actionType: .remind)
+        task.nextTriggerTime = Date(timeIntervalSince1970: 1_000_000)
+        let original = try XCTUnwrap(TimerTaskOccurrence(task: task))
+
+        task.nextTriggerTime = Date(timeIntervalSince1970: 1_000_060)
+        let rescheduled = try XCTUnwrap(TimerTaskOccurrence(task: task))
+
+        XCTAssertNotEqual(original, rescheduled)
+        XCTAssertEqual(original.taskID, rescheduled.taskID)
     }
 }

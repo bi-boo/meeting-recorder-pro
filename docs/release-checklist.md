@@ -6,7 +6,7 @@
 
 - P0/P1 问题为 0。
 - README、PRD、架构、分发说明和功能清单没有过期承诺。
-- `THIRD_PARTY_NOTICES.md` 和 `SimpleRecorder/ThirdParty/lame/COPYING` 保留。
+- `THIRD_PARTY_NOTICES.md`、`docs/lame-relinking.md`、`SimpleRecorder/ThirdParty/lame/COPYING` 和已校验的 `lame-3.100.tar.gz` 保留。
 - `CFBundleShortVersionString` 和 `CFBundleVersion` 已更新，且 `CFBundleVersion` 大于上一版。
 - Git 工作区没有未提交的相关改动。
 - 没有 `_Conflict.swift`、`.env`、证书、Sparkle 私钥、DMG、build、qa-runs 被暂存。
@@ -46,6 +46,11 @@ test -d "$MOUNT_DIR/会议录音 Pro.app"
 test -f "$MOUNT_DIR/LICENSE.txt"
 test -f "$MOUNT_DIR/THIRD_PARTY_NOTICES.md"
 test -f "$MOUNT_DIR/LAME-COPYING.txt"
+test -f "$MOUNT_DIR/LAME-SOURCE-AND-RELINKING.md"
+test -f "$MOUNT_DIR/lame-3.100.tar.gz"
+echo "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e  $MOUNT_DIR/lame-3.100.tar.gz" | shasum -a 256 -c -
+test -f "$MOUNT_DIR/PermissionFlow-LICENSE.txt"
+test -f "$MOUNT_DIR/Sparkle-LICENSE.txt"
 hdiutil detach "$MOUNT_DIR"
 ```
 
@@ -68,9 +73,16 @@ RELEASE=1 ./build_dmg.sh
 
 正式发布并同步自动更新源：
 
+1. 先执行上面的 `RELEASE=1 ./build_dmg.sh`，安装这次生成的 App，并运行真实录音集成测试。
+2. 将通过的 `report.json` 交给发布命令；发布命令复用同一份现成 App/DMG，不会重新构建。
+
 ```bash
-RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh
+RELEASE=1 PUBLISH_GITHUB_RELEASE=1 \
+RELEASE_INTEGRATION_REPORT="test-results/recording-integration/<timestamp>/report.json" \
+./build_dmg.sh
 ```
+
+发布脚本还会强制检查：工作区干净、HEAD 已在 `origin` 远程分支上、本地和远程 tag 均指向 HEAD、公开 Release 不含 QA Runner、Developer ID 签名、DMG 公证/stapler/Gatekeeper 全部通过。上传前会对最终 DMG 再跑完整 QA，并把 QA 证据绑定到当前 HEAD、App 版本和 DMG SHA-256；真实录音报告必须匹配当前 HEAD、版本和 Release App 可执行文件 SHA-256，DMG 内可执行文件也必须完全一致。
 
 环境变量：
 
@@ -86,7 +98,7 @@ NOTARY_PROFILE="notarytool-profile"
 - stapler staple 成功。
 - `xcrun stapler validate` 成功。
 - Gatekeeper accepted。
-- GitHub Release 包含 `MeetingRecorderPro_YYYYMMDD.dmg` 和 `appcast.xml` 两个资产。
+- GitHub Release 包含 `MeetingRecorderPro_YYYYMMDD.dmg`、`appcast.xml` 和 `lame-3.100.tar.gz` 三个资产。
 - `appcast.xml` 的 `sparkle:version` 与当前 `CFBundleVersion` 一致，且 `enclosure url` 指向同一 tag 的 DMG。
 
 额外检查：
@@ -110,7 +122,8 @@ scripts/run_full_qa.sh
 - `failed=0`。
 - 只有 `manual-remainder` 可 skipped。
 - `artifact-check.log` 完成。
-- 录音样本包含 M4A 和 MP3，并能被 `afinfo` 识别。
+- 录音样本包含 M4A 和 MP3，每个文件都可解码、时长达标且非静音。
+- `qa-result.json` 中所有按开关启用的场景必须恰好出现一次；缺失、重复、状态与 summary 不一致都会失败。
 
 ## 发布说明必含内容
 
@@ -122,7 +135,7 @@ Release Notes 至少包含：
 - 核心功能：麦克风、系统声音、混合录音、定时录音、M4A/MP3。
 - 权限说明：麦克风、屏幕与系统音频录制。
 - 隐私说明：仅访问 GitHub Releases 检查更新，不上传录音或遥测。
-- 第三方组件说明：PermissionFlow、LAME。
+- 第三方组件说明：PermissionFlow、Sparkle、LAME，以及 LAME 源码/重链接说明。
 - SHA256。
 
 ## 发布后检查

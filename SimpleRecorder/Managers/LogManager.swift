@@ -43,9 +43,13 @@ class LogManager {
 
     /// 日志目录
     private lazy var logDirectory: URL = {
-        let logDir =
-            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Logs")
+        let bundleDirectory = Bundle.main.bundleIdentifier ?? "com.meetingrecorderpro.app"
+        let logDir = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
+            .appendingPathComponent(bundleDirectory, isDirectory: true)
+            .appendingPathComponent("Logs", isDirectory: true)
 
         // 确保目录存在
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
@@ -236,23 +240,36 @@ class LogManager {
     private func cleanupOldLogs() {
         let fileManager = FileManager.default
 
-        guard
-            let files = try? fileManager.contentsOfDirectory(
-                at: logDirectory, includingPropertiesForKeys: [.creationDateKey])
-        else {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: logDirectory,
+            includingPropertiesForKeys: nil
+        ) else {
             return
         }
 
         let calendar = Calendar.current
-        let cutoffDate = calendar.date(byAdding: .day, value: -retentionDays, to: Date())!
+        let cutoffDate = calendar.startOfDay(
+            for: calendar.date(byAdding: .day, value: -retentionDays, to: Date())!)
+        let logDateFormatter = DateFormatter()
+        logDateFormatter.calendar = calendar
+        logDateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        logDateFormatter.dateFormat = "yyyy-MM-dd"
 
         for file in files {
-            guard file.pathExtension == "log" else { continue }
+            let fileName = file.lastPathComponent
+            guard
+                file.pathExtension == "log",
+                fileName.hasPrefix("MeetingRecorderPro_"),
+                let separatorIndex = fileName.lastIndex(of: "_"),
+                let extensionIndex = fileName.lastIndex(of: "."),
+                separatorIndex < extensionIndex,
+                let logDate = logDateFormatter.date(
+                    from: String(fileName[
+                        fileName.index(after: separatorIndex)..<extensionIndex
+                    ]))
+            else { continue }
 
-            if let attributes = try? fileManager.attributesOfItem(atPath: file.path),
-                let creationDate = attributes[.creationDate] as? Date,
-                creationDate < cutoffDate
-            {
+            if logDate < cutoffDate {
                 try? fileManager.removeItem(at: file)
             }
         }

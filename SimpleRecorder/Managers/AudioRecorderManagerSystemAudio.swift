@@ -19,9 +19,10 @@ extension AudioRecorderManager {
 
     // MARK: - 仅系统音频录音配置
     @available(macOS 13.0, *)
-    func setupSystemAudioOnlyRecording() async throws {
+    @MainActor
+    func setupSystemAudioOnlyRecording(startupGeneration: Int) async throws {
         setupRecordingMixer()
-        try await startSystemAudioCapture()
+        try await startSystemAudioCapture(startupGeneration: startupGeneration)
 
         // 仅系统录音：设置增益为 1.0，并开启弹性缓冲以对抗时钟抖动
         isSystemAudioBuffering = true
@@ -43,7 +44,8 @@ extension AudioRecorderManager {
 
     // MARK: - 混合录音配置（麦克风 + 系统音频）
     @available(macOS 13.0, *)
-    func setupMixedRecording() async throws {
+    @MainActor
+    func setupMixedRecording(startupGeneration: Int) async throws {
         // 1. 设置硬件输入设备 (麦克风)
         try updateInputDevice()
         setupRecordingMixer()
@@ -66,7 +68,7 @@ extension AudioRecorderManager {
         inputNode.volume = 1.0
 
         // 4. 启动系统音频采集
-        try await startSystemAudioCapture()
+        try await startSystemAudioCapture(startupGeneration: startupGeneration)
 
         // 5. 将系统音频包装为 SourceNode 接入混音器 Bus 1
         systemAudioSourceNode = AVAudioSourceNode(format: recordingFormat) {
@@ -89,7 +91,12 @@ extension AudioRecorderManager {
 
     // MARK: - 系统音频采集启动
     @available(macOS 13.0, *)
-    func startSystemAudioCapture() async throws {
+    @MainActor
+    func startSystemAudioCapture(startupGeneration: Int) async throws {
+        guard recordingState == .starting,
+            recordingStartupGeneration == startupGeneration
+        else { throw CancellationError() }
+
         let captureGeneration = nextSystemAudioCaptureGeneration()
         let configuration = SCStreamConfiguration()
 
@@ -104,13 +111,23 @@ extension AudioRecorderManager {
         configuration.sampleRate = 48000
         configuration.channelCount = 1
         // 正常录音排除自己的音频，避免回声。QA 模式下需要捕获 runner 播放的测试音。
-        configuration.excludesCurrentProcessAudio = !QAAutomationRunner.isActive
+        #if QA_AUTOMATION
+            configuration.excludesCurrentProcessAudio = !QAAutomationRunner.isActive
+        #else
+            configuration.excludesCurrentProcessAudio = true
+        #endif
+
+        let output: SystemAudioStreamOutput
+        let stream: SCStream
 
         // 使用 macOS 14.2+ 的仅音频采集方式
         if #available(macOS 14.2, *) {
             // macOS 14.2+ 支持 audio-only 权限
             let content = try await SCShareableContent.excludingDesktopWindows(
                 true, onScreenWindowsOnly: false)
+            guard recordingState == .starting,
+                recordingStartupGeneration == startupGeneration
+            else { throw CancellationError() }
 
             guard let display = content.displays.first else {
                 throw NSError(
@@ -119,29 +136,37 @@ extension AudioRecorderManager {
             }
 
             // 排除当前应用程序（SimpleRecorder）的音频，避免回声；QA 模式需要捕获内置测试音。
-            let excludedApplications =
-                QAAutomationRunner.isActive
-                ? []
-                : content.applications.filter {
+            #if QA_AUTOMATION
+                let excludedApplications = QAAutomationRunner.isActive
+                    ? []
+                    : content.applications.filter {
+                        $0.bundleIdentifier == Bundle.main.bundleIdentifier
+                    }
+            #else
+                let excludedApplications = content.applications.filter {
                     $0.bundleIdentifier == Bundle.main.bundleIdentifier
                 }
+            #endif
 
             let filter = SCContentFilter(
                 display: display,
                 excludingApplications: excludedApplications,
                 exceptingWindows: [])
 
-            systemAudioOutput = SystemAudioStreamOutput { [weak self] sampleBuffer in
+            output = SystemAudioStreamOutput { [weak self] sampleBuffer in
                 self?.handleSystemAudioSampleBuffer(
                     sampleBuffer, captureGeneration: captureGeneration)
             }
 
-            systemAudioStream = SCStream(
+            stream = SCStream(
                 filter: filter, configuration: configuration, delegate: self)
         } else {
             // macOS 13.0-14.1 回退方案：需要使用 display filter
             let content = try await SCShareableContent.excludingDesktopWindows(
                 false, onScreenWindowsOnly: false)
+            guard recordingState == .starting,
+                recordingStartupGeneration == startupGeneration
+            else { throw CancellationError() }
 
             guard let display = content.displays.first else {
                 throw NSError(
@@ -151,21 +176,30 @@ extension AudioRecorderManager {
 
             let filter = SCContentFilter(display: display, excludingWindows: [])
 
-            systemAudioOutput = SystemAudioStreamOutput { [weak self] sampleBuffer in
+            output = SystemAudioStreamOutput { [weak self] sampleBuffer in
                 self?.handleSystemAudioSampleBuffer(
                     sampleBuffer, captureGeneration: captureGeneration)
             }
 
-            systemAudioStream = SCStream(
+            stream = SCStream(
                 filter: filter, configuration: configuration, delegate: self)
         }
 
-        if let output = systemAudioOutput {
-            try systemAudioStream?.addStreamOutput(
-                output, type: .audio, sampleHandlerQueue: systemAudioSampleQueue)
+        try stream.addStreamOutput(
+            output, type: .audio, sampleHandlerQueue: systemAudioSampleQueue)
+        try await stream.startCapture()
+
+        guard recordingState == .starting,
+            recordingStartupGeneration == startupGeneration
+        else {
+            try? await stream.stopCapture()
+            throw CancellationError()
         }
 
-        try await systemAudioStream?.startCapture()
+        // 所有 await 和代次校验完成后再发布到全局状态，防止已取消的旧 Task
+        // 覆盖新会话的 stream/output。
+        systemAudioOutput = output
+        systemAudioStream = stream
         print("🔊 系统音频采集已启动")
     }
 
@@ -453,18 +487,16 @@ class SystemAudioStreamOutput: NSObject, SCStreamOutput {
 extension AudioRecorderManager: SCStreamDelegate {
     /// 系统音频采集流发生错误时的回调
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        // 只有在录音中且使用系统音频时才处理
-        guard recordingState == .recording,
-            currentAudioSource == .systemAudio || currentAudioSource == .both
-        else {
-            return
-        }
-
-        LogManager.shared.error("系统音频采集流停止 | 错误: \(error.localizedDescription)")
-
-        // 触发录音中断处理
+        // delegate 可能运行在 ScreenCaptureKit 内部队列；统一切主队列读取状态。
         DispatchQueue.main.async { [weak self] in
-            self?.handleRecordingInterruption(reason: .systemAudioStreamError(error))
+            guard let self = self,
+                self.systemAudioStream === stream,
+                (self.recordingState == .recording || self.recordingState == .paused),
+                (self.currentAudioSource == .systemAudio || self.currentAudioSource == .both)
+            else { return }
+
+            LogManager.shared.error("系统音频采集流停止 | 错误: \(error.localizedDescription)")
+            self.handleRecordingInterruption(reason: .systemAudioStreamError(error))
         }
     }
 }

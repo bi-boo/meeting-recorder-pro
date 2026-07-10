@@ -1,0 +1,5 @@
+# Pinned release-tool dependency. Update deliberately and verify appcast signatures before merging.
+cryptography==49.0.0
+cffi==2.0.0
+pycparser==2.23
+typing_extensions==4.16.0

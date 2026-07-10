@@ -46,6 +46,20 @@ final class UpdateManager: NSObject {
     private var status: UpdateStatus = .idle
     private var didStart = false
 
+    override private init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(recordingStateDidChange),
+            name: .recordingStateChanged,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     var menuTitle: String {
         switch status {
         case .checking:
@@ -69,8 +83,19 @@ final class UpdateManager: NSObject {
     var canSelectMenuItem: Bool {
         guard didStart else { return false }
         return availableVersion != nil
-            && !AudioRecorderManager.shared.isRecording
+            && !AudioRecorderManager.shared.isRecordingOrStarting
             && !status.isBusy
+    }
+
+    /// Sparkle 已经得到安装确认后不能再安全撤销，短暂阻止新的录音启动，
+    /// 避免应用退出安装与录音保存发生竞争。解压阶段仍允许录音，ready 回调会返回 dismiss。
+    var blocksRecordingStart: Bool {
+        switch status {
+        case .readyToInstall, .installing:
+            return true
+        case .idle, .checking, .downloading, .extracting, .failed:
+            return false
+        }
     }
 
     func start(onStatusChanged: @escaping () -> Void) {
@@ -92,7 +117,7 @@ final class UpdateManager: NSObject {
     }
 
     func handleMenuSelection() {
-        guard !AudioRecorderManager.shared.isRecording else {
+        guard !AudioRecorderManager.shared.isRecordingOrStarting else {
             LogManager.shared.info("录音中禁止检查更新")
             NSSound.beep()
             return
@@ -173,6 +198,44 @@ final class UpdateManager: NSObject {
         setStatus(.failed(Self.shortErrorMessage(error)))
     }
 
+    fileprivate func markUpdateCancelledForRecording() {
+        clearPendingInstallation()
+        installingDisplayVersion = nil
+        installingBuildVersion = nil
+        if status.isBusy {
+            setStatus(.idle)
+        } else {
+            notifyStatusChanged()
+        }
+    }
+
+    @objc private func recordingStateDidChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self,
+                AudioRecorderManager.shared.isRecordingOrStarting,
+                self.status.isBusy
+            else { return }
+
+            switch self.status {
+            case .checking, .downloading:
+                if self.userDriver.cancelActiveUpdateForRecording() {
+                    LogManager.shared.info("录音开始，已取消尚未解压的更新流程")
+                    self.markUpdateCancelledForRecording()
+                } else {
+                    LogManager.shared.warning("更新取消句柄不可用，保留真实更新状态")
+                }
+            case .extracting:
+                // Sparkle 规定下载取消句柄只在开始解压前有效。此时保持 busy，
+                // 等 showReadyToInstallAndRelaunch 看到录音状态后返回 dismiss。
+                LogManager.shared.info("录音开始时更新正在解压，将在安装确认阶段安全取消")
+            case .readyToInstall, .installing:
+                LogManager.shared.warning("更新已经进入安装阶段，录音启动门禁应已阻止该竞态")
+            case .idle, .failed:
+                break
+            }
+        }
+    }
+
     private func notifyStatusChanged() {
         DispatchQueue.main.async { [weak self] in
             self?.onStatusChanged?()
@@ -232,7 +295,7 @@ final class UpdateManager: NSObject {
 
 extension UpdateManager: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
-        if AudioRecorderManager.shared.isRecording {
+        if AudioRecorderManager.shared.isRecordingOrStarting {
             throw NSError(
                 domain: "MeetingRecorderProUpdate",
                 code: 1,
@@ -288,6 +351,16 @@ extension UpdateManager: SPUUpdaterDelegate {
 }
 
 private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
+    private var activeCancellation: (() -> Void)?
+
+    @discardableResult
+    func cancelActiveUpdateForRecording() -> Bool {
+        guard let cancellation = activeCancellation else { return false }
+        activeCancellation = nil
+        cancellation()
+        return true
+    }
+
     func show(_ request: SPUUpdatePermissionRequest) async -> SUUpdatePermissionResponse {
         SUUpdatePermissionResponse(
             automaticUpdateChecks: true,
@@ -297,6 +370,7 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
     }
 
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+        activeCancellation = cancellation
         LogManager.shared.info("开始检查更新")
     }
 
@@ -306,8 +380,9 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
             return .dismiss
         }
 
-        if AudioRecorderManager.shared.isRecording {
+        if AudioRecorderManager.shared.isRecordingOrStarting {
             LogManager.shared.warning("录音中发现更新，已取消安装流程 | 版本: \(appcastItem.displayVersionString)")
+            UpdateManager.shared.markUpdateCancelledForRecording()
             return .dismiss
         }
 
@@ -342,6 +417,7 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
     }
 
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
+        activeCancellation = cancellation
         LogManager.shared.info("开始下载更新包")
         UpdateManager.shared.markDownloadStarted()
     }
@@ -354,6 +430,8 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
     }
 
     func showDownloadDidStartExtractingUpdate() {
+        // Sparkle 的 cancellation 从此刻起不再保证有效，不能继续暴露为可取消状态。
+        activeCancellation = nil
         LogManager.shared.info("更新包下载完成，开始解压")
         UpdateManager.shared.markExtractionStarted()
     }
@@ -362,8 +440,9 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
     }
 
     func showReadyToInstallAndRelaunch() async -> SPUUserUpdateChoice {
-        if AudioRecorderManager.shared.isRecording {
+        if AudioRecorderManager.shared.isRecordingOrStarting {
             LogManager.shared.warning("录音中禁止重启安装更新")
+            UpdateManager.shared.markUpdateCancelledForRecording()
             return .dismiss
         }
 
@@ -376,15 +455,21 @@ private final class DirectInstallUpdateUserDriver: NSObject, SPUUserDriver {
         withApplicationTerminated applicationTerminated: Bool,
         retryTerminatingApplication: @escaping () -> Void
     ) {
+        activeCancellation = nil
         LogManager.shared.info("正在安装更新 | 应用已退出: \(applicationTerminated)")
         UpdateManager.shared.markInstalling()
     }
 
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool) async {
+        activeCancellation = nil
         LogManager.shared.info("更新安装完成 | 已重启: \(relaunched)")
     }
 
     func dismissUpdateInstallation() {
+        activeCancellation = nil
+        if AudioRecorderManager.shared.isRecordingOrStarting {
+            UpdateManager.shared.markUpdateCancelledForRecording()
+        }
         LogManager.shared.info("更新流程已结束")
     }
 }

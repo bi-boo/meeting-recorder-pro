@@ -112,13 +112,13 @@ struct TimerTaskListView: View {
                     .tint(.green)
                     .disabled(true)
 
-                Toggle("有启用的定时计划时，保持电脑唤醒", isOn: $settings.preventSleepWithSchedule)
+                Toggle("有启用的定时计划时，阻止电脑自动休眠", isOn: $settings.preventSleepWithSchedule)
                     .tint(.green)
             } header: {
                 Text("开机与唤醒")
                     .padding(.bottom, 4)
             } footer: {
-                Text("「录音期间保持唤醒」和「系统音频禁止屏幕关闭」为强制设置，确保录音完整性，无法关闭")
+                Text("定时计划防休眠默认关闭；开启后，只要存在启用的计划就会持续阻止自动休眠。关闭时，电脑睡眠期间的计划会在唤醒后补检查，无法保证准点触发。")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

@@ -69,9 +69,38 @@ struct TimerRecordingStartConfirmationPolicy {
         switch observation {
         case .recording:
             return .confirmed
-        case .starting, .idle:
+        case .starting:
             return remainingAttempts > 0 ? .wait : .failed
+        case .idle:
+            return .failed
         }
+    }
+}
+
+/// 唯一标识一个任务的某次计划，避免旧提醒回调推进编辑后的新计划。
+struct TimerTaskOccurrence: Hashable {
+    let taskID: UUID
+    let scheduledTime: Date
+
+    init?(task: TimerTask) {
+        guard let scheduledTime = task.nextTriggerTime else { return nil }
+        self.taskID = task.id
+        self.scheduledTime = scheduledTime
+    }
+}
+
+/// 在没有特权 helper 的前提下，只有持续阻止空闲睡眠才能保证未来计划不会因系统睡眠漏触发。
+struct TimerTaskSleepPreventionPolicy {
+    static func shouldPreventSleep(tasks: [TimerTask]) -> Bool {
+        tasks.contains { $0.enabled && $0.nextTriggerTime != nil }
+    }
+}
+
+struct TimerReminderPresentationPolicy {
+    static func timeout(for task: TimerTask, at date: Date = Date()) -> TimeInterval {
+        let configuredTimeout = Double(task.reminderMinutes) * 60
+        guard let nextTriggerTime = task.nextTriggerTime else { return configuredTimeout }
+        return max(0, min(configuredTimeout, nextTriggerTime.timeIntervalSince(date)))
     }
 }
 

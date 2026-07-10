@@ -38,14 +38,8 @@ extension AudioRecorderManager {
             return false
         }
 
-        // 锁定当前录音使用的音频源
-        currentAudioSource = AppSettings.shared.audioSource
-
-        // 如果需要系统音频但系统版本不支持，降级为麦克风
-        if !AppSettings.isSystemAudioSupported && currentAudioSource != .microphone {
-            currentAudioSource = .microphone
-            print("⚠️ 系统版本不支持系统音频采集，已降级为麦克风模式")
-        }
+        // currentAudioSource 已在权限检查前锁定，避免用户在异步授权期间切换设置，
+        // 也确保仅系统声音模式不会误走麦克风权限。
 
         // 系统音频采集依赖 ScreenCaptureKit 的显示器捕获对象，需在启动采集前阻止显示器睡眠。
         setupDisplaySleepPreventionForSystemAudio()
@@ -58,8 +52,15 @@ extension AudioRecorderManager {
         case .systemAudio, .both:
             // 系统音频模式：需要 async，使用 Task 启动
             if #available(macOS 13.0, *) {
+                let startupGeneration = recordingStartupGeneration
                 Task { @MainActor in
-                    await self.startSystemAudioRecording(at: recordingsPath)
+                    guard self.recordingState == .starting,
+                        self.recordingStartupGeneration == startupGeneration
+                    else { return }
+                    await self.startSystemAudioRecording(
+                        at: recordingsPath,
+                        startupGeneration: startupGeneration
+                    )
                 }
                 return true
             } else {
@@ -110,9 +111,9 @@ extension AudioRecorderManager {
                 throw assetWriter?.error ?? NSError(domain: "AudioRecorder", code: -1)
             }
 
-            setAcceptingAudioBuffers(true)
+            startupConfigurationChanged = false
             try audioEngine.start()
-            finalizeRecordingStart(fileURL: finalFileURL)
+            scheduleRecordingStartupStabilization(fileURL: finalFileURL)
             return true
 
         } catch {
@@ -153,7 +154,12 @@ extension AudioRecorderManager {
 
     // MARK: - 系统音频录音启动（异步）
     @available(macOS 13.0, *)
-    func startSystemAudioRecording(at recordingsPath: URL) async {
+    @MainActor
+    func startSystemAudioRecording(at recordingsPath: URL, startupGeneration: Int) async {
+        guard recordingState == .starting,
+            recordingStartupGeneration == startupGeneration
+        else { return }
+
         do {
             setAcceptingAudioBuffers(false)
             try FileManager.default.createDirectory(
@@ -187,21 +193,29 @@ extension AudioRecorderManager {
             prepareAudioEngineForNewRecording()
 
             if currentAudioSource == .systemAudio {
-                try await setupSystemAudioOnlyRecording()
+                try await setupSystemAudioOnlyRecording(startupGeneration: startupGeneration)
             } else {
-                try await setupMixedRecording()
+                try await setupMixedRecording(startupGeneration: startupGeneration)
             }
+
+            guard recordingState == .starting,
+                recordingStartupGeneration == startupGeneration
+            else { throw CancellationError() }
 
             guard assetWriter?.startWriting() == true else {
                 throw assetWriter?.error ?? NSError(domain: "AudioRecorder", code: -1)
             }
 
             // 启动音频引擎以开始处理
-            setAcceptingAudioBuffers(true)
+            startupConfigurationChanged = false
             try audioEngine.start()
-            finalizeRecordingStart(fileURL: finalFileURL)
+            scheduleRecordingStartupStabilization(fileURL: finalFileURL)
 
         } catch {
+            guard recordingStartupGeneration == startupGeneration else {
+                LogManager.shared.info("忽略已取消的系统音频启动任务")
+                return
+            }
             setAcceptingAudioBuffers(false)
             LogManager.shared.error("系统音频录音启动失败 | 错误: \(error.localizedDescription)")
 
@@ -254,8 +268,127 @@ extension AudioRecorderManager {
         }
     }
 
+    // MARK: - 启动期设备格式稳定
+
+    /// 蓝牙麦克风第一次启动后可能从 48kHz 切到 24kHz，并触发一次引擎配置变化。
+    /// 仅系统声音不依赖输入设备，可直接完成；含麦克风的模式等待一个短窗口并最多重建一次。
+    func scheduleRecordingStartupStabilization(fileURL: URL) {
+        guard recordingState == .starting else { return }
+
+        if currentAudioSource == .systemAudio {
+            finalizeRecordingStart(fileURL: fileURL)
+            return
+        }
+
+        let generation = recordingStartupGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + startupStabilizationDelay) { [weak self] in
+            guard let self = self,
+                self.recordingState == .starting,
+                self.recordingStartupGeneration == generation
+            else { return }
+
+            guard self.startupConfigurationChanged else {
+                self.finalizeRecordingStart(fileURL: fileURL)
+                return
+            }
+
+            guard self.startupCaptureRetryCount < self.maximumStartupCaptureRetries else {
+                self.failRecordingStartup(
+                    fileURL: fileURL,
+                    message: "输入设备格式在启动后仍持续变化，请重新选择麦克风后再试。")
+                return
+            }
+
+            self.startupCaptureRetryCount += 1
+            LogManager.shared.warning(
+                "启动期检测到输入格式变化，等待设备稳定后重建采集链路 | 重试: \(self.startupCaptureRetryCount)/\(self.maximumStartupCaptureRetries)")
+            Task { @MainActor in
+                await self.rebuildCaptureDuringStartup(
+                    fileURL: fileURL,
+                    generation: generation
+                )
+            }
+        }
+    }
+
+    @MainActor
+    func rebuildCaptureDuringStartup(fileURL: URL, generation: Int) async {
+        guard recordingState == .starting, recordingStartupGeneration == generation else { return }
+
+        setAcceptingAudioBuffers(false)
+        invalidateSystemAudioCaptureGeneration()
+
+        if #available(macOS 13.0, *) {
+            let previousStream = systemAudioStream
+            systemAudioStream = nil
+            systemAudioOutput = nil
+            try? await previousStream?.stopCapture()
+        }
+        guard recordingState == .starting, recordingStartupGeneration == generation else { return }
+
+        do {
+            prepareAudioEngineForNewRecording()
+            if currentAudioSource == .microphone {
+                try setupMicrophoneOnlyRecording()
+            } else if #available(macOS 13.0, *) {
+                try await setupMixedRecording(startupGeneration: generation)
+            }
+
+            guard recordingState == .starting,
+                recordingStartupGeneration == generation
+            else { return }
+            startupConfigurationChanged = false
+            try audioEngine.start()
+            scheduleRecordingStartupStabilization(fileURL: fileURL)
+        } catch {
+            guard recordingState == .starting,
+                recordingStartupGeneration == generation
+            else {
+                LogManager.shared.info("忽略已取消的启动期采集重建任务")
+                return
+            }
+            failRecordingStartup(
+                fileURL: fileURL,
+                message: "输入设备稳定后重新建立录音链路失败：\(error.localizedDescription)"
+            )
+        }
+    }
+
+    func failRecordingStartup(fileURL: URL, message: String) {
+        recordingStartupGeneration += 1
+        setAcceptingAudioBuffers(false)
+        cleanupAudioCapture()
+        assetWriter?.cancelWriting()
+        assetWriter = nil
+        assetWriterInput = nil
+        isWriterStarted = false
+        currentRecordingURL = nil
+        recordingDeviceID = nil
+        recordingDeviceName = nil
+        recordingInputSampleRate = nil
+        recordingInputChannelCount = nil
+        activeInputDeviceID = nil
+        activeInputDeviceName = nil
+        expectedDefaultInputDeviceID = nil
+        startupConfigurationChanged = false
+        startupCaptureRetryCount = 0
+        engineConfigurationRecoveryAttempts = 0
+        try? FileManager.default.removeItem(at: fileURL)
+        clearRecordingState()
+        releaseSleepPrevention()
+        recordingState = .idle
+        LogManager.shared.error("录音启动稳定性检查失败 | \(message)")
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+        showRecordingErrorAlert(message: message)
+    }
+
     // MARK: - 录音启动完成处理
     func finalizeRecordingStart(fileURL: URL) {
+        guard recordingState == .starting else {
+            LogManager.shared.warning("忽略过期的录音启动完成回调 | 当前状态: \(recordingState)")
+            return
+        }
+
         // 开始新的录音会话
         let sessionID = LogManager.shared.startRecordingSession()
 
@@ -275,6 +408,7 @@ extension AudioRecorderManager {
         lastWarningTime = 0
         lastDiskCheckTime = Date().timeIntervalSince1970
         isHandlingInterruption = false
+        engineConfigurationRecoveryAttempts = 0
         lastObservedFrameCount = 0
         audioStallBeganAt = nil
         resetFrameDropStats()
@@ -292,6 +426,15 @@ extension AudioRecorderManager {
                 $0.id == AppSettings.shared.selectedDeviceID
             })?.name
 
+        if currentAudioSource != .systemAudio {
+            let inputFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+            recordingInputSampleRate = inputFormat.sampleRate
+            recordingInputChannelCount = inputFormat.channelCount
+        } else {
+            recordingInputSampleRate = nil
+            recordingInputChannelCount = nil
+        }
+
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self, let startDate = self.currentSegmentStartTime else { return }
             self.recordingDuration = self.accumulatedDuration + Date().timeIntervalSince(startDate)
@@ -307,7 +450,10 @@ extension AudioRecorderManager {
             let currentTime = Date().timeIntervalSince1970
             if currentTime - self.lastDiskCheckTime >= self.diskCheckInterval {
                 self.lastDiskCheckTime = currentTime
-                if !self.checkDiskSpace(at: AppSettings.shared.recordingsPath) {
+                let activeRecordingDirectory =
+                    self.currentRecordingURL?.deletingLastPathComponent()
+                    ?? AppSettings.shared.recordingsPath
+                if !self.checkDiskSpace(at: activeRecordingDirectory) {
                     self.handleRecordingInterruption(reason: .diskSpaceFull)
                     return
                 }

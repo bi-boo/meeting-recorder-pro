@@ -31,6 +31,8 @@ xcuserdata/
 qa-runs/
 ui-audit-*/
 *.profraw
+__pycache__/
+*.pyc
 
 # =====================================
 # 敏感配置（隐私保护）

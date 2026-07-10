@@ -11,9 +11,11 @@ RECORDINGS_DIR="$QA_DIR/recordings"
 SCENARIO_PATH="$QA_DIR/scenario.json"
 RESULT_PATH="$QA_DIR/qa-result.json"
 REPORT_PATH="$QA_DIR/report.md"
-APP_PATH="$ROOT_DIR/build/Release/SimpleRecorder.app"
+EVIDENCE_PATH="${QA_EVIDENCE_PATH:-$QA_DIR/release-evidence.json}"
+PUBLIC_APP_PATH="$ROOT_DIR/build/Release/SimpleRecorder.app"
+APP_PATH="$ROOT_DIR/build/QA/Release/SimpleRecorder.app"
 APP_BIN="$APP_PATH/Contents/MacOS/SimpleRecorder"
-LOG_FILE="$HOME/Library/Application Support/Logs/MeetingRecorderPro_$(date +%Y-%m-%d).log"
+LOG_FILE="$HOME/Library/Application Support/com.meetingrecorderpro.app/Logs/MeetingRecorderPro_$(date +%Y-%m-%d).log"
 
 RECORD_SECONDS="${QA_RECORD_SECONDS:-4}"
 PAUSE_SECONDS="${QA_PAUSE_SECONDS:-1}"
@@ -23,6 +25,9 @@ INCLUDE_MIXED_AUDIO="${QA_INCLUDE_MIXED_AUDIO:-true}"
 INCLUDE_TIMER="${QA_INCLUDE_TIMER:-true}"
 ALLOW_SKIPS="${QA_ALLOW_SKIPS:-false}"
 QA_TIMEOUT_SECONDS="${QA_TIMEOUT_SECONDS:-180}"
+SKIP_RELEASE_BUILD="${QA_SKIP_BUILD:-false}"
+
+source "$ROOT_DIR/scripts/qa_process_guard.sh"
 
 json_bool() {
   local name="$1"
@@ -63,6 +68,7 @@ INCLUDE_SYSTEM_AUDIO_JSON="$(json_bool QA_INCLUDE_SYSTEM_AUDIO "$INCLUDE_SYSTEM_
 INCLUDE_MIXED_AUDIO_JSON="$(json_bool QA_INCLUDE_MIXED_AUDIO "$INCLUDE_MIXED_AUDIO")"
 INCLUDE_TIMER_JSON="$(json_bool QA_INCLUDE_TIMER "$INCLUDE_TIMER")"
 ALLOW_SKIPS_JSON="$(json_bool QA_ALLOW_SKIPS "$ALLOW_SKIPS")"
+SKIP_RELEASE_BUILD_JSON="$(json_bool QA_SKIP_BUILD "$SKIP_RELEASE_BUILD")"
 QA_TIMEOUT_SECONDS="$(json_positive_int QA_TIMEOUT_SECONDS "$QA_TIMEOUT_SECONDS")"
 
 mkdir -p "$RECORDINGS_DIR"
@@ -108,18 +114,38 @@ echo "场景: $SCENARIO_PATH"
 
 echo
 echo "== Build package =="
-./build_dmg.sh | tee "$QA_DIR/build.log"
-
-DMG_PATH="$(find "$ROOT_DIR" -maxdepth 1 -type f -name 'MeetingRecorderPro_*.dmg' -print | sort | tail -n 1)"
-if [[ -z "$DMG_PATH" ]]; then
-  echo "未找到 MeetingRecorderPro_*.dmg" >&2
-  exit 1
+if [[ "$SKIP_RELEASE_BUILD_JSON" == "true" ]]; then
+  if [[ ! -d "$PUBLIC_APP_PATH" ]]; then
+    echo "QA_SKIP_BUILD=true 但公开 Release App 不存在: $PUBLIC_APP_PATH" >&2
+    exit 1
+  fi
+  printf '使用已有公开 Release App: %s\n' "$PUBLIC_APP_PATH" | tee "$QA_DIR/build.log"
+else
+  ./build_dmg.sh | tee "$QA_DIR/build.log"
 fi
 
 echo
-echo "== Stop existing app =="
-pkill -x SimpleRecorder >/dev/null 2>&1 || true
-sleep 1
+echo "== Build QA-only app =="
+scripts/build_qa_app.sh | tee "$QA_DIR/qa-app-build.log"
+
+if [[ "$SKIP_RELEASE_BUILD_JSON" == "true" ]]; then
+  DMG_PATH="${QA_DMG_PATH:-}"
+else
+  DMG_PATH="$(find "$ROOT_DIR" -maxdepth 1 -type f -name 'MeetingRecorderPro_*.dmg' -print | sort | tail -n 1)"
+fi
+if [[ -z "$DMG_PATH" ]]; then
+  echo "未找到 DMG；QA_SKIP_BUILD=true 时必须显式设置 QA_DMG_PATH。" >&2
+  exit 1
+fi
+if [[ ! -f "$DMG_PATH" ]]; then
+  echo "DMG 不存在: $DMG_PATH" >&2
+  exit 1
+fi
+DMG_PATH="$(cd "$(dirname "$DMG_PATH")" && pwd)/$(basename "$DMG_PATH")"
+
+echo
+echo "== Check existing app =="
+qa_prepare_for_run "$APP_BIN"
 
 if [[ ! -x "$APP_BIN" ]]; then
   echo "App binary not found: $APP_BIN" >&2
@@ -136,9 +162,12 @@ deadline=$((SECONDS + QA_TIMEOUT_SECONDS))
 
 while kill -0 "$APP_PID" >/dev/null 2>&1; do
   if (( SECONDS >= deadline )); then
-    echo "QA 自动化超时，终止进程: $APP_PID" >&2
-    kill "$APP_PID" >/dev/null 2>&1 || true
-    wait "$APP_PID" >/dev/null 2>&1 || true
+    echo "QA 自动化超时，请求 App 优雅退出: $APP_PID" >&2
+    if qa_gracefully_quit_pid "$APP_PID" "$APP_BIN"; then
+      wait "$APP_PID" >/dev/null 2>&1 || true
+    else
+      echo "QA App 仍在运行，为避免丢失录音，脚本未强制终止它。" >&2
+    fi
     APP_EXIT=124
     break
   fi
@@ -163,11 +192,19 @@ fi
 echo
 echo "== QA result =="
 set +e
+scripts/validate_qa_result.py \
+  --result "$RESULT_PATH" \
+  --recordings "$RECORDINGS_DIR" \
+  --app-info-plist "$PUBLIC_APP_PATH/Contents/Info.plist" \
+  --expect-mp3 "$INCLUDE_MP3_JSON" \
+  --expect-system-audio "$INCLUDE_SYSTEM_AUDIO_JSON" \
+  --expect-mixed-audio "$INCLUDE_MIXED_AUDIO_JSON" \
+  --expect-timer "$INCLUDE_TIMER_JSON" \
+  --allow-skips "$ALLOW_SKIPS_JSON"
+RESULT_EXIT=$?
+set -e
+
 QA_ALLOW_SKIPS_JSON="$ALLOW_SKIPS_JSON" \
-QA_EXPECT_MP3="$INCLUDE_MP3_JSON" \
-QA_EXPECT_SYSTEM_AUDIO="$INCLUDE_SYSTEM_AUDIO_JSON" \
-QA_EXPECT_MIXED_AUDIO="$INCLUDE_MIXED_AUDIO_JSON" \
-QA_EXPECT_TIMER="$INCLUDE_TIMER_JSON" \
 /usr/bin/python3 - "$RESULT_PATH" "$REPORT_PATH" "$DMG_PATH" <<'PY'
 import hashlib
 import json
@@ -192,20 +229,9 @@ except Exception:
 
 sha256 = hashlib.sha256(dmg_path.read_bytes()).hexdigest()
 allow_skips = os.environ.get("QA_ALLOW_SKIPS_JSON") == "true"
-
-required_steps = []
-if os.environ.get("QA_EXPECT_MP3") == "true":
-    required_steps.append("5.2 output-format-mp3")
-if os.environ.get("QA_EXPECT_SYSTEM_AUDIO") == "true":
-    required_steps.append("4.3 system-audio")
-if os.environ.get("QA_EXPECT_MIXED_AUDIO") == "true":
-    required_steps.append("4.4 mixed-audio")
-if os.environ.get("QA_EXPECT_TIMER") == "true":
-    required_steps.append("6.2 timer-auto-start")
-
 skipped_required = [
     step for step in steps
-    if step.get("name") in required_steps and step.get("status") == "skipped"
+    if step.get("name") != "manual-remainder" and step.get("status") == "skipped"
 ]
 
 lines = [
@@ -226,7 +252,14 @@ lines = [
 
 for step in steps:
     recordings = "<br>".join(
-        f"{pathlib.Path(item.get('path', '')).name} ({item.get('bytes', 0)} bytes)"
+        (
+            f"{pathlib.Path(item.get('path', '')).name} "
+            f"({item.get('bytes', 0)} bytes, "
+            f"duration={item.get('durationSeconds', 'unknown')}, "
+            f"peak={item.get('peakAmplitude', 'unknown')}, "
+            f"rms={item.get('rmsAmplitude', 'unknown')}, "
+            f"error={item.get('validationError') or 'none'})"
+        )
         for item in step.get("recordings", [])
     )
     message = (step.get("message") or "").replace("|", "\\|")
@@ -246,20 +279,14 @@ if skipped_required and not allow_skips:
 
 report_path.write_text("\n".join(lines) + "\n")
 print(report_path)
-
-has_failed_steps = int(summary.get("failed", 0)) > 0
-has_blocking_skips = bool(skipped_required) and not allow_skips
-sys.exit(1 if has_failed_steps or has_blocking_skips else 0)
 PY
-RESULT_EXIT=$?
-set -e
 
 echo
 echo "== Artifact check =="
 set +e
 scripts/qa_artifact_check.sh \
   --dmg "$DMG_PATH" \
-  --app "$APP_PATH" \
+  --app "$PUBLIC_APP_PATH" \
   --recordings "$RECORDINGS_DIR" \
   --log-file "$LOG_FILE" | tee "$QA_DIR/artifact-check.log"
 ARTIFACT_EXIT="${PIPESTATUS[0]}"
@@ -277,6 +304,51 @@ echo "包校验日志: $QA_DIR/artifact-check.log"
 if [[ "$APP_EXIT" -ne 0 || "$RESULT_EXIT" -ne 0 || "$ARTIFACT_EXIT" -ne 0 ]]; then
   echo "QA 未完全通过: app=$APP_EXIT result=$RESULT_EXIT artifact=$ARTIFACT_EXIT" >&2
   exit 1
+fi
+
+if [[ "$ALLOW_SKIPS_JSON" == "false" ]]; then
+  QA_RESULT_PATH="$RESULT_PATH" \
+  QA_EVIDENCE_PATH="$EVIDENCE_PATH" \
+  QA_DMG_PATH="$DMG_PATH" \
+  QA_ALLOW_SKIPS_JSON="$ALLOW_SKIPS_JSON" \
+  /usr/bin/python3 <<'PY'
+import datetime
+import hashlib
+import json
+import os
+import pathlib
+import plistlib
+import subprocess
+
+result_path = pathlib.Path(os.environ["QA_RESULT_PATH"]).resolve()
+evidence_path = pathlib.Path(os.environ["QA_EVIDENCE_PATH"]).resolve()
+dmg_path = pathlib.Path(os.environ["QA_DMG_PATH"]).resolve()
+app_info_path = pathlib.Path("build/Release/SimpleRecorder.app/Contents/Info.plist")
+
+result = json.loads(result_path.read_text(encoding="utf-8"))
+with app_info_path.open("rb") as handle:
+    info = plistlib.load(handle)
+
+evidence = {
+    "schemaVersion": 1,
+    "status": "passed",
+    "generatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "gitCommit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+    "appVersion": str(info["CFBundleShortVersionString"]),
+    "buildVersion": str(info["CFBundleVersion"]),
+    "dmgFileName": dmg_path.name,
+    "dmgSHA256": hashlib.sha256(dmg_path.read_bytes()).hexdigest(),
+    "qaResultPath": str(result_path),
+    "qaResultSHA256": hashlib.sha256(result_path.read_bytes()).hexdigest(),
+    "allowSkips": os.environ["QA_ALLOW_SKIPS_JSON"] == "true",
+    "summary": result["summary"],
+}
+evidence_path.parent.mkdir(parents=True, exist_ok=True)
+evidence_path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print(f"发布 QA 证据: {evidence_path}")
+PY
+else
+  echo "QA_ALLOW_SKIPS=true：本轮仅作为本机烟测，不生成发布证据。"
 fi
 
 echo

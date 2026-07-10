@@ -46,11 +46,15 @@ RELEASE=1 ./build_dmg.sh
 
 正式发布并同步自动更新源：
 
+先用 `RELEASE=1 ./build_dmg.sh` 生成并公证最终包，安装这份 App 后运行真实录音集成测试。确认报告通过后，再执行：
+
 ```bash
-RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh
+RELEASE=1 PUBLISH_GITHUB_RELEASE=1 \
+RELEASE_INTEGRATION_REPORT="test-results/recording-integration/<timestamp>/report.json" \
+./build_dmg.sh
 ```
 
-该命令会在本地发布包校验通过后，把 DMG 和 `appcast.xml` 上传到 GitHub Releases。
+该命令不会重新构建，而是复用刚才完成真实录音测试的 App/DMG；它会严格比对报告、Release App 和 DMG 内 App 的可执行文件 SHA-256。随后对同一份最终 DMG 运行完整 QA，再把 DMG、`appcast.xml` 和 LAME 3.100 完整源码包上传到 GitHub Releases。已有 tag 若仍是 draft 或 prerelease，脚本会拒绝上传，避免 `releases/latest` 继续指向旧更新源。
 
 ## 权限说明
 
@@ -83,9 +87,9 @@ RELEASE=1 PUBLISH_GITHUB_RELEASE=1 ./build_dmg.sh
 - 根目录保留 `LICENSE`，明确主项目开源许可证。
 - 保留 `THIRD_PARTY_NOTICES.md`，发布说明中注明第三方组件来源。
 - 保留 `SimpleRecorder/ThirdParty/lame/COPYING`，发布说明中注明内嵌 LAME 的许可来源。
-- `build_dmg.sh` 会把 `LICENSE.txt`、`THIRD_PARTY_NOTICES.md`、`LAME-COPYING.txt` 放入 DMG 根目录。
+- `build_dmg.sh` 会把项目许可证、第三方声明、PermissionFlow/Sparkle 完整许可证，以及 LAME 许可证、完整源码包和源码/重链接说明放入 DMG 根目录。
 - 当前公开版支持 M4A 与 MP3 输出；MP3 由内嵌 `libmp3lame.a` 分块转码实现。
-- 若二进制 DMG 内继续分发 `libmp3lame.a`，Release Notes 需要说明 LAME 构建来源、替换/重建方式，并链接 `THIRD_PARTY_NOTICES.md`。
+- 二进制 DMG 内继续分发 `libmp3lame.a` 时，DMG 和同一 GitHub Release 必须包含校验通过的 `lame-3.100.tar.gz`，Release Notes 需要说明该源码资产。
 - 跑完整 QA：
 
 ```bash

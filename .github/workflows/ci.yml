@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Validate scripts and manifests
+        run: |
+          find SimpleRecorder -name '*Conflict.swift' -print -quit | grep -q . && exit 1 || true
+          bash -n build_dmg.sh scripts/*.sh
+          python3 -m py_compile scripts/*.py
+          plutil -lint SimpleRecorder/Info.plist SimpleRecorder/PrivacyInfo.xcprivacy
+
+      - name: Unit tests
+        run: |
+          xcodebuild test \
+            -project SimpleRecorder.xcodeproj \
+            -scheme SimpleRecorder \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath build/CI-TestDerivedData \
+            -packageAuthorizationProvider netrc
+
+      - name: Public Release must not contain QA runner
+        run: |
+          xcodebuild \
+            -project SimpleRecorder.xcodeproj \
+            -scheme SimpleRecorder \
+            -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath build/CI-ReleaseDerivedData \
+            -packageAuthorizationProvider netrc \
+            SYMROOT="$PWD/build/CI-Release" \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS= \
+            build
+          scripts/verify_public_release.sh build/CI-Release/Release/SimpleRecorder.app
+
+      - name: QA-only build compiles
+        run: scripts/build_qa_app.sh

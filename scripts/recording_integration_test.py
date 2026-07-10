@@ -17,6 +17,7 @@ restores them at the end.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import itertools
 import json
 import plistlib
@@ -27,13 +28,13 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_APP_PATH = Path("/Applications/SimpleRecorder.app")
+DEFAULT_APP_PATH = Path("/Applications/会议录音 Pro.app")
 DEFAULT_BUNDLE_ID = "com.meetingrecorderpro.app"
 PROCESS_NAME = "SimpleRecorder"
 MODES = ("microphone", "system_audio", "both")
@@ -174,6 +175,24 @@ def read_plist(path: Path) -> dict:
         return {}
 
 
+def app_release_metadata(app_path: Path) -> dict[str, str]:
+    info = read_plist(app_path / "Contents" / "Info.plist")
+    executable = expected_app_binary(app_path)
+    digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+    commit = run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+        check=False,
+    ).stdout.strip()
+    if not commit:
+        commit = "unknown"
+    return {
+        "gitCommit": commit,
+        "appVersion": str(info.get("CFBundleShortVersionString", "unknown")),
+        "buildVersion": str(info.get("CFBundleVersion", "unknown")),
+        "appExecutableSHA256": digest,
+    }
+
+
 def write_plist(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as handle:
@@ -225,32 +244,89 @@ def recording_flag(domain: str) -> bool:
     )
 
 
-def app_running() -> bool:
-    return run(["pgrep", "-x", PROCESS_NAME], check=False).returncode == 0
+def running_app_pids() -> list[int]:
+    result = run(["pgrep", "-x", PROCESS_NAME], check=False)
+    return [int(value) for value in result.stdout.split() if value.isdigit()]
 
 
-def quit_app(bundle_id: str, timeout: float = 8.0) -> None:
-    run(
-        [
-            "osascript",
-            "-e",
-            f'tell application id "{bundle_id}" to quit',
-        ],
+def process_executable(pid: int) -> Path | None:
+    result = run(
+        ["lsof", "-a", "-p", str(pid), "-d", "txt", "-Fn"],
         check=False,
     )
+    for line in result.stdout.splitlines():
+        if line.startswith("n/"):
+            return Path(line[1:]).resolve()
+    return None
+
+
+def expected_app_binary(app_path: Path) -> Path:
+    return (app_path / "Contents" / "MacOS" / PROCESS_NAME).resolve()
+
+
+def assert_only_expected_app_is_running(app_path: Path) -> list[int]:
+    expected = expected_app_binary(app_path)
+    pids = running_app_pids()
+    for pid in pids:
+        executable = process_executable(pid)
+        if executable != expected:
+            raise RuntimeError(
+                "Another SimpleRecorder instance is running and will not be stopped: "
+                f"PID {pid}, executable={executable or 'unknown'}, expected={expected}. "
+                "End any real recording and quit that app manually before running QA."
+            )
+    return pids
+
+
+def app_running(app_path: Path | None = None) -> bool:
+    if app_path is None:
+        return bool(running_app_pids())
+    expected = expected_app_binary(app_path)
+    return any(process_executable(pid) == expected for pid in running_app_pids())
+
+
+def quit_app(bundle_id: str, app_path: Path, timeout: float = 8.0) -> None:
+    pids = assert_only_expected_app_is_running(app_path)
+    if not pids:
+        return
+    if recording_is_active(bundle_id):
+        raise RuntimeError(
+            "Refusing to quit SimpleRecorder because a recording appears to be active. "
+            "Stop and save it before running QA."
+        )
+
+    for pid in pids:
+        run(
+            [
+                "osascript",
+                "-l",
+                "JavaScript",
+                "-e",
+                (
+                    "ObjC.import('AppKit'); "
+                    "const app = $.NSRunningApplication."
+                    f"runningApplicationWithProcessIdentifier({pid}); "
+                    "if (app.js) { app.terminate; }"
+                ),
+            ],
+            check=False,
+        )
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not app_running():
+        if not app_running(app_path):
             return
         time.sleep(0.25)
-    run(["pkill", "-x", PROCESS_NAME], check=False)
+    raise RuntimeError(
+        f"App did not exit within {timeout:.0f}s after a graceful quit request; "
+        "no force-kill was attempted."
+    )
 
 
 def launch_app(app_path: Path, timeout: float = 10.0) -> None:
     run(["open", str(app_path)])
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if app_running():
+        if app_running(app_path):
             time.sleep(2.0)
             return
         time.sleep(0.25)
@@ -321,10 +397,10 @@ def trigger_record_hotkey(key_code: int) -> None:
         ) from exc
 
 
-def wait_for_recording_flag(domain: str, expected: bool, timeout: float) -> bool:
+def wait_for_recording_state(domain: str, expected: bool, timeout: float) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if recording_flag(domain) == expected:
+        if recording_is_active(domain) == expected:
             return True
         time.sleep(0.25)
     return False
@@ -332,7 +408,14 @@ def wait_for_recording_flag(domain: str, expected: bool, timeout: float) -> bool
 
 def current_log_path() -> Path:
     stamp = datetime.now().strftime("%Y-%m-%d")
-    return Path.home() / "Library" / "Application Support" / "Logs" / f"MeetingRecorderPro_{stamp}.log"
+    return (
+        Path.home()
+        / "Library"
+        / "Application Support"
+        / DEFAULT_BUNDLE_ID
+        / "Logs"
+        / f"MeetingRecorderPro_{stamp}.log"
+    )
 
 
 def log_offset(path: Path) -> int:
@@ -405,6 +488,14 @@ def log_recording_active() -> bool:
         ):
             active = False
     return active
+
+
+def recording_is_active(domain: str) -> bool:
+    # 集成测试在启动录音前会等待应用写入日志，因此当日志存在时，
+    # 最近一条录音生命周期事件比尚未同步的 UserDefaults 更可靠。
+    if current_log_path().exists():
+        return log_recording_active()
+    return recording_flag(domain)
 
 
 def list_recording_files(recordings_dir: Path, since: float) -> list[Path]:
@@ -495,9 +586,25 @@ def stop_recording(
     *,
     assume_recording: bool = False,
 ) -> Path | None:
-    if assume_recording or recording_flag(domain):
+    stop_requested = assume_recording or recording_is_active(domain)
+    if stop_requested:
         trigger_record_hotkey(hotkey_code)
-    return wait_for_new_recording(recordings_dir, since, timeout)
+    path = wait_for_new_recording(recordings_dir, since, timeout)
+
+    # 文件出现时，UserDefaults 中的录音标记可能还没来得及落盘。
+    # 等待应用与日志都进入空闲态，避免下一个用例误判为“仍在录音”。
+    if stop_requested:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not recording_is_active(domain):
+                return path
+            time.sleep(0.25)
+        raise RuntimeError(
+            "Recording file was saved, but the app did not reach an idle state "
+            "before the stop timeout."
+        )
+
+    return path
 
 
 def ffprobe_duration(path: Path) -> float | None:
@@ -673,7 +780,7 @@ def run_mode_recording(
     result = CaseResult(name=name, status="passed", mode=mode)
     print_step(f"{name}: {mode}")
     if manage_app:
-        quit_app(args.bundle_id)
+        quit_app(args.bundle_id, args.app)
         configure_app_preferences(args.bundle_id, mode, recordings_dir)
         launch_app(args.app)
 
@@ -857,12 +964,12 @@ def run_input_switch_case(
         result.note(f"Could not switch input to '{source}'.")
         return [result]
 
-    quit_app(args.bundle_id)
+    quit_app(args.bundle_id, args.app)
     configure_app_preferences(args.bundle_id, mode, recordings_dir)
     launch_app(args.app)
 
     try:
-        since_wall, _ = start_recording(
+        since_wall, recording_start = start_recording(
             args.bundle_id,
             args.hotkey_code,
             args.start_timeout,
@@ -871,6 +978,26 @@ def run_input_switch_case(
     except Exception as exc:
         result.fail(str(exc))
         return [result]
+
+    def elapsed() -> float:
+        return max(0.0, time.monotonic() - recording_start)
+
+    time.sleep(args.settle_seconds)
+    audible_start = elapsed()
+    if args.mic_prompt:
+        countdown(
+            args.prompt_countdown,
+            "输入切换前录音验证：请对着当前输入设备持续说几秒话。",
+        )
+    else:
+        print("输入切换前录音验证：未启用人工提示，将依赖环境声音。", flush=True)
+    time.sleep(args.mic_seconds)
+    audible_segment = Segment(
+        name="input_before_switch",
+        start=audible_start,
+        duration=max(args.mic_seconds, elapsed() - audible_start),
+        threshold_db=args.mic_threshold_db,
+    )
 
     time.sleep(args.switch_before_seconds)
     if args.manual_device_switch:
@@ -891,7 +1018,7 @@ def run_input_switch_case(
             )
             return [result]
 
-    interrupted = wait_for_recording_flag(args.bundle_id, False, args.switch_observe_seconds)
+    interrupted = wait_for_recording_state(args.bundle_id, False, args.switch_observe_seconds)
     path = wait_for_new_recording(recordings_dir, since_wall, args.stop_timeout)
     if interrupted:
         result.note("Recording stopped after input-device change, as expected.")
@@ -901,12 +1028,12 @@ def run_input_switch_case(
         )
         stop_recording(args.bundle_id, args.hotkey_code, recordings_dir, since_wall, args.stop_timeout)
 
-    if path:
-        result.file = str(path)
-        result.duration = ffprobe_duration(path)
-        result.full_volume = volume_dict(ffmpeg_volume(path))
-    else:
-        result.note("No interrupted recording file was found.")
+    assert_audio_file(
+        result,
+        path,
+        [audible_segment],
+        min_duration=max(1.0, audible_segment.duration * 0.55),
+    )
 
     restart = run_mode_recording(
         name=f"input_switch_restart/{mode}/after {target}",
@@ -936,7 +1063,7 @@ def run_output_switch_case(
         result.note(f"Could not switch output to '{source}'.")
         return result
 
-    quit_app(args.bundle_id)
+    quit_app(args.bundle_id, args.app)
     configure_app_preferences(args.bundle_id, mode, recordings_dir)
     launch_app(args.app)
 
@@ -978,7 +1105,7 @@ def run_output_switch_case(
             return result
     time.sleep(args.switch_after_seconds)
 
-    if not recording_flag(args.bundle_id):
+    if not recording_is_active(args.bundle_id):
         result.fail("Recording stopped after output-device change; it should have continued.")
         path = wait_for_new_recording(recordings_dir, since_wall, args.stop_timeout)
         assert_audio_file(result, path, [], 1.0)
@@ -1165,7 +1292,8 @@ def main() -> int:
     recordings_dir.mkdir(parents=True, exist_ok=True)
     generate_tone(tone_path, args.tone_seconds)
 
-    was_running = app_running()
+    assert_only_expected_app_is_running(args.app)
+    was_running = app_running(args.app)
     original_input = env["devices"]["current_input"]
     original_output = env["devices"]["current_output"]
     pref_backup = run_dir / "userdefaults-backup"
@@ -1175,6 +1303,9 @@ def main() -> int:
 
     results: list[CaseResult] = []
     report = {
+        **app_release_metadata(args.app),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "appPath": str(args.app),
         "environment": env,
         "planned_cases": planned_cases,
         "results_dir": str(run_dir),
@@ -1190,7 +1321,7 @@ def main() -> int:
             )
 
         for mode in args.modes:
-            quit_app(args.bundle_id)
+            quit_app(args.bundle_id, args.app)
             configure_app_preferences(args.bundle_id, mode, recordings_dir)
             launch_app(args.app)
             results.append(
@@ -1215,7 +1346,7 @@ def main() -> int:
             )
             if log_recording_active():
                 raise RuntimeError(f"Mode {mode} still appears to be recording after restart tests.")
-            quit_app(args.bundle_id)
+            quit_app(args.bundle_id, args.app)
 
         if not args.skip_device_switch:
             if args.manual_device_switch and not input_pairs:
@@ -1286,14 +1417,32 @@ def main() -> int:
                 )
         except Exception:
             pass
-        quit_app(args.bundle_id)
-        restore_preferences(args.bundle_id, pref_backup)
-        if original_input:
-            switch_audio_source("input", original_input)
-        if original_output:
-            switch_audio_source("output", original_output)
-        if was_running:
-            launch_app(args.app)
+        cleanup_succeeded = True
+        try:
+            quit_app(args.bundle_id, args.app)
+        except Exception as exc:
+            cleanup_succeeded = False
+            results.append(
+                CaseResult(name="cleanup", status="failed", errors=[str(exc)])
+            )
+        if cleanup_succeeded:
+            restore_preferences(args.bundle_id, pref_backup)
+            if original_input:
+                switch_audio_source("input", original_input)
+            if original_output:
+                switch_audio_source("output", original_output)
+            if was_running:
+                launch_app(args.app)
+        else:
+            results.append(
+                CaseResult(
+                    name="cleanup_restore",
+                    status="failed",
+                    errors=[
+                        "App is still running, so preferences and audio routes were not changed underneath it."
+                    ],
+                )
+            )
 
         report["results"] = [asdict(result) for result in results]
         summary = {

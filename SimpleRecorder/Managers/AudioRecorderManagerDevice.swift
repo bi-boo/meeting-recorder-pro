@@ -88,22 +88,42 @@ extension AudioRecorderManager {
 
     /// 处理音频设备变更（如插拔耳机）
     func handleAudioDeviceChange() {
-        // 只有在录音中且使用麦克风时才需要检查
-        guard recordingState == .recording, currentAudioSource != .systemAudio else { return }
+        // 无论是否正在录音都先刷新列表，避免空闲态长期显示过期设备。
+        AppSettings.shared.refreshInputDevices()
+
+        let currentDefaultID = currentDefaultInputDeviceInfo()?.id
+        if let expectedID = expectedDefaultInputDeviceID, currentDefaultID == expectedID {
+            expectedDefaultInputDeviceID = nil
+            LogManager.shared.debug("忽略应用主动切换输入设备产生的系统回调 | 设备ID: \(expectedID)")
+            return
+        }
+
+        // 录音和暂停都属于活跃会话；暂停期间切换设备同样必须保存当前文件。
+        guard recordingState == .recording || recordingState == .paused,
+            currentAudioSource != .systemAudio
+        else { return }
+
+        if let recordingDeviceID = recordingDeviceID,
+            let currentDefaultID = currentDefaultID,
+            recordingDeviceID == currentDefaultID
+        {
+            LogManager.shared.debug("默认输入设备回调未改变当前录音设备，忽略")
+            return
+        }
 
         LogManager.shared.warning("检测到音频设备变更，结束当前录音以避免静音续录")
-        AppSettings.shared.refreshInputDevices()
         handleRecordingInterruption(reason: .deviceChanged)
     }
 
     /// 处理设备列表变更（设备被移除）
     func handleAudioDeviceListChange() {
-        // 只有在录音中且使用麦克风时才需要检查
-        guard recordingState == .recording, currentAudioSource != .systemAudio else { return }
-        guard let deviceID = recordingDeviceID, deviceID != "default" else { return }
-
         // 先刷新真实设备列表，避免用旧缓存误判设备是否仍然存在。
         AppSettings.shared.refreshInputDevices()
+
+        guard recordingState == .recording || recordingState == .paused,
+            currentAudioSource != .systemAudio
+        else { return }
+        guard let deviceID = recordingDeviceID, deviceID != "default" else { return }
 
         // 检查当前使用的设备是否还在列表中
         let availableDevices = AppSettings.shared.availableInputDevices
@@ -118,17 +138,106 @@ extension AudioRecorderManager {
 
     /// 处理 AVAudioEngine 配置变更
     @objc func handleAudioEngineConfigChange(_ notification: Notification) {
-        if let changedEngine = notification.object as? AVAudioEngine,
-            changedEngine !== audioEngine
-        {
+        // Apple 会在 AVAudioEngine 的内部串行队列发送此通知。回调内不拆引擎，
+        // 只切回主队列后再读取状态和处理资源。
+        guard let changedEngine = notification.object as? AVAudioEngine else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, changedEngine === self.audioEngine else { return }
+            self.processAudioEngineConfigurationChange()
+        }
+    }
+
+    private func processAudioEngineConfigurationChange() {
+        if recordingState == .starting {
+            startupConfigurationChanged = true
+            LogManager.shared.warning("录音启动期检测到 AVAudioEngine 配置变化，等待设备格式稳定")
             return
         }
 
-        // 只有在录音中时才处理
-        guard recordingState == .recording else { return }
+        guard recordingState == .recording || recordingState == .paused,
+            currentAudioSource != .systemAudio
+        else { return }
 
-        LogManager.shared.warning("检测到 AVAudioEngine 配置变更，结束当前录音以避免静音续录")
-        handleRecordingInterruption(reason: .engineConfigurationChanged)
+        if recordingState == .paused {
+            if hasRecordingInputConfigurationChanged() {
+                LogManager.shared.warning("暂停期间输入设备配置发生变化，保存当前录音")
+                handleRecordingInterruption(reason: .engineConfigurationChanged)
+            } else {
+                LogManager.shared.info("暂停期间仅检测到非输入侧配置变化，恢复时重新验证采集")
+            }
+            return
+        }
+
+        scheduleEngineConfigurationEvaluation()
+    }
+
+    private func scheduleEngineConfigurationEvaluation() {
+        engineConfigurationEvaluationWorkItem?.cancel()
+        engineConfigurationEvaluationGeneration += 1
+        let evaluationGeneration = engineConfigurationEvaluationGeneration
+        let observedFrames = framesCounter.withLock { $0 }
+        let observedEngine = audioEngine
+
+        let workItem = DispatchWorkItem { [weak self, weak observedEngine] in
+            guard let self = self,
+                let observedEngine = observedEngine,
+                self.engineConfigurationEvaluationGeneration == evaluationGeneration,
+                self.recordingState == .recording,
+                self.audioEngine === observedEngine
+            else { return }
+
+            let currentFrames = self.framesCounter.withLock { $0 }
+            if currentFrames > observedFrames {
+                self.engineConfigurationRecoveryAttempts = 0
+                LogManager.shared.info("引擎配置变化后音频帧仍在增长，判定为非输入侧变化")
+                return
+            }
+
+            if !self.hasRecordingInputConfigurationChanged(),
+                self.engineConfigurationRecoveryAttempts < 1
+            {
+                do {
+                    self.engineConfigurationRecoveryAttempts += 1
+                    if self.audioEngine.isRunning {
+                        self.audioEngine.stop()
+                    }
+                    try self.audioEngine.start()
+                    LogManager.shared.info("非输入侧配置变化后已重新启动音频引擎，继续验证")
+                    self.scheduleEngineConfigurationEvaluation()
+                    return
+                } catch {
+                    LogManager.shared.warning(
+                        "非输入侧配置变化后重启音频引擎失败 | 错误: \(error.localizedDescription)")
+                }
+            }
+
+            LogManager.shared.warning("引擎配置变化后音频帧停止增长，保存当前录音")
+            self.handleRecordingInterruption(reason: .engineConfigurationChanged)
+        }
+        engineConfigurationEvaluationWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: workItem)
+    }
+
+    private func hasRecordingInputConfigurationChanged() -> Bool {
+        if let recordingDeviceID = recordingDeviceID,
+            let currentDeviceID = currentDefaultInputDeviceInfo()?.id,
+            recordingDeviceID != currentDeviceID
+        {
+            return true
+        }
+
+        let currentFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+        if let sampleRate = recordingInputSampleRate,
+            abs(currentFormat.sampleRate - sampleRate) > 0.5
+        {
+            return true
+        }
+        if let channelCount = recordingInputChannelCount,
+            currentFormat.channelCount != channelCount
+        {
+            return true
+        }
+        return false
     }
 
     // MARK: - 设备激活
@@ -189,7 +298,14 @@ extension AudioRecorderManager {
         activeInputDeviceID = targetID
         activeInputDeviceName = targetName
 
-        setDefaultInputDevice(deviceUID: targetID)
+        let shouldChangeDefaultInput = currentDefaultInputDeviceInfo()?.id != targetID
+        if shouldChangeDefaultInput {
+            expectedDefaultInputDeviceID = targetID
+        }
+        if !setDefaultInputDevice(deviceUID: targetID), shouldChangeDefaultInput {
+            expectedDefaultInputDeviceID = nil
+            LogManager.shared.warning("切换 Core Audio 默认输入设备失败 | 设备ID: \(targetID)")
+        }
 
         guard shouldUseCaptureSessionActivation(deviceUID: targetID) else {
             LogManager.shared.info("已切换 Core Audio 默认输入设备 | 名称: \(targetName), ID: \(targetID)")
@@ -371,7 +487,8 @@ extension AudioRecorderManager {
     }
 
     /// 设置系统默认输入设备
-    func setDefaultInputDevice(deviceUID: String) {
+    @discardableResult
+    func setDefaultInputDevice(deviceUID: String) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -414,7 +531,7 @@ extension AudioRecorderManager {
                 )
 
                 var mutableDeviceID = id
-                AudioObjectSetPropertyData(
+                let status = AudioObjectSetPropertyData(
                     AudioObjectID(kAudioObjectSystemObject),
                     &defaultInputAddress,
                     0,
@@ -422,9 +539,10 @@ extension AudioRecorderManager {
                     UInt32(MemoryLayout<AudioDeviceID>.size),
                     &mutableDeviceID
                 )
-                break
+                return status == noErr
             }
         }
+        return false
     }
 
     /// 停止设备激活会话
