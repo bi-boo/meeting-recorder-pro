@@ -8,7 +8,7 @@
 |---|---|
 | 应用名称 | 会议录音 Pro |
 | Bundle ID | `com.meetingrecorderpro.app` |
-| 当前版本 | `1.0.4` (`5`) |
+| 当前版本 | `1.0.5` (`6`) |
 | 支持系统 | macOS 13.0 或更高版本 |
 | 当前发布架构 | Apple Silicon (`arm64`) |
 | 分发产物 | `MeetingRecorderPro_YYYYMMDD.dmg` |
