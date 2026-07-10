@@ -63,8 +63,8 @@ qa_gracefully_quit_pid() {
 qa_prepare_for_run() {
   local expected_bin="$1"
   local pid actual_bin
-  local -a matching_pids=()
 
+  # 第一遍只校验，确保不会在发现无关实例之前先退出任何进程。
   while IFS= read -r pid; do
     [[ -n "$pid" ]] || continue
     actual_bin="$(qa_process_executable "$pid")"
@@ -73,10 +73,12 @@ qa_prepare_for_run() {
       echo "QA will not stop an installed or unrelated app. End any real recording and quit that app manually." >&2
       return 1
     fi
-    matching_pids+=("$pid")
   done < <(qa_running_pids)
 
-  for pid in "${matching_pids[@]}"; do
+  # macOS 自带 Bash 3 在 set -u 下展开空数组会报 unbound variable；
+  # 第二遍直接重新读取 PID，并在退出前由 qa_gracefully_quit_pid 再次核对可执行文件。
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
     qa_gracefully_quit_pid "$pid" "$expected_bin" || return 1
-  done
+  done < <(qa_running_pids)
 }
