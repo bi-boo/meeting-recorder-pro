@@ -32,6 +32,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastToggleTime: Date = .distantPast  // 用于防抖
     private var lastTimeString: String = ""
     private var startingIndicatorStep: Int = 0
+    private let statusItemHorizontalPadding: CGFloat = 12
     #if QA_AUTOMATION
     private var qaAutomationRunner: QAAutomationRunner?
     #endif
@@ -530,6 +531,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private var menuBarFont: NSFont {
+        NSFont.menuBarFont(ofSize: 0)
+    }
+
+    private var menuBarTimerFont: NSFont {
+        NSFont.monospacedDigitSystemFont(
+            ofSize: menuBarFont.pointSize,
+            weight: .regular
+        )
+    }
+
+    /// 为动态标题预留固定宽度，避免状态栏项目随数字或省略号变化反复横向跳动。
+    private func applyFixedStatusItemLayout(
+        reservingTitle title: String,
+        font: NSFont
+    ) {
+        guard let button = statusItem.button else { return }
+
+        if button.font != font {
+            button.font = font
+        }
+        button.imagePosition = .imageLeading
+
+        let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
+        let fallbackImageWidth = NSStatusBar.system.thickness * 0.7
+        let imageWidth = max(button.image?.size.width ?? 0, fallbackImageWidth)
+        let fixedLength = ceil(imageWidth + titleWidth + statusItemHorizontalPadding)
+
+        if abs(statusItem.length - fixedLength) > 0.5 {
+            statusItem.length = fixedLength
+        }
+    }
+
+    private func applyCompactStatusItemLayout() {
+        if let button = statusItem.button, button.font != menuBarFont {
+            button.font = menuBarFont
+        }
+        if statusItem.length != NSStatusItem.variableLength {
+            statusItem.length = NSStatusItem.variableLength
+        }
+    }
+
     private func updateStatusBarTimer() {
         if let button = statusItem.button {
             button.alphaValue = 1.0  // 录音状态下强制恢复完全不透明
@@ -537,6 +580,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // 根据设置决定是否显示录制时长
             if AppSettings.shared.showDurationWhenRecording {
+                // 最长录音上限为 9 小时 55 分钟，分钟数最多三位；始终按 000:00 预留宽度。
+                applyFixedStatusItemLayout(
+                    reservingTitle: " 000:00",
+                    font: menuBarTimerFont
+                )
+
                 let elapsed = Int(recordingManager.recordingDuration)
                 let totalMinutes = elapsed / 60
                 let seconds = elapsed % 60
@@ -551,6 +600,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 button.imagePosition = .imageLeading
             } else {
                 // 不显示时长，仅显示图标
+                applyCompactStatusItemLayout()
                 button.title = ""
                 button.imagePosition = .imageOnly
             }
@@ -569,13 +619,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.alphaValue = 1.0
             button.image = getStatusImage()
-            button.imagePosition = .imageLeading
 
             let dotCount = (startingIndicatorStep % 3) + 1
             let dots = String(repeating: ".", count: dotCount)
             if AppSettings.shared.showDurationWhenRecording {
+                applyFixedStatusItemLayout(
+                    reservingTitle: " 启动中...",
+                    font: menuBarFont
+                )
                 button.title = " 启动中\(dots)"
             } else {
+                applyFixedStatusItemLayout(reservingTitle: " ...", font: menuBarFont)
                 button.title = " \(dots)"
             }
             startingIndicatorStep += 1
@@ -584,6 +638,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateIdleIcon() {
         if let button = statusItem.button {
+            applyCompactStatusItemLayout()
             button.image = getStatusImage()
             button.title = ""
             button.imagePosition = .imageOnly
@@ -601,11 +656,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.alphaValue = 1.0
             button.image = getStatusImage()
-            button.imagePosition = .imageLeading
 
             if AppSettings.shared.showDurationWhenRecording {
+                applyFixedStatusItemLayout(reservingTitle: " 保存中...", font: menuBarFont)
                 button.title = " 保存中..."
             } else {
+                applyFixedStatusItemLayout(reservingTitle: " ...", font: menuBarFont)
                 button.title = " ..."
             }
         }
@@ -615,12 +671,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.alphaValue = 1.0  // 录音状态下恢复完全不透明
             button.image = getStatusImage()  // 统一图标样式
-            button.imagePosition = .imageLeading
 
             if AppSettings.shared.showDurationWhenRecording {
+                applyFixedStatusItemLayout(reservingTitle: " 已暂停", font: menuBarFont)
                 button.title = " 已暂停"
             } else {
                 // 即使不显示时长，也需标注暂停状态，避免与空闲状态混淆
+                applyFixedStatusItemLayout(reservingTitle: " ‖", font: menuBarFont)
                 button.title = " ‖"
             }
         }
