@@ -70,4 +70,73 @@ final class RecordingCorePolicyTests: XCTestCase {
             )
         )
     }
+
+    func testStartupFinalizesAfterBenignConfigurationNotifications() {
+        XCTAssertEqual(
+            RecordingStartupStabilityPolicy.action(
+                engineIsRunning: true,
+                inputConfigurationIsStable: true,
+                hasObservedAudioFrames: true,
+                deadlineReached: false
+            ),
+            .finalize
+        )
+    }
+
+    func testStartupWaitsForInitialFramesWithoutRebuildingStableEngine() {
+        XCTAssertEqual(
+            RecordingStartupStabilityPolicy.action(
+                engineIsRunning: true,
+                inputConfigurationIsStable: true,
+                hasObservedAudioFrames: false,
+                deadlineReached: false
+            ),
+            .wait
+        )
+    }
+
+    func testStartupRebuildsUnstableConfigurationBeforeDeadline() {
+        XCTAssertEqual(
+            RecordingStartupStabilityPolicy.action(
+                engineIsRunning: false,
+                inputConfigurationIsStable: false,
+                hasObservedAudioFrames: false,
+                deadlineReached: false
+            ),
+            .rebuild
+        )
+    }
+
+    func testStartupFailsOnlyWhenUnstableAtDeadline() {
+        XCTAssertEqual(
+            RecordingStartupStabilityPolicy.action(
+                engineIsRunning: true,
+                inputConfigurationIsStable: true,
+                hasObservedAudioFrames: false,
+                deadlineReached: true
+            ),
+            .fail
+        )
+        XCTAssertEqual(
+            RecordingStartupStabilityPolicy.action(
+                engineIsRunning: false,
+                inputConfigurationIsStable: false,
+                hasObservedAudioFrames: false,
+                deadlineReached: true
+            ),
+            .fail
+        )
+    }
+
+    func testStableStartupWinsEvenAtDeadlineBoundary() {
+        XCTAssertEqual(
+            RecordingStartupStabilityPolicy.action(
+                engineIsRunning: true,
+                inputConfigurationIsStable: true,
+                hasObservedAudioFrames: true,
+                deadlineReached: true
+            ),
+            .finalize
+        )
+    }
 }

@@ -111,7 +111,7 @@ extension AudioRecorderManager {
                 throw assetWriter?.error ?? NSError(domain: "AudioRecorder", code: -1)
             }
 
-            startupConfigurationChanged = false
+            prepareRecordingStartupStabilityAttempt()
             try audioEngine.start()
             scheduleRecordingStartupStabilization(fileURL: finalFileURL)
             return true
@@ -145,6 +145,7 @@ extension AudioRecorderManager {
                 currentRecordingURL = nil
             }
 
+            resetRecordingStartupStabilityState()
             releaseDisplaySleepPrevention()
             recordingState = .idle
             NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
@@ -207,7 +208,7 @@ extension AudioRecorderManager {
             }
 
             // 启动音频引擎以开始处理
-            startupConfigurationChanged = false
+            prepareRecordingStartupStabilityAttempt()
             try audioEngine.start()
             scheduleRecordingStartupStabilization(fileURL: finalFileURL)
 
@@ -262,6 +263,7 @@ extension AudioRecorderManager {
                 currentRecordingURL = nil
             }
 
+            resetRecordingStartupStabilityState()
             releaseDisplaySleepPrevention()
             recordingState = .idle
             NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
@@ -270,14 +272,49 @@ extension AudioRecorderManager {
 
     // MARK: - 启动期设备格式稳定
 
-    /// 蓝牙麦克风第一次启动后可能从 48kHz 切到 24kHz，并触发一次引擎配置变化。
-    /// 仅系统声音不依赖输入设备，可直接完成；含麦克风的模式等待一个短窗口并最多重建一次。
+    func captureRecordingStartupInputConfiguration(_ format: AVAudioFormat) {
+        startupConfiguredInputSampleRate = format.sampleRate
+        startupConfiguredInputChannelCount = format.channelCount
+    }
+
+    func prepareRecordingStartupStabilityAttempt() {
+        startupConfigurationChanged = false
+        startupObservedFrameCount.withLock { $0 = 0 }
+    }
+
+    func resetRecordingStartupStabilityState() {
+        startupConfigurationChanged = false
+        startupStabilityStartedAt = nil
+        startupConfiguredInputSampleRate = nil
+        startupConfiguredInputChannelCount = nil
+        startupObservedFrameCount.withLock { $0 = 0 }
+    }
+
+    func isRecordingStartupInputConfigurationStable() -> Bool {
+        guard let expectedSampleRate = startupConfiguredInputSampleRate,
+            let expectedChannelCount = startupConfiguredInputChannelCount
+        else { return false }
+
+        let currentFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+        guard currentFormat.sampleRate > 0, currentFormat.channelCount > 0 else { return false }
+
+        return abs(currentFormat.sampleRate - expectedSampleRate) <= 0.5
+            && currentFormat.channelCount == expectedChannelCount
+    }
+
+    /// 含麦克风的模式必须确认引擎仍在运行、输入格式与建图时一致，且已经产生音频帧。
+    /// 配置变化通知只作为诊断信号；在限定总时长内允许设备完成多轮格式协商。
     func scheduleRecordingStartupStabilization(fileURL: URL) {
         guard recordingState == .starting else { return }
 
         if currentAudioSource == .systemAudio {
             finalizeRecordingStart(fileURL: fileURL)
             return
+        }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        if startupStabilityStartedAt == nil {
+            startupStabilityStartedAt = now
         }
 
         let generation = recordingStartupGeneration
@@ -287,25 +324,46 @@ extension AudioRecorderManager {
                 self.recordingStartupGeneration == generation
             else { return }
 
-            guard self.startupConfigurationChanged else {
-                self.finalizeRecordingStart(fileURL: fileURL)
-                return
-            }
+            let elapsed = ProcessInfo.processInfo.systemUptime
+                - (self.startupStabilityStartedAt ?? ProcessInfo.processInfo.systemUptime)
+            let engineIsRunning = self.audioEngine.isRunning
+            let inputConfigurationIsStable = self.isRecordingStartupInputConfigurationStable()
+            let observedFrames = self.startupObservedFrameCount.withLock { $0 }
+            let deadlineReached = elapsed >= self.maximumStartupStabilizationDuration
+            let elapsedText = String(format: "%.2f", elapsed)
+            let action = RecordingStartupStabilityPolicy.action(
+                engineIsRunning: engineIsRunning,
+                inputConfigurationIsStable: inputConfigurationIsStable,
+                hasObservedAudioFrames: observedFrames > 0,
+                deadlineReached: deadlineReached
+            )
 
-            guard self.startupCaptureRetryCount < self.maximumStartupCaptureRetries else {
+            LogManager.shared.debug(
+                "录音启动稳定性检查 | 引擎运行: \(engineIsRunning), 输入格式稳定: \(inputConfigurationIsStable), 已观察帧: \(observedFrames), 配置通知: \(self.startupConfigurationChanged), 已等待: \(elapsedText)s")
+
+            switch action {
+            case .finalize:
+                if self.startupConfigurationChanged {
+                    LogManager.shared.info("启动期配置通知后引擎、输入格式和音频帧均已稳定，继续录音")
+                }
+                self.finalizeRecordingStart(fileURL: fileURL)
+            case .wait:
+                self.startupConfigurationChanged = false
+                LogManager.shared.info("录音引擎和输入格式已稳定，继续等待首批音频帧")
+                self.scheduleRecordingStartupStabilization(fileURL: fileURL)
+            case .rebuild:
+                LogManager.shared.warning(
+                    "启动期录音链路尚未稳定，等待设备协商后重建采集链路 | 已等待: \(elapsedText)s")
+                Task { @MainActor in
+                    await self.rebuildCaptureDuringStartup(
+                        fileURL: fileURL,
+                        generation: generation
+                    )
+                }
+            case .fail:
                 self.failRecordingStartup(
                     fileURL: fileURL,
-                    message: "输入设备格式在启动后仍持续变化，请重新选择麦克风后再试。")
-                return
-            }
-
-            self.startupCaptureRetryCount += 1
-            LogManager.shared.warning(
-                "启动期检测到输入格式变化，等待设备稳定后重建采集链路 | 重试: \(self.startupCaptureRetryCount)/\(self.maximumStartupCaptureRetries)")
-            Task { @MainActor in
-                await self.rebuildCaptureDuringStartup(
-                    fileURL: fileURL,
-                    generation: generation
+                    message: "麦克风在 3 秒内未能形成稳定的录音链路，请重新选择麦克风后再试。"
                 )
             }
         }
@@ -316,28 +374,29 @@ extension AudioRecorderManager {
         guard recordingState == .starting, recordingStartupGeneration == generation else { return }
 
         setAcceptingAudioBuffers(false)
-        invalidateSystemAudioCaptureGeneration()
-
-        if #available(macOS 13.0, *) {
-            let previousStream = systemAudioStream
-            systemAudioStream = nil
-            systemAudioOutput = nil
-            try? await previousStream?.stopCapture()
-        }
-        guard recordingState == .starting, recordingStartupGeneration == generation else { return }
 
         do {
-            prepareAudioEngineForNewRecording()
+            // 启动期的 AVAudioEngine 格式协商只需重建麦克风/混音链路。
+            // 混合录音已启动的 SCStream 不受该通知影响，保留它可避免
+            // stopCapture() 的异步等待卡住整个恢复任务。
+            let canReuseSystemAudioCapture = currentAudioSource == .both
+                && systemAudioStream != nil
+                && systemAudioOutput != nil
+            prepareAudioEngineForNewRecording(
+                preserveSystemAudioCapture: canReuseSystemAudioCapture)
             if currentAudioSource == .microphone {
                 try setupMicrophoneOnlyRecording()
             } else if #available(macOS 13.0, *) {
-                try await setupMixedRecording(startupGeneration: generation)
+                try await setupMixedRecording(
+                    startupGeneration: generation,
+                    reuseSystemAudioCapture: canReuseSystemAudioCapture
+                )
             }
 
             guard recordingState == .starting,
                 recordingStartupGeneration == generation
             else { return }
-            startupConfigurationChanged = false
+            prepareRecordingStartupStabilityAttempt()
             try audioEngine.start()
             scheduleRecordingStartupStabilization(fileURL: fileURL)
         } catch {
@@ -370,8 +429,7 @@ extension AudioRecorderManager {
         activeInputDeviceID = nil
         activeInputDeviceName = nil
         expectedDefaultInputDeviceID = nil
-        startupConfigurationChanged = false
-        startupCaptureRetryCount = 0
+        resetRecordingStartupStabilityState()
         engineConfigurationRecoveryAttempts = 0
         try? FileManager.default.removeItem(at: fileURL)
         clearRecordingState()
@@ -434,6 +492,7 @@ extension AudioRecorderManager {
             recordingInputSampleRate = nil
             recordingInputChannelCount = nil
         }
+        resetRecordingStartupStabilityState()
 
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self, let startDate = self.currentSegmentStartTime else { return }
@@ -535,9 +594,11 @@ extension AudioRecorderManager {
     // MARK: - 音频引擎预备（确保干净状态）
     /// 在每次新录音开始前调用，确保音频引擎处于干净状态
     /// 这对于从之前失败的录音恢复非常重要
-    func prepareAudioEngineForNewRecording() {
+    func prepareAudioEngineForNewRecording(preserveSystemAudioCapture: Bool = false) {
         setAcceptingAudioBuffers(false)
-        invalidateSystemAudioCaptureGeneration()
+        if !preserveSystemAudioCapture {
+            invalidateSystemAudioCaptureGeneration()
+        }
 
         // 1. 停止引擎（如果正在运行）
         if audioEngine.isRunning {
@@ -595,6 +656,7 @@ extension AudioRecorderManager {
         }
         LogManager.shared.info(
             "麦克风录音输入格式 | 采样率: \(micFormat.sampleRate)Hz, 声道: \(micFormat.channelCount)ch")
+        captureRecordingStartupInputConfiguration(micFormat)
 
         // 3. 纯麦克风也走 mixer，统一做重采样/声道折叠，避免 2 声道输入被直接 tap 成静音。
         setupRecordingMixer()
@@ -624,7 +686,18 @@ extension AudioRecorderManager {
             // 【关键修复】移除 isPaused 检查
             // audioEngine.pause() 会暂停引擎本身，tap 回调在暂停期间不会被调用
             // 这样恢复时 tap 能立即处理数据，不会因 isPaused 设置时机导致丢数据
-            guard let self = self, self.isRecording else { return }
+            guard let self = self else { return }
+
+            if self.isStarting {
+                if buffer.frameLength > 0 {
+                    self.startupObservedFrameCount.withLock {
+                        $0 += Int64(buffer.frameLength)
+                    }
+                }
+                return
+            }
+
+            guard self.isRecording else { return }
 
             // 原子地读取当前帧计数并递增，确保 PTS 绝对准确且无数据竞争
             let pts = self.framesCounter.withLock { frames -> CMTime in

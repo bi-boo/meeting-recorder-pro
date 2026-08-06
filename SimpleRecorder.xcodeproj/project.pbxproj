@@ -36,6 +36,8 @@
 		034 /* RecordingFinalizationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 152; };
 		035 /* RecordingFinalizationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 152; };
 		036 /* RecordingCorePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153; };
+		037 /* RecordingStartupStabilityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154; };
+		038 /* RecordingStartupStabilityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +72,7 @@
 		151 /* SimpleRecorderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimpleRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		152 /* RecordingFinalizationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFinalizationPolicy.swift; sourceTree = "<group>"; };
 		153 /* RecordingCorePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingCorePolicyTests.swift; sourceTree = "<group>"; };
+		154 /* RecordingStartupStabilityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStartupStabilityPolicy.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,6 +138,7 @@
 			children = (
 				102 /* AudioRecorderManagerCore.swift */,
 				152 /* RecordingFinalizationPolicy.swift */,
+				154 /* RecordingStartupStabilityPolicy.swift */,
 				140 /* AudioRecorderManagerEngine.swift */,
 				141 /* AudioRecorderManagerSystemAudio.swift */,
 				142 /* AudioRecorderManagerWriter.swift */,
@@ -320,6 +324,7 @@
 				001 /* SimpleRecorderApp.swift in Sources */,
 				002 /* AudioRecorderManagerCore.swift in Sources */,
 				034 /* RecordingFinalizationPolicy.swift in Sources */,
+				037 /* RecordingStartupStabilityPolicy.swift in Sources */,
 				020 /* AudioRecorderManagerEngine.swift in Sources */,
 				021 /* AudioRecorderManagerSystemAudio.swift in Sources */,
 				022 /* AudioRecorderManagerWriter.swift in Sources */,
@@ -346,6 +351,7 @@
 			files = (
 				031 /* TimerTask.swift in Sources */,
 				035 /* RecordingFinalizationPolicy.swift in Sources */,
+				038 /* RecordingStartupStabilityPolicy.swift in Sources */,
 				032 /* TimerTaskTests.swift in Sources */,
 				036 /* RecordingCorePolicyTests.swift in Sources */,
 			);

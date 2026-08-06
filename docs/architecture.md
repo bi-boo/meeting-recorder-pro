@@ -52,6 +52,12 @@
 - **资源清理**：停止引擎、移除 tap、detach 节点、清空缓冲队列
 - **格式匹配**：使用 `inputNode.inputFormat(forBus: 0)` 获取硬件实际格式，确保链路采样率统一
 
+### H3 录音启动稳定门禁
+- **真实状态判断**：含麦克风的模式确认引擎仍在运行、输入格式与建图时一致，并已收到有效音频帧后才进入录音状态
+- **限定恢复窗口**：允许蓝牙、USB 和连续互通设备在 3 秒内完成多轮格式协商；链路未稳定时自动等待或重建
+- **通知仅作诊断**：`AVAudioEngineConfigurationChange` 的次数不再作为失败条件，避免把正常的多轮初始化误判为设备异常
+- **超时保护**：超过恢复窗口仍没有稳定音频链路时中止启动，不生成空录音文件
+
 ### H3 防休眠机制
 - 集成 `IOKit` 电源管理 API
 - 录音期间通过 `IOPMAssertionCreateWithDescription` 申请 `kIOPMAssertionTypeNoIdleSleep` 断言

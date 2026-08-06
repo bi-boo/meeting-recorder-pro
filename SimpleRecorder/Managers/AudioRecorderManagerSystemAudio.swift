@@ -45,7 +45,10 @@ extension AudioRecorderManager {
     // MARK: - 混合录音配置（麦克风 + 系统音频）
     @available(macOS 13.0, *)
     @MainActor
-    func setupMixedRecording(startupGeneration: Int) async throws {
+    func setupMixedRecording(
+        startupGeneration: Int,
+        reuseSystemAudioCapture: Bool = false
+    ) async throws {
         // 1. 设置硬件输入设备 (麦克风)
         try updateInputDevice()
         setupRecordingMixer()
@@ -63,12 +66,23 @@ extension AudioRecorderManager {
         }
         LogManager.shared.info(
             "混合录音麦克风输出格式 | 采样率: \(micFormat.sampleRate)Hz, 声道: \(micFormat.channelCount)ch")
+        captureRecordingStartupInputConfiguration(micFormat)
         audioEngine.connect(
             inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: micFormat)
         inputNode.volume = 1.0
 
-        // 4. 启动系统音频采集
-        try await startSystemAudioCapture(startupGeneration: startupGeneration)
+        // 4. 启动系统音频采集。如果只是启动期重建 AVAudioEngine，
+        // 复用已在运行的 SCStream，避免不必要的停止和二次授权。
+        if reuseSystemAudioCapture {
+            guard systemAudioStream != nil, systemAudioOutput != nil else {
+                throw NSError(
+                    domain: "AudioRecorder", code: -4,
+                    userInfo: [NSLocalizedDescriptionKey: "无法复用系统音频采集链路"])
+            }
+            LogManager.shared.info("启动期重建混音引擎，复用已运行的系统音频采集")
+        } else {
+            try await startSystemAudioCapture(startupGeneration: startupGeneration)
+        }
 
         // 5. 将系统音频包装为 SourceNode 接入混音器 Bus 1
         systemAudioSourceNode = AVAudioSourceNode(format: recordingFormat) {

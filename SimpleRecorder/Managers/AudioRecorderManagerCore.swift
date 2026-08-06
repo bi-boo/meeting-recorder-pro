@@ -112,13 +112,16 @@ class AudioRecorderManager: NSObject, ObservableObject {
     let audioBufferAcceptanceLock = OSAllocatedUnfairLock<Bool>(initialState: false)
     var isAutoStoppedByLimit = false  // 标记是否因为达到时长上限而停止
 
-    // 录音启动稳定性：蓝牙输入设备常在 AVAudioEngine 首次启动后切换采样率。
-    // 在有限的稳定窗口内只允许重建一次采集链路，避免无限重试。
+    // 录音启动稳定性：蓝牙、USB 和连续互通设备可能在 AVAudioEngine 启动后多次协商格式。
+    // 以限定总时长内的真实引擎状态、输入格式和音频帧作为门禁，不依赖通知次数。
     var recordingStartupGeneration = 0
     var startupConfigurationChanged = false
-    var startupCaptureRetryCount = 0
+    var startupStabilityStartedAt: TimeInterval?
+    var startupConfiguredInputSampleRate: Double?
+    var startupConfiguredInputChannelCount: AVAudioChannelCount?
+    let startupObservedFrameCount = OSAllocatedUnfairLock<Int64>(initialState: 0)
     let startupStabilizationDelay: TimeInterval = 0.6
-    let maximumStartupCaptureRetries = 1
+    let maximumStartupStabilizationDuration: TimeInterval = 3.0
 
     // 当前录音使用的音频源（录音开始时锁定）
     var currentAudioSource: AudioSource = .microphone
@@ -466,8 +469,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         recordingDuration = 0
         currentAudioSource = effectiveAudioSource(for: AppSettings.shared.audioSource)
         recordingStartupGeneration += 1
-        startupConfigurationChanged = false
-        startupCaptureRetryCount = 0
+        resetRecordingStartupStabilityState()
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
 
         // 仅系统声音不读取麦克风，不能被麦克风 TCC 状态阻断。
@@ -830,8 +832,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             activeInputDeviceID = nil
             activeInputDeviceName = nil
             expectedDefaultInputDeviceID = nil
-            startupConfigurationChanged = false
-            startupCaptureRetryCount = 0
+            resetRecordingStartupStabilityState()
             clearRecordingState()
             releaseSleepPrevention()
             recordingState = .idle

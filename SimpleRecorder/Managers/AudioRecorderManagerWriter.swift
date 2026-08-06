@@ -227,8 +227,7 @@ extension AudioRecorderManager {
         activeInputDeviceID = nil
         activeInputDeviceName = nil
         expectedDefaultInputDeviceID = nil
-        startupConfigurationChanged = false
-        startupCaptureRetryCount = 0
+        resetRecordingStartupStabilityState()
         isHandlingInterruption = false
         engineConfigurationEvaluationWorkItem?.cancel()
         engineConfigurationEvaluationWorkItem = nil
