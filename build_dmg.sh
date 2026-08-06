@@ -179,6 +179,11 @@ set +o pipefail
 
 echo "--- [3/5] 代码签名 ---"
 
+# 签名前清理 Finder/隔离等扩展属性。签名后再递归清理会改变已密封的
+# App bundle，导致 codesign 在复制或安装时报告签名被修改。
+xattr -cr "${RELEASE_APP_PATH}"
+echo "已在签名前清除应用扩展属性 (xattr -cr)"
+
 SIGNING_IDENTITY="-"
 SIGNING_IS_ADHOC=true
 if [ -n "${DEVELOPER_ID_CERT:-}" ]; then
@@ -229,9 +234,7 @@ if [ -d "${SPARKLE_FRAMEWORK_PATH}" ]; then
 fi
 
 codesign "${codesign_args[@]}" "${RELEASE_APP_PATH}"
-
-xattr -cr "${RELEASE_APP_PATH}"
-echo "已清除隔离属性 (xattr -cr)"
+codesign --verify --deep --strict --verbose=2 "${RELEASE_APP_PATH}"
 
 echo "--- [4/5] 生成 DMG 镜像 ---"
 rm -rf "${DMG_STAGING_DIR}"
@@ -256,12 +259,12 @@ hdiutil create -volname "${VOLUME_NAME}" -srcfolder "${DMG_STAGING_DIR}" -ov -fo
 mv "${TEMP_DMG}" "${DMG_PATH}"
 
 echo "--- [5/5] DMG 签名 ---"
+xattr -cr "${DMG_PATH}"
 if [ "${SIGNING_IS_ADHOC}" = false ]; then
     codesign --force --timestamp --sign "${SIGNING_IDENTITY}" "${DMG_PATH}"
 else
     codesign --force --sign "${SIGNING_IDENTITY}" "${DMG_PATH}"
 fi
-xattr -cr "${DMG_PATH}"
 
 if [ -n "${NOTARY_PROFILE:-}" ] && [ "${SIGNING_IS_ADHOC}" = false ]; then
     echo "--- 可选公证：提交 notarytool ---"
