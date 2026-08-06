@@ -45,6 +45,26 @@
 
 5. 根据改动范围执行人工冒烟测试。
 
+   录音逻辑、设备变更处理或集成测试脚本发生变化时，还需安装本轮 Release App，
+   再执行真实录音与设备切换测试：
+
+   ```bash
+   scripts/recording_integration_test.py \
+     --app '/Applications/会议录音 Pro.app' \
+     --yes --quick --prompt-countdown 2 --start-attempts 3
+   ```
+
+   当自动排序选中的麦克风没有有效输入时，应先做输入电平预检，再明确指定两个
+   有声音且当前在线的设备，避免把静音硬件误报成应用失败：
+
+   ```bash
+   scripts/recording_integration_test.py \
+     --app '/Applications/会议录音 Pro.app' \
+     --yes --quick \
+     --input-pair '源麦克风名称' '目标麦克风名称' \
+     --output-pair '源扬声器名称' '目标扬声器名称'
+   ```
+
 6. 提交前检查：
 
    ```bash

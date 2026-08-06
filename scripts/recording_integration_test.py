@@ -368,13 +368,18 @@ def restore_preferences(domain: str, backup_dir: Path | None) -> None:
     kill_cfprefsd()
 
 
-def configure_app_preferences(domain: str, mode: str, recordings_dir: Path) -> None:
+def configure_app_preferences(
+    domain: str,
+    mode: str,
+    recordings_dir: Path,
+    selected_device_id: str = "default",
+) -> None:
     update_preference_files(
         domain,
         {
             "audioSource": mode,
             "outputFormat": "m4a",
-            "selectedDeviceID": "default",
+            "selectedDeviceID": selected_device_id,
             "recordingsPath_path": str(recordings_dir),
             "openFolderAfterRecording": False,
             "recording_in_progress": False,
@@ -776,12 +781,18 @@ def run_mode_recording(
     recordings_dir: Path,
     tone_path: Path,
     manage_app: bool = True,
+    selected_device_id: str = "default",
 ) -> CaseResult:
     result = CaseResult(name=name, status="passed", mode=mode)
     print_step(f"{name}: {mode}")
     if manage_app:
         quit_app(args.bundle_id, args.app)
-        configure_app_preferences(args.bundle_id, mode, recordings_dir)
+        configure_app_preferences(
+            args.bundle_id,
+            mode,
+            recordings_dir,
+            selected_device_id=selected_device_id,
+        )
         launch_app(args.app)
 
     try:
@@ -946,6 +957,26 @@ def device_pairs(devices: list[str], quick: bool) -> list[tuple[str, str]]:
     return pairs
 
 
+def requested_device_pairs(
+    devices: list[str],
+    quick: bool,
+    requested_pair: list[str] | None,
+    kind: str,
+) -> list[tuple[str, str]]:
+    if not requested_pair:
+        return device_pairs(devices, quick)
+
+    source, target = requested_pair
+    if source == target:
+        raise ValueError(f"{kind} source and target must be different devices.")
+    missing = [name for name in (source, target) if name not in devices]
+    if missing:
+        raise ValueError(
+            f"Unknown {kind} device: {', '.join(missing)}. Available: {', '.join(devices)}"
+        )
+    return [(source, target)]
+
+
 def run_input_switch_case(
     *,
     mode: str,
@@ -954,6 +985,7 @@ def run_input_switch_case(
     args: argparse.Namespace,
     recordings_dir: Path,
     tone_path: Path,
+    input_device_ids: dict[str, str],
 ) -> list[CaseResult]:
     name = f"input_switch/{mode}/{source} -> {target}"
     result = CaseResult(name=name, status="passed", mode=mode)
@@ -964,8 +996,20 @@ def run_input_switch_case(
         result.note(f"Could not switch input to '{source}'.")
         return [result]
 
+    source_device_id = input_device_ids.get(source)
+    target_device_id = input_device_ids.get(target)
+    if not source_device_id or not target_device_id:
+        result.status = "skipped"
+        result.note("Could not resolve both input device names to stable AVFoundation IDs.")
+        return [result]
+
     quit_app(args.bundle_id, args.app)
-    configure_app_preferences(args.bundle_id, mode, recordings_dir)
+    configure_app_preferences(
+        args.bundle_id,
+        mode,
+        recordings_dir,
+        selected_device_id=source_device_id,
+    )
     launch_app(args.app)
 
     try:
@@ -1041,6 +1085,7 @@ def run_input_switch_case(
         args=args,
         recordings_dir=recordings_dir,
         tone_path=tone_path,
+        selected_device_id=target_device_id,
     )
     return [result, restart]
 
@@ -1149,6 +1194,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--list-devices", action="store_true", help="Print discovered audio devices and exit.")
     parser.add_argument("--quick", action="store_true", help="Use only the first device pair per switch test.")
     parser.add_argument("--skip-device-switch", action="store_true")
+    parser.add_argument(
+        "--input-pair",
+        nargs=2,
+        metavar=("SOURCE", "TARGET"),
+        help=(
+            "Use one explicit input-device pair. SOURCE is also pinned for baseline "
+            "microphone and mixed-mode recordings."
+        ),
+    )
+    parser.add_argument(
+        "--output-pair",
+        nargs=2,
+        metavar=("SOURCE", "TARGET"),
+        help="Use one explicit output-device pair.",
+    )
     parser.add_argument(
         "--manual-device-switch",
         action="store_true",
@@ -1267,8 +1327,29 @@ def main() -> int:
         planned_cases.append(f"restart/{mode}/first")
         planned_cases.append(f"restart/{mode}/second")
 
-    input_pairs = device_pairs(env["devices"]["switch_input"], args.quick)
-    output_pairs = device_pairs(env["devices"]["switch_output"], args.quick)
+    try:
+        input_pairs = requested_device_pairs(
+            env["devices"]["switch_input"], args.quick, args.input_pair, "input"
+        )
+        output_pairs = requested_device_pairs(
+            env["devices"]["switch_output"], args.quick, args.output_pair, "output"
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    input_device_ids = {
+        device["name"]: device["unique_id"]
+        for device in env["devices"]["avfoundation_input"]
+    }
+    baseline_input_device_id = "default"
+    if args.input_pair:
+        unresolved = [name for name in args.input_pair if name not in input_device_ids]
+        if unresolved:
+            parser.error(
+                "Could not resolve stable AVFoundation IDs for input device: "
+                + ", ".join(unresolved)
+            )
+        baseline_input_device_id = input_device_ids[args.input_pair[0]]
     if not args.skip_device_switch:
         for mode in [mode for mode in args.modes if mode in {"microphone", "both"}]:
             for source, target in input_pairs:
@@ -1322,7 +1403,16 @@ def main() -> int:
 
         for mode in args.modes:
             quit_app(args.bundle_id, args.app)
-            configure_app_preferences(args.bundle_id, mode, recordings_dir)
+            configure_app_preferences(
+                args.bundle_id,
+                mode,
+                recordings_dir,
+                selected_device_id=(
+                    baseline_input_device_id
+                    if mode in {"microphone", "both"}
+                    else "default"
+                ),
+            )
             launch_app(args.app)
             results.append(
                 run_mode_recording(
@@ -1371,6 +1461,7 @@ def main() -> int:
                             args=args,
                             recordings_dir=recordings_dir,
                             tone_path=tone_path,
+                            input_device_ids=input_device_ids,
                         )
                     )
 
