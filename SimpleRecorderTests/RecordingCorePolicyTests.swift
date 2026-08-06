@@ -44,6 +44,40 @@ final class RecordingCorePolicyTests: XCTestCase {
         )
     }
 
+    func testMP3SourceIsRemovedOnlyAfterEncoderAndFinalMediaValidationSucceed() {
+        XCTAssertTrue(
+            RecordingFinalizationPolicy.shouldRemoveSourceAfterMP3Finalization(
+                encoderSucceeded: true,
+                mediaValidationSucceeded: true,
+                finalFileExists: true
+            )
+        )
+    }
+
+    func testMP3SourceIsKeptWhenAnyFinalizationGateFails() {
+        XCTAssertFalse(
+            RecordingFinalizationPolicy.shouldRemoveSourceAfterMP3Finalization(
+                encoderSucceeded: false,
+                mediaValidationSucceeded: true,
+                finalFileExists: true
+            )
+        )
+        XCTAssertFalse(
+            RecordingFinalizationPolicy.shouldRemoveSourceAfterMP3Finalization(
+                encoderSucceeded: true,
+                mediaValidationSucceeded: false,
+                finalFileExists: true
+            )
+        )
+        XCTAssertFalse(
+            RecordingFinalizationPolicy.shouldRemoveSourceAfterMP3Finalization(
+                encoderSucceeded: true,
+                mediaValidationSucceeded: true,
+                finalFileExists: false
+            )
+        )
+    }
+
     func testInterruptedRecoveryOnlyMutatesMatchingIdleMarker() {
         XCTAssertTrue(
             RecordingFinalizationPolicy.canApplyInterruptedRecovery(

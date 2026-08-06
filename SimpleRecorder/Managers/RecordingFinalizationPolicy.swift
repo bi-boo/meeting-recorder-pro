@@ -24,6 +24,16 @@ enum RecordingFinalizationPolicy {
     ) -> Bool {
         recordingStateIsIdle && markerIsActive && currentMarkerPath == expectedPath
     }
+
+    /// MP3 源文件删除门禁。编码器成功不代表最终文件完整；
+    /// 只有最终 MP3 通过媒体验证且仍然存在时，才允许删除源 M4A。
+    static func shouldRemoveSourceAfterMP3Finalization(
+        encoderSucceeded: Bool,
+        mediaValidationSucceeded: Bool,
+        finalFileExists: Bool
+    ) -> Bool {
+        encoderSucceeded && mediaValidationSucceeded && finalFileExists
+    }
 }
 
 /// CoreAudio 的默认输入设备回调可能先于设备信息完成刷新。

@@ -28,6 +28,8 @@ DEVELOPER_ID_CERT="Developer ID Application: Your Name (TEAMID)"
 NOTARY_PROFILE="notarytool-profile"
 ```
 
+`build_dmg.sh` 只会读取项目根目录的 `.env`，并且只接受 `RELEASE`、`PUBLISH_GITHUB_RELEASE`、`RELEASE_INTEGRATION_REPORT`、`PUBLISH_DMG_PATH`、`NOTARY_PROFILE`、`DEVELOPER_ID_CERT`、`GITHUB_REPOSITORY` 和 `RELEASE_TAG`。`PATH`、`PYTHONPATH` 等其他变量会被忽略，避免本地配置改写构建命令的来源。
+
 执行：
 
 ```bash
@@ -42,7 +44,7 @@ NOTARY_PROFILE="notarytool-profile"
 RELEASE=1 ./build_dmg.sh
 ```
 
-严格模式会要求 Developer ID Application 证书和 `NOTARY_PROFILE`，并强制通过 notarization、stapler validation、`codesign`、`hdiutil verify` 与 Gatekeeper 校验。
+严格模式会要求干净的 Git 工作区、Developer ID Application 证书和 `NOTARY_PROFILE`，并强制通过 notarization、stapler validation、`codesign`、`hdiutil verify` 与 Gatekeeper 校验。构建完成后会在 `build/release-artifact-manifest.json` 记录当前提交、App 可执行文件和 DMG 的 SHA-256。
 
 正式发布并同步自动更新源：
 
@@ -54,7 +56,7 @@ RELEASE_INTEGRATION_REPORT="test-results/recording-integration/<timestamp>/repor
 ./build_dmg.sh
 ```
 
-该命令不会重新构建，而是复用刚才完成真实录音测试的 App/DMG；它会严格比对报告、Release App 和 DMG 内 App 的可执行文件 SHA-256。随后对同一份最终 DMG 运行完整 QA，再把 DMG、`appcast.xml` 和 LAME 3.100 完整源码包上传到 GitHub Releases。已有 tag 若仍是 draft 或 prerelease，脚本会拒绝上传，避免 `releases/latest` 继续指向旧更新源。
+该命令不会重新构建，而是复用刚才完成真实录音测试的 App/DMG；它先根据构建时的来源清单确认 App/DMG 确实属于当前 HEAD，再严格比对报告、Release App 和 DMG 内 App 的可执行文件 SHA-256。生成 `appcast.xml` 时会创建全新的临时 Python 环境，只安装通过 SHA-256 锁定的 Apple Silicon 轮子，不复用旧环境。随后对同一份最终 DMG 运行完整 QA，再把 DMG、`appcast.xml` 和 LAME 3.100 完整源码包上传到 GitHub Releases。已有 tag 若仍是 draft 或 prerelease，脚本会拒绝上传，避免 `releases/latest` 继续指向旧更新源。
 
 ## 权限说明
 

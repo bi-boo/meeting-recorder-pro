@@ -418,21 +418,53 @@ extension AudioRecorderManager {
         DispatchQueue.global(qos: .userInitiated).async {
             let success = MP3Encoder.convertToMP3(from: sourceURL, to: mp3URL)
 
-            if success {
-                try? FileManager.default.removeItem(at: sourceURL)
-
-                let fileSize =
-                    (try? FileManager.default.attributesOfItem(atPath: mp3URL.path)[.size] as? Int64)
-                    ?? 0
-                let fileSizeMB = Double(fileSize) / (1024 * 1024)
-                LogManager.shared.info(
-                    "MP3 转换完成 | 文件: \(mp3URL.lastPathComponent), 大小: \(String(format: "%.2f", fileSizeMB))MB"
-                )
-
-                DispatchQueue.main.async { completion(mp3URL) }
-            } else {
+            guard success else {
                 LogManager.shared.warning("MP3 转换失败，保留原 M4A 文件")
                 DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            // 编码器返回成功后重新打开最终 MP3，复用录音收尾的完整媒体验证。
+            // 只有文件存在、可播放、含音轨且时长有效时，才能删除源 M4A。
+            self.validateFinalizedRecording(at: mp3URL) { result in
+                switch result {
+                case .success(let duration):
+                    guard RecordingFinalizationPolicy.shouldRemoveSourceAfterMP3Finalization(
+                        encoderSucceeded: success,
+                        mediaValidationSucceeded: true,
+                        finalFileExists: FileManager.default.fileExists(atPath: mp3URL.path)
+                    ) else {
+                        LogManager.shared.error(
+                            "MP3 验证后文件不存在，保留原 M4A 文件 | 目标: \(mp3URL.lastPathComponent)"
+                        )
+                        completion(nil)
+                        return
+                    }
+
+                    do {
+                        try FileManager.default.removeItem(at: sourceURL)
+                    } catch {
+                        // MP3 已通过验证；删除源文件失败时保留两份，不误报转码失败。
+                        LogManager.shared.warning(
+                            "MP3 已验证，但原 M4A 删除失败，已保留两份 | 错误: \(error.localizedDescription)"
+                        )
+                    }
+
+                    let fileSize =
+                        ((try? FileManager.default.attributesOfItem(atPath: mp3URL.path)[.size])
+                            as? NSNumber)?.int64Value ?? 0
+                    let fileSizeMB = Double(fileSize) / (1024 * 1024)
+                    LogManager.shared.info(
+                        "MP3 转换完成并已验证 | 文件: \(mp3URL.lastPathComponent), 时长: \(String(format: "%.1f", duration))s, 大小: \(String(format: "%.2f", fileSizeMB))MB"
+                    )
+                    completion(mp3URL)
+
+                case .failure(let error):
+                    LogManager.shared.error(
+                        "MP3 转换后完整性验证失败，保留原 M4A 文件 | 错误: \(error.localizedDescription)"
+                    )
+                    completion(nil)
+                }
             }
         }
     }

@@ -14,12 +14,17 @@
 
 ## 标准执行流程
 
-1. 确认没有旧进程和旧挂载：
+1. 确认没有正在录音的应用进程和旧挂载。若发现 `SimpleRecorder`，先在应用内停止并确认文件已保存，再从菜单正常退出；不要强制终止进程：
 
    ```bash
-   pkill -x SimpleRecorder >/dev/null 2>&1 || true
+   pgrep -fl SimpleRecorder || true
+   for pid in $(pgrep -x SimpleRecorder 2>/dev/null); do
+     lsof -p "$pid" | rg '\.(m4a|mp3|caf|wav)(\.|$)' || true
+   done
    mount | rg '会议录音 Pro|MeetingRecorderPro' || true
    ```
+
+   只要上一步仍列出应用进程或录音文件句柄，就停止安装、替换应用以及会启动应用的测试，等待录音正常结束。
 
 2. 跑单元测试：
 

@@ -152,4 +152,121 @@ final class TimerTaskTests: XCTestCase {
         XCTAssertNotEqual(original, rescheduled)
         XCTAssertEqual(original.taskID, rescheduled.taskID)
     }
+
+    func testApprovedAutomaticRecordingTaskRemainsAuthorizedAfterPersistenceRoundTrip() throws {
+        let store = InMemoryTimerTaskAuthorizationStore()
+        let controller = TimerTaskAuthorizationController(store: store)
+        var task = TimerTask(
+            enabled: true,
+            daysOfWeek: [1, 3, 5],
+            hour: 9,
+            minute: 30,
+            repeatType: .weekly,
+            actionType: .autoStart
+        )
+        task.nextTriggerTime = Date(timeIntervalSince1970: 1_000_000)
+
+        XCTAssertTrue(controller.authorizeUserChange(from: nil, to: task))
+
+        let encoded = try JSONEncoder().encode(task)
+        let restored = try JSONDecoder().decode(TimerTask.self, from: encoded)
+        XCTAssertTrue(controller.isAuthorizedForAutomaticRecording(restored))
+    }
+
+    func testChangingPersistedAutomaticRecordingScheduleInvalidatesAuthorization() {
+        let store = InMemoryTimerTaskAuthorizationStore()
+        let controller = TimerTaskAuthorizationController(store: store)
+        var task = TimerTask(
+            hour: 9,
+            minute: 30,
+            repeatType: .daily,
+            actionType: .autoStart
+        )
+        task.nextTriggerTime = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertTrue(controller.authorizeUserChange(from: nil, to: task))
+
+        task.nextTriggerTime = Date(timeIntervalSince1970: 1_000_060)
+
+        XCTAssertFalse(controller.isAuthorizedForAutomaticRecording(task))
+    }
+
+    func testChangingPersistedAutomaticRecordingEnabledStateInvalidatesAuthorization() {
+        let store = InMemoryTimerTaskAuthorizationStore()
+        let controller = TimerTaskAuthorizationController(store: store)
+        var task = TimerTask(enabled: false, actionType: .autoStart)
+        XCTAssertTrue(controller.authorizeUserChange(from: nil, to: task))
+
+        task.enabled = true
+        task.calculateNextTriggerTime()
+
+        XCTAssertFalse(controller.isAuthorizedForAutomaticRecording(task))
+    }
+
+    func testLegacyOrRevokedAutomaticRecordingTaskIsNotAuthorized() {
+        let store = InMemoryTimerTaskAuthorizationStore()
+        let controller = TimerTaskAuthorizationController(store: store)
+        let task = TimerTask(actionType: .autoStart)
+
+        XCTAssertFalse(controller.isAuthorizedForAutomaticRecording(task))
+        XCTAssertTrue(controller.authorizeUserChange(from: nil, to: task))
+        XCTAssertTrue(controller.isAuthorizedForAutomaticRecording(task))
+        XCTAssertTrue(controller.revokeAuthorization(for: task.id))
+        XCTAssertFalse(controller.isAuthorizedForAutomaticRecording(task))
+    }
+
+    func testReminderUserChangesDoNotDependOnAuthorizationStore() {
+        let store = InMemoryTimerTaskAuthorizationStore()
+        store.shouldFailSet = true
+        store.shouldFailRemoval = true
+        let controller = TimerTaskAuthorizationController(store: store)
+        let original = TimerTask(actionType: .remind)
+        var edited = original
+        edited.hour = 10
+
+        XCTAssertTrue(controller.authorizeUserChange(from: nil, to: original))
+        XCTAssertTrue(controller.authorizeUserChange(from: original, to: edited))
+        XCTAssertEqual(store.setCallCount, 0)
+        XCTAssertEqual(store.removeCallCount, 0)
+    }
+
+    func testAutomaticRecordingToReminderConversionFailsClosedWhenRevocationFails() {
+        let store = InMemoryTimerTaskAuthorizationStore()
+        let controller = TimerTaskAuthorizationController(store: store)
+        let automaticTask = TimerTask(actionType: .autoStart)
+        XCTAssertTrue(controller.authorizeUserChange(from: nil, to: automaticTask))
+
+        var reminderTask = automaticTask
+        reminderTask.actionType = .remind
+        store.shouldFailRemoval = true
+
+        XCTAssertFalse(controller.authorizeUserChange(from: automaticTask, to: reminderTask))
+        XCTAssertTrue(controller.isAuthorizedForAutomaticRecording(automaticTask))
+        XCTAssertEqual(store.removeCallCount, 1)
+    }
+}
+
+private final class InMemoryTimerTaskAuthorizationStore: TimerTaskAuthorizationStore {
+    private var digests: [UUID: Data] = [:]
+    var shouldFailSet = false
+    var shouldFailRemoval = false
+    private(set) var setCallCount = 0
+    private(set) var removeCallCount = 0
+
+    func authorizationDigest(for taskID: UUID) -> Data? {
+        digests[taskID]
+    }
+
+    func setAuthorizationDigest(_ digest: Data, for taskID: UUID) -> Bool {
+        setCallCount += 1
+        guard !shouldFailSet else { return false }
+        digests[taskID] = digest
+        return true
+    }
+
+    func removeAuthorization(for taskID: UUID) -> Bool {
+        removeCallCount += 1
+        guard !shouldFailRemoval else { return false }
+        digests.removeValue(forKey: taskID)
+        return true
+    }
 }

@@ -558,9 +558,10 @@ extension AudioRecorderManager {
         setupSleepPrevention()
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
 
-        let deviceName = recordingDeviceName ?? "默认设备"
+        let deviceSelection =
+            AppSettings.shared.selectedDeviceID == "default" ? "系统默认" : "用户已选择"
         LogManager.shared.info(
-            "录音已启动 | 会话ID: \(sessionID), 音源: \(currentAudioSource.displayName), 输入设备: \(deviceName), 文件: \(fileURL.lastPathComponent)"
+            "录音已启动 | 会话ID: \(sessionID), 音源: \(currentAudioSource.displayName), 输入设备: \(deviceSelection), 格式: \(fileURL.pathExtension.uppercased())"
         )
     }
 

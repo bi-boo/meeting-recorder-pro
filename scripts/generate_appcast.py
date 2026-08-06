@@ -14,8 +14,8 @@ try:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 except ModuleNotFoundError as error:
     raise SystemExit(
-        "Missing pinned release dependency. Run scripts/setup_release_python.sh, "
-        "then use build/release-venv/bin/python to run this script."
+        "Missing pinned release dependency. Use scripts/publish_github_release.sh, "
+        "which provisions a fresh hash-verified release environment."
     ) from error
 
 
