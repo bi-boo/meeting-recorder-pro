@@ -103,11 +103,15 @@ extension AudioRecorderManager {
             currentAudioSource != .systemAudio
         else { return }
 
-        if let recordingDeviceID = recordingDeviceID,
-            let currentDefaultID = currentDefaultID,
-            recordingDeviceID == currentDefaultID
-        {
-            LogManager.shared.debug("默认输入设备回调未改变当前录音设备，忽略")
+        guard RecordingInputDeviceChangePolicy.shouldInterruptRecording(
+            recordingDeviceID: recordingDeviceID,
+            currentDefaultInputDeviceID: currentDefaultID
+        ) else {
+            if currentDefaultID == nil {
+                LogManager.shared.debug("默认输入设备回调期间设备信息尚未稳定，等待后续回调")
+            } else {
+                LogManager.shared.debug("默认输入设备回调未改变当前录音设备，忽略")
+            }
             return
         }
 

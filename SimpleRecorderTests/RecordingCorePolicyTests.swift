@@ -139,4 +139,46 @@ final class RecordingCorePolicyTests: XCTestCase {
             .finalize
         )
     }
+
+    func testInputDeviceCallbackDoesNotInterruptWhenDeviceIsUnchanged() {
+        XCTAssertFalse(
+            RecordingInputDeviceChangePolicy.shouldInterruptRecording(
+                recordingDeviceID: "built-in-microphone",
+                currentDefaultInputDeviceID: "built-in-microphone"
+            )
+        )
+    }
+
+    func testInputDeviceCallbackWaitsWhenCoreAudioTemporarilyCannotResolveDefault() {
+        XCTAssertFalse(
+            RecordingInputDeviceChangePolicy.shouldInterruptRecording(
+                recordingDeviceID: "built-in-microphone",
+                currentDefaultInputDeviceID: nil
+            )
+        )
+    }
+
+    func testInputDeviceCallbackInterruptsOnlyForConfirmedDifferentDevice() {
+        XCTAssertTrue(
+            RecordingInputDeviceChangePolicy.shouldInterruptRecording(
+                recordingDeviceID: "built-in-microphone",
+                currentDefaultInputDeviceID: "external-microphone"
+            )
+        )
+    }
+
+    func testInputDeviceCallbackDoesNotGuessWhenRecordingDeviceIsUnknown() {
+        XCTAssertFalse(
+            RecordingInputDeviceChangePolicy.shouldInterruptRecording(
+                recordingDeviceID: nil,
+                currentDefaultInputDeviceID: "external-microphone"
+            )
+        )
+        XCTAssertFalse(
+            RecordingInputDeviceChangePolicy.shouldInterruptRecording(
+                recordingDeviceID: "default",
+                currentDefaultInputDeviceID: "external-microphone"
+            )
+        )
+    }
 }

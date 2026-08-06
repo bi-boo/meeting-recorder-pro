@@ -25,3 +25,21 @@ enum RecordingFinalizationPolicy {
         recordingStateIsIdle && markerIsActive && currentMarkerPath == expectedPath
     }
 }
+
+/// CoreAudio 的默认输入设备回调可能先于设备信息完成刷新。
+/// 只有录音设备与当前默认输入设备都可解析，且 ID 确实不同时，才能判定为真实切换。
+enum RecordingInputDeviceChangePolicy {
+    static func shouldInterruptRecording(
+        recordingDeviceID: String?,
+        currentDefaultInputDeviceID: String?
+    ) -> Bool {
+        guard let recordingDeviceID,
+            recordingDeviceID != "default",
+            let currentDefaultInputDeviceID
+        else {
+            return false
+        }
+
+        return recordingDeviceID != currentDefaultInputDeviceID
+    }
+}
