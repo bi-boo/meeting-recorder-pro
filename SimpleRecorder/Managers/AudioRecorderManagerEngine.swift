@@ -298,6 +298,13 @@ extension AudioRecorderManager {
         let currentFormat = audioEngine.inputNode.outputFormat(forBus: 0)
         guard currentFormat.sampleRate > 0, currentFormat.channelCount > 0 else { return false }
 
+        // 采样率和声道数相同不代表仍是同一个麦克风。CoreAudio 可能在引擎
+        // 已产生首批帧后才完成默认输入路由切换，启动门禁必须同时核对设备 ID。
+        guard RecordingStartupStabilityPolicy.inputDeviceIsStable(
+            activeInputDeviceID: activeInputDeviceID,
+            currentDefaultInputDeviceID: currentDefaultInputDeviceInfo()?.id
+        ) else { return false }
+
         return abs(currentFormat.sampleRate - expectedSampleRate) <= 0.5
             && currentFormat.channelCount == expectedChannelCount
     }
@@ -329,12 +336,15 @@ extension AudioRecorderManager {
             let engineIsRunning = self.audioEngine.isRunning
             let inputConfigurationIsStable = self.isRecordingStartupInputConfigurationStable()
             let observedFrames = self.startupObservedFrameCount.withLock { $0 }
+            let minimumObservationReached =
+                elapsed >= self.minimumStartupStabilizationDuration
             let deadlineReached = elapsed >= self.maximumStartupStabilizationDuration
             let elapsedText = String(format: "%.2f", elapsed)
             let action = RecordingStartupStabilityPolicy.action(
                 engineIsRunning: engineIsRunning,
                 inputConfigurationIsStable: inputConfigurationIsStable,
                 hasObservedAudioFrames: observedFrames > 0,
+                minimumObservationReached: minimumObservationReached,
                 deadlineReached: deadlineReached
             )
 

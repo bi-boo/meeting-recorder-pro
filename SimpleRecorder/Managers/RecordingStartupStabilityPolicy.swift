@@ -10,13 +10,24 @@ enum RecordingStartupStabilityAction: Equatable {
 /// 录音启动阶段的稳定性门禁。只根据当前真实状态做决定，
 /// 不把 AVAudioEngine 配置变化通知的次数当作失败条件。
 enum RecordingStartupStabilityPolicy {
+    static func inputDeviceIsStable(
+        activeInputDeviceID: String?,
+        currentDefaultInputDeviceID: String?
+    ) -> Bool {
+        guard let activeInputDeviceID, activeInputDeviceID != "default" else { return true }
+        return activeInputDeviceID == currentDefaultInputDeviceID
+    }
+
     static func action(
         engineIsRunning: Bool,
         inputConfigurationIsStable: Bool,
         hasObservedAudioFrames: Bool,
+        minimumObservationReached: Bool,
         deadlineReached: Bool
     ) -> RecordingStartupStabilityAction {
-        if engineIsRunning && inputConfigurationIsStable && hasObservedAudioFrames {
+        if engineIsRunning && inputConfigurationIsStable && hasObservedAudioFrames
+            && minimumObservationReached
+        {
             return .finalize
         }
 

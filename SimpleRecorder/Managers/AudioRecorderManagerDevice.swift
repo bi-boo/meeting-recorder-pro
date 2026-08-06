@@ -98,6 +98,12 @@ extension AudioRecorderManager {
             return
         }
 
+        if recordingState == .starting, currentAudioSource != .systemAudio {
+            startupConfigurationChanged = true
+            LogManager.shared.info("录音启动期检测到默认输入设备回调，继续等待设备路由稳定")
+            return
+        }
+
         // 录音和暂停都属于活跃会话；暂停期间切换设备同样必须保存当前文件。
         guard recordingState == .recording || recordingState == .paused,
             currentAudioSource != .systemAudio

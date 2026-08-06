@@ -77,6 +77,7 @@ final class RecordingCorePolicyTests: XCTestCase {
                 engineIsRunning: true,
                 inputConfigurationIsStable: true,
                 hasObservedAudioFrames: true,
+                minimumObservationReached: true,
                 deadlineReached: false
             ),
             .finalize
@@ -89,6 +90,7 @@ final class RecordingCorePolicyTests: XCTestCase {
                 engineIsRunning: true,
                 inputConfigurationIsStable: true,
                 hasObservedAudioFrames: false,
+                minimumObservationReached: true,
                 deadlineReached: false
             ),
             .wait
@@ -101,6 +103,7 @@ final class RecordingCorePolicyTests: XCTestCase {
                 engineIsRunning: false,
                 inputConfigurationIsStable: false,
                 hasObservedAudioFrames: false,
+                minimumObservationReached: true,
                 deadlineReached: false
             ),
             .rebuild
@@ -113,6 +116,7 @@ final class RecordingCorePolicyTests: XCTestCase {
                 engineIsRunning: true,
                 inputConfigurationIsStable: true,
                 hasObservedAudioFrames: false,
+                minimumObservationReached: true,
                 deadlineReached: true
             ),
             .fail
@@ -122,6 +126,7 @@ final class RecordingCorePolicyTests: XCTestCase {
                 engineIsRunning: false,
                 inputConfigurationIsStable: false,
                 hasObservedAudioFrames: false,
+                minimumObservationReached: true,
                 deadlineReached: true
             ),
             .fail
@@ -134,9 +139,44 @@ final class RecordingCorePolicyTests: XCTestCase {
                 engineIsRunning: true,
                 inputConfigurationIsStable: true,
                 hasObservedAudioFrames: true,
+                minimumObservationReached: true,
                 deadlineReached: true
             ),
             .finalize
+        )
+    }
+
+    func testStableStartupWaitsUntilMinimumObservationWindowCompletes() {
+        XCTAssertEqual(
+            RecordingStartupStabilityPolicy.action(
+                engineIsRunning: true,
+                inputConfigurationIsStable: true,
+                hasObservedAudioFrames: true,
+                minimumObservationReached: false,
+                deadlineReached: false
+            ),
+            .wait
+        )
+    }
+
+    func testStartupInputDeviceMustRemainResolvableAndUnchanged() {
+        XCTAssertTrue(
+            RecordingStartupStabilityPolicy.inputDeviceIsStable(
+                activeInputDeviceID: "built-in-microphone",
+                currentDefaultInputDeviceID: "built-in-microphone"
+            )
+        )
+        XCTAssertFalse(
+            RecordingStartupStabilityPolicy.inputDeviceIsStable(
+                activeInputDeviceID: "built-in-microphone",
+                currentDefaultInputDeviceID: "external-microphone"
+            )
+        )
+        XCTAssertFalse(
+            RecordingStartupStabilityPolicy.inputDeviceIsStable(
+                activeInputDeviceID: "built-in-microphone",
+                currentDefaultInputDeviceID: nil
+            )
         )
     }
 

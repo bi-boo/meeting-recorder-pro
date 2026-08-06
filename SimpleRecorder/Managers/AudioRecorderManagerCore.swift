@@ -121,6 +121,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     var startupConfiguredInputChannelCount: AVAudioChannelCount?
     let startupObservedFrameCount = OSAllocatedUnfairLock<Int64>(initialState: 0)
     let startupStabilizationDelay: TimeInterval = 0.6
+    let minimumStartupStabilizationDuration: TimeInterval = 1.5
     let maximumStartupStabilizationDuration: TimeInterval = 3.0
 
     // 当前录音使用的音频源（录音开始时锁定）
