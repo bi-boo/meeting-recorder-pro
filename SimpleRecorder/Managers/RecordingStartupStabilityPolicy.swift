@@ -1,4 +1,16 @@
+import CoreAudio
 import Foundation
+
+/// 判断麦克风采集是否需要避开 AVAudioEngine 的隐式聚合设备。
+/// 蓝牙和 AirPlay 输出与另一输入设备并用时，改走独立采集链路。
+enum RecordingInputRoutePolicy {
+    static func requiresIndependentCapture(outputTransportType: UInt32?) -> Bool {
+        guard let outputTransportType else { return false }
+        return outputTransportType == kAudioDeviceTransportTypeBluetooth
+            || outputTransportType == kAudioDeviceTransportTypeBluetoothLE
+            || outputTransportType == kAudioDeviceTransportTypeAirPlay
+    }
+}
 
 enum RecordingStartupStabilityAction: Equatable {
     case finalize

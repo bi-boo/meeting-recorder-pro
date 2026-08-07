@@ -1004,11 +1004,15 @@ def run_input_switch_case(
         return [result]
 
     quit_app(args.bundle_id, args.app)
+    # SwitchAudioSource changes macOS's default input. The app must follow
+    # "System Default" for this case. Pinning the app to `source` would
+    # correctly keep recording from that explicit device and test the wrong
+    # behavior.
     configure_app_preferences(
         args.bundle_id,
         mode,
         recordings_dir,
-        selected_device_id=source_device_id,
+        selected_device_id="default",
     )
     launch_app(args.app)
 
@@ -1085,7 +1089,7 @@ def run_input_switch_case(
         args=args,
         recordings_dir=recordings_dir,
         tone_path=tone_path,
-        selected_device_id=target_device_id,
+        selected_device_id="default",
     )
     return [result, restart]
 
@@ -1199,8 +1203,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=2,
         metavar=("SOURCE", "TARGET"),
         help=(
-            "Use one explicit input-device pair. SOURCE is also pinned for baseline "
-            "microphone and mixed-mode recordings."
+            "Use one explicit input-device pair. SOURCE is pinned for baseline "
+            "recordings; switch cases follow the macOS system-default input."
         ),
     )
     parser.add_argument(

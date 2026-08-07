@@ -1,6 +1,32 @@
+import CoreAudio
 import XCTest
 
 final class RecordingCorePolicyTests: XCTestCase {
+    func testWirelessOutputsUseIndependentMicrophoneCapture() {
+        XCTAssertTrue(
+            RecordingInputRoutePolicy.requiresIndependentCapture(
+                outputTransportType: kAudioDeviceTransportTypeBluetooth)
+        )
+        XCTAssertTrue(
+            RecordingInputRoutePolicy.requiresIndependentCapture(
+                outputTransportType: kAudioDeviceTransportTypeBluetoothLE)
+        )
+        XCTAssertTrue(
+            RecordingInputRoutePolicy.requiresIndependentCapture(
+                outputTransportType: kAudioDeviceTransportTypeAirPlay)
+        )
+    }
+
+    func testWiredOrUnknownOutputsKeepStandardMicrophoneCapture() {
+        XCTAssertFalse(
+            RecordingInputRoutePolicy.requiresIndependentCapture(
+                outputTransportType: kAudioDeviceTransportTypeUSB)
+        )
+        XCTAssertFalse(
+            RecordingInputRoutePolicy.requiresIndependentCapture(outputTransportType: nil)
+        )
+    }
+
     func testSystemAudioOnlyDoesNotRequireMicrophonePermission() {
         XCTAssertFalse(
             RecordingPermissionPolicy.requiresMicrophonePermission(isSystemAudioOnly: true)

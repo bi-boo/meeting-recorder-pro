@@ -98,6 +98,16 @@ extension AudioRecorderManager {
             return
         }
 
+        // 独立采集链路已经固定到用户选择的 AVCaptureDevice。此时 macOS 因
+        // AirPods 输出协商而改变“系统默认输入”，不会改变实际录音设备。
+        if microphoneCaptureSession != nil,
+            AppSettings.shared.selectedDeviceID != "default"
+        {
+            LogManager.shared.debug(
+                "独立麦克风采集期间系统默认输入变化，实际录音设备未改变，忽略回调")
+            return
+        }
+
         if recordingState == .starting, currentAudioSource != .systemAudio {
             guard let currentDefaultID else {
                 LogManager.shared.debug("录音启动期默认输入设备暂时不可解析，等待后续回调")
@@ -237,6 +247,13 @@ extension AudioRecorderManager {
     }
 
     private func hasRecordingInputConfigurationChanged() -> Bool {
+        if microphoneCaptureSession != nil {
+            // 显式选择的 AVCaptureDevice 不跟随系统默认输入变化；设备拔出由
+            // handleAudioDeviceListChange 单独处理。只有“系统默认”模式需要比较。
+            guard AppSettings.shared.selectedDeviceID == "default" else { return false }
+            return recordingDeviceID != currentDefaultInputDeviceInfo()?.id
+        }
+
         if let recordingDeviceID = recordingDeviceID,
             let currentDeviceID = currentDefaultInputDeviceInfo()?.id,
             recordingDeviceID != currentDeviceID
@@ -262,7 +279,7 @@ extension AudioRecorderManager {
 
     /// 根据 AppSettings 切换硬件输入设备。
     /// 普通 USB/蓝牙/内置麦克风只切 Core Audio 默认输入；仅连续互通麦克风需要 AVCaptureSession 预激活。
-    func updateInputDevice() throws {
+    func updateInputDevice(changeSystemDefault: Bool = true) throws {
         // 先清理之前的激活会话
         stopDeviceActivationSession()
 
@@ -315,6 +332,12 @@ extension AudioRecorderManager {
 
         activeInputDeviceID = targetID
         activeInputDeviceName = targetName
+
+        if !changeSystemDefault {
+            LogManager.shared.info(
+                "使用独立麦克风采集，不修改系统默认输入 | 名称: \(targetName), ID: \(targetID)")
+            return
+        }
 
         let shouldChangeDefaultInput = currentDefaultInputDeviceInfo()?.id != targetID
         if shouldChangeDefaultInput {
@@ -407,6 +430,47 @@ extension AudioRecorderManager {
 
         return transportType == kAudioDeviceTransportTypeContinuityCaptureWired
             || transportType == kAudioDeviceTransportTypeContinuityCaptureWireless
+    }
+
+    /// 蓝牙输出与独立 USB/内置输入组合时，AVAudioEngine 会依赖系统创建的
+    /// 隐式聚合设备。部分 AirPods 路由会让该聚合设备持续返回静音帧，因此
+    /// 含麦克风的录音改用与输出解耦的 AVCaptureSession 输入链路。
+    func shouldUseIndependentMicrophoneCapture() -> Bool {
+        var defaultOutputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var outputDeviceID = AudioDeviceID(0)
+        var outputDeviceSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let outputStatus = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultOutputAddress,
+            0,
+            nil,
+            &outputDeviceSize,
+            &outputDeviceID
+        )
+        guard outputStatus == noErr, outputDeviceID != 0 else { return false }
+
+        var transportAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var transportType: UInt32 = 0
+        var transportSize = UInt32(MemoryLayout<UInt32>.size)
+        let transportStatus = AudioObjectGetPropertyData(
+            outputDeviceID,
+            &transportAddress,
+            0,
+            nil,
+            &transportSize,
+            &transportType
+        )
+        guard transportStatus == noErr else { return false }
+        return RecordingInputRoutePolicy.requiresIndependentCapture(
+            outputTransportType: transportType)
     }
 
     private func audioDeviceTransportType(for uid: String) -> UInt32? {
