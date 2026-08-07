@@ -311,15 +311,20 @@ extension AudioRecorderManager {
         let shouldChangeDefaultInput = currentDefaultInputDeviceInfo()?.id != targetID
         if shouldChangeDefaultInput {
             expectedDefaultInputDeviceID = targetID
-        }
-        if !setDefaultInputDevice(deviceUID: targetID), shouldChangeDefaultInput {
-            expectedDefaultInputDeviceID = nil
-            LogManager.shared.warning("切换 Core Audio 默认输入设备失败 | 设备ID: \(targetID)")
+            if !setDefaultInputDevice(deviceUID: targetID) {
+                expectedDefaultInputDeviceID = nil
+                LogManager.shared.warning("切换 Core Audio 默认输入设备失败 | 设备ID: \(targetID)")
+            }
         }
 
         guard shouldUseCaptureSessionActivation(deviceUID: targetID) else {
-            LogManager.shared.info("已切换 Core Audio 默认输入设备 | 名称: \(targetName), ID: \(targetID)")
-            audioEngine = AVAudioEngine()
+            if shouldChangeDefaultInput {
+                LogManager.shared.info("已切换 Core Audio 默认输入设备 | 名称: \(targetName), ID: \(targetID)")
+                audioEngine = AVAudioEngine()
+                setupEngineConfigurationChangeListener()
+            } else {
+                LogManager.shared.info("沿用当前 Core Audio 默认输入设备 | 名称: \(targetName), ID: \(targetID)")
+            }
             return
         }
 
