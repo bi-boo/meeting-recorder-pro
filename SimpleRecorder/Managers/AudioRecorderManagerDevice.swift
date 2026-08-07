@@ -99,6 +99,14 @@ extension AudioRecorderManager {
         }
 
         if recordingState == .starting, currentAudioSource != .systemAudio {
+            guard let currentDefaultID else {
+                LogManager.shared.debug("录音启动期默认输入设备暂时不可解析，等待后续回调")
+                return
+            }
+            guard currentDefaultID != activeInputDeviceID else {
+                LogManager.shared.debug("录音启动期默认输入设备未实际变化，忽略回调")
+                return
+            }
             startupConfigurationChanged = true
             LogManager.shared.info("录音启动期检测到默认输入设备回调，继续等待设备路由稳定")
             return
@@ -311,17 +319,26 @@ extension AudioRecorderManager {
         let shouldChangeDefaultInput = currentDefaultInputDeviceInfo()?.id != targetID
         if shouldChangeDefaultInput {
             expectedDefaultInputDeviceID = targetID
-            if !setDefaultInputDevice(deviceUID: targetID) {
+            guard setDefaultInputDevice(deviceUID: targetID) else {
                 expectedDefaultInputDeviceID = nil
-                LogManager.shared.warning("切换 Core Audio 默认输入设备失败 | 设备ID: \(targetID)")
+                throw NSError(
+                    domain: "AudioRecorder", code: -4,
+                    userInfo: [NSLocalizedDescriptionKey: "切换到所选麦克风失败"]
+                )
             }
+            guard waitForDefaultInputDevice(deviceUID: targetID) else {
+                expectedDefaultInputDeviceID = nil
+                throw NSError(
+                    domain: "AudioRecorder", code: -5,
+                    userInfo: [NSLocalizedDescriptionKey: "所选麦克风未能在限定时间内完成路由切换"]
+                )
+            }
+            expectedDefaultInputDeviceID = nil
         }
 
         guard shouldUseCaptureSessionActivation(deviceUID: targetID) else {
             if shouldChangeDefaultInput {
-                LogManager.shared.info("已切换 Core Audio 默认输入设备 | 名称: \(targetName), ID: \(targetID)")
-                audioEngine = AVAudioEngine()
-                setupEngineConfigurationChangeListener()
+                LogManager.shared.info("已切换并确认 Core Audio 默认输入设备 | 名称: \(targetName), ID: \(targetID)")
             } else {
                 LogManager.shared.info("沿用当前 Core Audio 默认输入设备 | 名称: \(targetName), ID: \(targetID)")
             }
@@ -479,6 +496,30 @@ extension AudioRecorderManager {
             ) ?? uid
 
         return AudioInputDevice(id: uid, name: name)
+    }
+
+    private func waitForDefaultInputDevice(
+        deviceUID: String,
+        timeout: TimeInterval = 0.8
+    ) -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        var consecutiveMatches = 0
+
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if currentDefaultInputDeviceInfo()?.id == deviceUID {
+                consecutiveMatches += 1
+                if consecutiveMatches >= 3 {
+                    // 属性已经更新后仍给 HAL 一个很短的格式协商窗口，避免
+                    // AVAudioEngine 在设备回调抵达前初始化输入音频单元。
+                    Thread.sleep(forTimeInterval: 0.1)
+                    return true
+                }
+            } else {
+                consecutiveMatches = 0
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return false
     }
 
     private func stringProperty(
