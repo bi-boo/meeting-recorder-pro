@@ -138,6 +138,32 @@ class AudioRecorderManager: NSObject, ObservableObject {
     var deviceActivationSession: AVCaptureSession?
     var deviceActivationInput: AVCaptureDeviceInput?
 
+    // 蓝牙输出与外接麦克风并用时，AVAudioEngine 会让 Core Audio 创建隐式聚合设备，
+    // 部分组合（例如 AirPods 输出 + USB 麦克风输入）会持续产出静音帧。
+    // 这条独立的 AVCaptureSession 输入链路只负责采集麦克风，再通过 SourceNode
+    // 接入现有混音器，从而不让蓝牙输出参与麦克风设备协商。
+    var microphoneCaptureSession: AVCaptureSession?
+    var microphoneCaptureInput: AVCaptureDeviceInput?
+    var microphoneCaptureOutput: AVCaptureAudioDataOutput?
+    var microphoneStreamOutput: MicrophoneAudioStreamOutput?
+    var microphoneSourceNode: AVAudioSourceNode?
+    let microphoneSampleQueueKey = DispatchSpecificKey<Bool>()
+    let microphoneSessionQueue = DispatchQueue(
+        label: "com.meetingrecorderpro.microphoneSessionQueue", qos: .userInitiated)
+    let microphoneSampleQueue = DispatchQueue(
+        label: "com.meetingrecorderpro.microphoneSampleQueue", qos: .userInitiated)
+    let microphoneCaptureGeneration = OSAllocatedUnfairLock<Int>(initialState: 0)
+    let capturedMicrophoneFrameCount = OSAllocatedUnfairLock<Int64>(initialState: 0)
+
+    var microphoneAudioBufferQueue = [AVAudioPCMBuffer]()
+    var microphoneAudioBufferHeadIndex = 0
+    var microphoneAudioBufferReadOffset: AVAudioFrameCount = 0
+    let microphoneAudioQueueLimit = 600
+    let microphoneAudioQueueLock = NSLock()
+    var cachedMicrophoneAudioConverter: AVAudioConverter?
+    var lastMicrophoneSourceFormat: AVAudioFormat?
+    var lastMicrophoneDestinationFormat: AVAudioFormat?
+
     // 用于混音的 Mixer Node
     var mixerNode: AVAudioMixerNode?
     var recordingMixer: AVAudioMixerNode!
@@ -243,6 +269,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         super.init()
         LogManager.shared.info("AudioRecorderManager 初始化")
         systemAudioSampleQueue.setSpecific(key: systemAudioSampleQueueKey, value: true)
+        microphoneSampleQueue.setSpecific(key: microphoneSampleQueueKey, value: true)
         setupAudioHardwareListeners()
         setupEngineConfigurationChangeListener()
     }
@@ -742,6 +769,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
         // 5. 【关键优化】系统音频采集 (SCStream) 在暂停时不关闭。
         recordingState = .paused
+        clearMicrophoneAudioState()
 
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
     }
@@ -766,6 +794,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 2. 先在系统音频采集队列上重置缓冲和 converter，再恢复录音态。
         //    这样不会和正在执行的 SCStream 音频回调并发访问同一个 AVAudioConverter。
         resetSystemAudioStateForResume()
+        clearMicrophoneAudioState()
         recordingState = .recording
         lastObservedFrameCount = framesCounter.withLock { $0 }
         audioStallBeganAt = nil

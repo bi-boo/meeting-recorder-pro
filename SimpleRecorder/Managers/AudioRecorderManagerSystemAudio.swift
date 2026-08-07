@@ -49,27 +49,35 @@ extension AudioRecorderManager {
         startupGeneration: Int,
         reuseSystemAudioCapture: Bool = false
     ) async throws {
-        // 1. 设置硬件输入设备 (麦克风)
-        try updateInputDevice()
+        // 1. AirPods 等蓝牙输出与外接麦克风并用时，使用独立采集链路，
+        // 避免 AVAudioEngine 的隐式聚合设备返回静音帧。
+        let useIndependentMicrophoneCapture = shouldUseIndependentMicrophoneCapture()
+        if !useIndependentMicrophoneCapture {
+            try updateInputDevice()
+        }
         setupRecordingMixer()
 
         // 2. 混合录制：开启弹性缓冲以对齐异构时钟
         isSystemAudioBuffering = true
 
         // 3. 麦克风 -> Bus 0。麦克风保持 1.0，避免系统音存在时人声过轻。
-        let inputNode = audioEngine.inputNode
-        let micFormat = inputNode.outputFormat(forBus: 0)
-        guard micFormat.sampleRate > 0, micFormat.channelCount > 0 else {
-            throw NSError(
-                domain: "AudioRecorder", code: -3,
-                userInfo: [NSLocalizedDescriptionKey: "当前麦克风输出格式不可用"])
+        if useIndependentMicrophoneCapture {
+            try setupIndependentMicrophoneCapture(toBus: 0)
+        } else {
+            let inputNode = audioEngine.inputNode
+            let micFormat = inputNode.outputFormat(forBus: 0)
+            guard micFormat.sampleRate > 0, micFormat.channelCount > 0 else {
+                throw NSError(
+                    domain: "AudioRecorder", code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "当前麦克风输出格式不可用"])
+            }
+            LogManager.shared.info(
+                "混合录音麦克风输出格式 | 采样率: \(micFormat.sampleRate)Hz, 声道: \(micFormat.channelCount)ch")
+            captureRecordingStartupInputConfiguration(micFormat)
+            audioEngine.connect(
+                inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: micFormat)
+            inputNode.volume = 1.0
         }
-        LogManager.shared.info(
-            "混合录音麦克风输出格式 | 采样率: \(micFormat.sampleRate)Hz, 声道: \(micFormat.channelCount)ch")
-        captureRecordingStartupInputConfiguration(micFormat)
-        audioEngine.connect(
-            inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: micFormat)
-        inputNode.volume = 1.0
 
         // 4. 启动系统音频采集。如果只是启动期重建 AVAudioEngine，
         // 复用已在运行的 SCStream，避免不必要的停止和二次授权。

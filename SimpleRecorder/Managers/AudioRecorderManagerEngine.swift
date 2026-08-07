@@ -11,6 +11,7 @@
 
 import AVFoundation
 import AppKit
+import CoreMedia
 import Foundation
 import IOKit.pwr_mgt
 
@@ -122,8 +123,11 @@ extension AudioRecorderManager {
 
             // 轻量级清理：只清理本次录音创建的资源，不调用 reset() 避免破坏引擎状态
             // 移除可能已安装的 tap
-            audioEngine.inputNode.removeTap(onBus: 0)
+            if microphoneSourceNode == nil {
+                audioEngine.inputNode.removeTap(onBus: 0)
+            }
             recordingMixer?.removeTap(onBus: 0)
+            stopIndependentMicrophoneCapture()
             audioEngine.stop()
 
             // 清理 mixer 节点
@@ -222,8 +226,11 @@ extension AudioRecorderManager {
 
             // 轻量级清理：只清理本次录音创建的资源
             // 移除可能已安装的 tap
-            audioEngine.inputNode.removeTap(onBus: 0)
+            if microphoneSourceNode == nil {
+                audioEngine.inputNode.removeTap(onBus: 0)
+            }
             recordingMixer?.removeTap(onBus: 0)
+            stopIndependentMicrophoneCapture()
             audioEngine.stop()
 
             // 清理 mixer 节点
@@ -280,6 +287,7 @@ extension AudioRecorderManager {
     func prepareRecordingStartupStabilityAttempt() {
         startupConfigurationChanged = false
         startupObservedFrameCount.withLock { $0 = 0 }
+        capturedMicrophoneFrameCount.withLock { $0 = 0 }
     }
 
     func resetRecordingStartupStabilityState() {
@@ -288,9 +296,24 @@ extension AudioRecorderManager {
         startupConfiguredInputSampleRate = nil
         startupConfiguredInputChannelCount = nil
         startupObservedFrameCount.withLock { $0 = 0 }
+        capturedMicrophoneFrameCount.withLock { $0 = 0 }
     }
 
     func isRecordingStartupInputConfigurationStable() -> Bool {
+        if let captureSession = microphoneCaptureSession {
+            guard captureSession.isRunning,
+                let activeInputDeviceID,
+                AppSettings.shared.availableInputDevices.contains(where: {
+                    $0.id == activeInputDeviceID
+                })
+            else { return false }
+
+            if AppSettings.shared.selectedDeviceID == "default" {
+                return currentDefaultInputDeviceInfo()?.id == activeInputDeviceID
+            }
+            return true
+        }
+
         guard let expectedSampleRate = startupConfiguredInputSampleRate,
             let expectedChannelCount = startupConfiguredInputChannelCount
         else { return false }
@@ -335,7 +358,9 @@ extension AudioRecorderManager {
                 - (self.startupStabilityStartedAt ?? ProcessInfo.processInfo.systemUptime)
             let engineIsRunning = self.audioEngine.isRunning
             let inputConfigurationIsStable = self.isRecordingStartupInputConfigurationStable()
-            let observedFrames = self.startupObservedFrameCount.withLock { $0 }
+            let observedFrames = self.microphoneCaptureSession == nil
+                ? self.startupObservedFrameCount.withLock { $0 }
+                : self.capturedMicrophoneFrameCount.withLock { $0 }
             let minimumObservationReached =
                 elapsed >= self.minimumStartupStabilizationDuration
             let deadlineReached = elapsed >= self.maximumStartupStabilizationDuration
@@ -494,7 +519,10 @@ extension AudioRecorderManager {
                 $0.id == AppSettings.shared.selectedDeviceID
             })?.name
 
-        if currentAudioSource != .systemAudio {
+        if microphoneCaptureSession != nil {
+            recordingInputSampleRate = recordingFormat.sampleRate
+            recordingInputChannelCount = recordingFormat.channelCount
+        } else if currentAudioSource != .systemAudio {
             let inputFormat = audioEngine.inputNode.outputFormat(forBus: 0)
             recordingInputSampleRate = inputFormat.sampleRate
             recordingInputChannelCount = inputFormat.channelCount
@@ -611,13 +639,18 @@ extension AudioRecorderManager {
             invalidateSystemAudioCaptureGeneration()
         }
 
+        let usedIndependentMicrophoneCapture = microphoneSourceNode != nil
+        stopIndependentMicrophoneCapture()
+
         // 1. 停止引擎（如果正在运行）
         if audioEngine.isRunning {
             audioEngine.stop()
         }
 
         // 2. 移除所有可能存在的 tap
-        audioEngine.inputNode.removeTap(onBus: 0)
+        if !usedIndependentMicrophoneCapture {
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
         recordingMixer?.removeTap(onBus: 0)
 
         // 3. 清理之前可能残留的节点
@@ -628,6 +661,10 @@ extension AudioRecorderManager {
         if let sourceNode = systemAudioSourceNode {
             audioEngine.detach(sourceNode)
             systemAudioSourceNode = nil
+        }
+        if let sourceNode = microphoneSourceNode {
+            audioEngine.detach(sourceNode)
+            microphoneSourceNode = nil
         }
         if let mixer = mixerNode {
             audioEngine.detach(mixer)
@@ -654,6 +691,13 @@ extension AudioRecorderManager {
 
     // MARK: - 仅麦克风录音配置
     func setupMicrophoneOnlyRecording() throws {
+        if shouldUseIndependentMicrophoneCapture() {
+            setupRecordingMixer()
+            try setupIndependentMicrophoneCapture(toBus: 0)
+            installRecordingTap()
+            return
+        }
+
         // 1. 设置硬件输入设备（如果选择了特定设备）
         try updateInputDevice()
 
@@ -674,6 +718,288 @@ extension AudioRecorderManager {
         audioEngine.connect(inputNode, to: recordingMixer, fromBus: 0, toBus: 0, format: micFormat)
         inputNode.volume = 1.0
         installRecordingTap()
+    }
+
+    // MARK: - 蓝牙输出下的独立麦克风采集
+
+    func setupIndependentMicrophoneCapture(toBus bus: AVAudioNodeBus) throws {
+        try updateInputDevice(changeSystemDefault: false)
+
+        guard let targetID = activeInputDeviceID,
+            targetID != "default"
+        else {
+            throw NSError(
+                domain: "AudioRecorder", code: -20,
+                userInfo: [NSLocalizedDescriptionKey: "无法解析要录制的麦克风"])
+        }
+
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInMicrophone, .externalUnknown],
+            mediaType: .audio,
+            position: .unspecified
+        )
+        guard let device = discoverySession.devices.first(where: { $0.uniqueID == targetID }) else {
+            throw NSError(
+                domain: "AudioRecorder", code: -21,
+                userInfo: [NSLocalizedDescriptionKey: "所选麦克风当前不可用"])
+        }
+
+        stopIndependentMicrophoneCapture()
+        clearMicrophoneAudioState()
+
+        let session = AVCaptureSession()
+        let input = try AVCaptureDeviceInput(device: device)
+        let output = AVCaptureAudioDataOutput()
+        output.audioSettings = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: recordingFormat.sampleRate,
+            AVNumberOfChannelsKey: recordingFormat.channelCount,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsNonInterleaved: true,
+        ]
+
+        guard session.canAddInput(input), session.canAddOutput(output) else {
+            throw NSError(
+                domain: "AudioRecorder", code: -22,
+                userInfo: [NSLocalizedDescriptionKey: "无法建立所选麦克风的独立采集链路"])
+        }
+
+        session.beginConfiguration()
+        session.addInput(input)
+        session.addOutput(output)
+        session.commitConfiguration()
+
+        let generation = microphoneCaptureGeneration.withLock { value in
+            value += 1
+            return value
+        }
+        let streamOutput = MicrophoneAudioStreamOutput { [weak self] sampleBuffer in
+            self?.handleMicrophoneSampleBuffer(sampleBuffer, captureGeneration: generation)
+        }
+        output.setSampleBufferDelegate(streamOutput, queue: microphoneSampleQueue)
+
+        microphoneCaptureSession = session
+        microphoneCaptureInput = input
+        microphoneCaptureOutput = output
+        microphoneStreamOutput = streamOutput
+
+        microphoneSessionQueue.sync {
+            session.startRunning()
+        }
+        guard session.isRunning else {
+            stopIndependentMicrophoneCapture()
+            throw NSError(
+                domain: "AudioRecorder", code: -23,
+                userInfo: [NSLocalizedDescriptionKey: "所选麦克风未能开始采集"])
+        }
+
+        let sourceNode = AVAudioSourceNode(format: recordingFormat) {
+            [weak self] _, _, frameCount, audioBufferList -> OSStatus in
+            guard let self else { return noErr }
+            return self.fillMicrophoneAudioBuffer(audioBufferList, frameCount: frameCount)
+        }
+        microphoneSourceNode = sourceNode
+        audioEngine.attach(sourceNode)
+        audioEngine.connect(
+            sourceNode, to: recordingMixer, fromBus: 0, toBus: bus, format: recordingFormat)
+        sourceNode.volume = 1.0
+
+        captureRecordingStartupInputConfiguration(recordingFormat)
+        LogManager.shared.info(
+            "已启用与蓝牙输出解耦的麦克风采集 | 名称: \(device.localizedName), ID: \(targetID)")
+    }
+
+    func stopIndependentMicrophoneCapture() {
+        microphoneCaptureGeneration.withLock { $0 += 1 }
+
+        let output = microphoneCaptureOutput
+        output?.setSampleBufferDelegate(nil, queue: nil)
+
+        if let session = microphoneCaptureSession {
+            microphoneSessionQueue.sync {
+                if session.isRunning {
+                    session.stopRunning()
+                }
+            }
+        }
+
+        microphoneCaptureSession = nil
+        microphoneCaptureInput = nil
+        microphoneCaptureOutput = nil
+        microphoneStreamOutput = nil
+        clearMicrophoneAudioState()
+    }
+
+    func handleMicrophoneSampleBuffer(
+        _ sampleBuffer: CMSampleBuffer,
+        captureGeneration: Int
+    ) {
+        guard microphoneCaptureGeneration.withLock({ $0 == captureGeneration }),
+            !isPaused,
+            CMSampleBufferIsValid(sampleBuffer),
+            let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+            let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(
+                formatDescription),
+            let sourceFormat = AVAudioFormat(streamDescription: streamDescription)
+        else { return }
+
+        let sourceFrameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard sourceFrameCount > 0,
+            let sourceBuffer = AVAudioPCMBuffer(
+                pcmFormat: sourceFormat, frameCapacity: sourceFrameCount)
+        else { return }
+        sourceBuffer.frameLength = sourceFrameCount
+
+        let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(sourceFrameCount),
+            into: sourceBuffer.mutableAudioBufferList
+        )
+        guard copyStatus == noErr else { return }
+
+        let finalBuffer: AVAudioPCMBuffer
+        if sourceFormat.isEqual(recordingFormat) {
+            finalBuffer = sourceBuffer
+        } else {
+            let converter: AVAudioConverter
+            if let cached = cachedMicrophoneAudioConverter,
+                let previousSource = lastMicrophoneSourceFormat,
+                let previousDestination = lastMicrophoneDestinationFormat,
+                previousSource.isEqual(sourceFormat),
+                previousDestination.isEqual(recordingFormat)
+            {
+                converter = cached
+            } else {
+                guard let newConverter = AVAudioConverter(
+                    from: sourceFormat, to: recordingFormat)
+                else { return }
+                cachedMicrophoneAudioConverter = newConverter
+                lastMicrophoneSourceFormat = sourceFormat
+                lastMicrophoneDestinationFormat = recordingFormat
+                converter = newConverter
+            }
+
+            let ratio = recordingFormat.sampleRate / sourceFormat.sampleRate
+            let destinationCapacity = AVAudioFrameCount(
+                ceil(Double(sourceFrameCount) * ratio) + 32)
+            guard let destinationBuffer = AVAudioPCMBuffer(
+                pcmFormat: recordingFormat,
+                frameCapacity: max(destinationCapacity, 1))
+            else { return }
+
+            var conversionError: NSError?
+            var suppliedInput = false
+            let conversionStatus = converter.convert(
+                to: destinationBuffer,
+                error: &conversionError
+            ) { _, inputStatus in
+                if suppliedInput {
+                    inputStatus.pointee = .noDataNow
+                    return nil
+                }
+                suppliedInput = true
+                inputStatus.pointee = .haveData
+                return sourceBuffer
+            }
+            guard conversionStatus != .error,
+                conversionError == nil,
+                destinationBuffer.frameLength > 0
+            else { return }
+            finalBuffer = destinationBuffer
+        }
+
+        capturedMicrophoneFrameCount.withLock {
+            $0 += Int64(finalBuffer.frameLength)
+        }
+        enqueueMicrophoneAudioBuffer(finalBuffer)
+    }
+
+    func enqueueMicrophoneAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+        microphoneAudioQueueLock.lock()
+        microphoneAudioBufferQueue.append(buffer)
+        let overflow = microphoneAudioBufferQueue.count - microphoneAudioBufferHeadIndex
+            - microphoneAudioQueueLimit
+        if overflow > 0 {
+            microphoneAudioBufferHeadIndex += overflow
+            microphoneAudioBufferReadOffset = 0
+        }
+        if microphoneAudioBufferHeadIndex > 128,
+            microphoneAudioBufferHeadIndex * 2 >= microphoneAudioBufferQueue.count
+        {
+            microphoneAudioBufferQueue.removeFirst(microphoneAudioBufferHeadIndex)
+            microphoneAudioBufferHeadIndex = 0
+        }
+        microphoneAudioQueueLock.unlock()
+    }
+
+    func fillMicrophoneAudioBuffer(
+        _ audioBufferList: UnsafeMutablePointer<AudioBufferList>,
+        frameCount: AVAudioFrameCount
+    ) -> OSStatus {
+        let destinationBuffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+        for buffer in destinationBuffers {
+            if let data = buffer.mData {
+                memset(data, 0, Int(buffer.mDataByteSize))
+            }
+        }
+
+        guard microphoneAudioQueueLock.try() else { return noErr }
+        defer { microphoneAudioQueueLock.unlock() }
+
+        var framesCopied: AVAudioFrameCount = 0
+        let sampleSize = MemoryLayout<Float>.size
+        while framesCopied < frameCount,
+            microphoneAudioBufferHeadIndex < microphoneAudioBufferQueue.count
+        {
+            let sourceBuffer = microphoneAudioBufferQueue[microphoneAudioBufferHeadIndex]
+            let framesAvailable = sourceBuffer.frameLength - microphoneAudioBufferReadOffset
+            let framesToCopy = min(frameCount - framesCopied, framesAvailable)
+            let sourceBuffers = UnsafeMutableAudioBufferListPointer(
+                sourceBuffer.mutableAudioBufferList)
+
+            for index in 0..<min(destinationBuffers.count, sourceBuffers.count) {
+                guard let sourceData = sourceBuffers[index].mData,
+                    let destinationData = destinationBuffers[index].mData
+                else { continue }
+                memcpy(
+                    destinationData.advanced(by: Int(framesCopied) * sampleSize),
+                    sourceData.advanced(by: Int(microphoneAudioBufferReadOffset) * sampleSize),
+                    Int(framesToCopy) * sampleSize
+                )
+            }
+
+            framesCopied += framesToCopy
+            microphoneAudioBufferReadOffset += framesToCopy
+            if microphoneAudioBufferReadOffset >= sourceBuffer.frameLength {
+                microphoneAudioBufferHeadIndex += 1
+                microphoneAudioBufferReadOffset = 0
+            }
+        }
+        return noErr
+    }
+
+    func clearMicrophoneAudioState() {
+        performOnMicrophoneSampleQueueSynchronously {
+            microphoneAudioQueueLock.lock()
+            microphoneAudioBufferQueue.removeAll()
+            microphoneAudioBufferHeadIndex = 0
+            microphoneAudioBufferReadOffset = 0
+            cachedMicrophoneAudioConverter?.reset()
+            cachedMicrophoneAudioConverter = nil
+            lastMicrophoneSourceFormat = nil
+            lastMicrophoneDestinationFormat = nil
+            microphoneAudioQueueLock.unlock()
+        }
+    }
+
+    private func performOnMicrophoneSampleQueueSynchronously(_ work: () -> Void) {
+        if DispatchQueue.getSpecific(key: microphoneSampleQueueKey) == true {
+            work()
+        } else {
+            microphoneSampleQueue.sync(execute: work)
+        }
     }
 
     func setupRecordingMixer() {
@@ -730,8 +1056,13 @@ extension AudioRecorderManager {
         setAcceptingAudioBuffers(false)
         invalidateSystemAudioCaptureGeneration()
 
+        let usedIndependentMicrophoneCapture = microphoneSourceNode != nil
+        stopIndependentMicrophoneCapture()
+
         // 1. 停止并移除 tap (必须首先执行)
-        audioEngine.inputNode.removeTap(onBus: 0)
+        if !usedIndependentMicrophoneCapture {
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
         recordingMixer?.removeTap(onBus: 0)
 
         // 2. 停止并重置引擎 (reset 会自动 detach 所有节点并清除连接)
@@ -750,6 +1081,7 @@ extension AudioRecorderManager {
 
         // 4. 置空各节点引用
         systemAudioSourceNode = nil
+        microphoneSourceNode = nil
         self.recordingMixer = nil
         mixerNode = nil
         resetSystemAudioConverterCacheSynchronously()
@@ -845,5 +1177,25 @@ extension AudioRecorderManager {
         } else {
             LogManager.shared.warning("释放系统音频防显示器睡眠断言失败 | 错误码: \(result)")
         }
+    }
+}
+
+final class MicrophoneAudioStreamOutput: NSObject,
+    AVCaptureAudioDataOutputSampleBufferDelegate
+{
+    private let onSampleBuffer: (CMSampleBuffer) -> Void
+
+    init(onSampleBuffer: @escaping (CMSampleBuffer) -> Void) {
+        self.onSampleBuffer = onSampleBuffer
+        super.init()
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard CMSampleBufferIsValid(sampleBuffer) else { return }
+        onSampleBuffer(sampleBuffer)
     }
 }
