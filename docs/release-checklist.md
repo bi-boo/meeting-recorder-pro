@@ -38,8 +38,13 @@ git check-ignore -v .env config/sparkle_ed25519_private.pem MeetingRecorderPro_*
 验证 DMG 内容：
 
 ```bash
-MOUNT_DIR="/tmp/MeetingRecorderProDMG-$$"
-mkdir -p "$MOUNT_DIR"
+set -euo pipefail
+MOUNT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/MeetingRecorderProDMG.XXXXXX")"
+cleanup_mount() {
+  hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+  rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
+}
+trap cleanup_mount EXIT
 hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_DIR" MeetingRecorderPro_YYYYMMDD.dmg
 ls -la "$MOUNT_DIR"
 test -d "$MOUNT_DIR/会议录音 Pro.app"
@@ -52,6 +57,8 @@ echo "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e  $MOUNT_D
 test -f "$MOUNT_DIR/PermissionFlow-LICENSE.txt"
 test -f "$MOUNT_DIR/Sparkle-LICENSE.txt"
 hdiutil detach "$MOUNT_DIR"
+rmdir "$MOUNT_DIR"
+trap - EXIT
 ```
 
 未公证的本机验证包可能显示：

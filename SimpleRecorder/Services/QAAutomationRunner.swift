@@ -680,10 +680,22 @@ final class QAAutomationRunner {
         task.lastTriggerTime = nil
 
         manager.tasks = [task]
+        guard manager.authorizeAutomaticRecordingForQAAutomation(task) else {
+            manager.tasks = originalTasks
+            return failedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "无法建立 QA 定时任务的进程内授权",
+                details: ["taskID": task.id.uuidString]
+            )
+        }
+        defer {
+            manager.revokeAutomaticRecordingForQAAutomation(taskID: task.id)
+            manager.tasks = originalTasks
+        }
         manager.checkAndTriggerReminders()
 
         guard await waitForState(.recording, timeout: 12.0) else {
-            manager.tasks = originalTasks
             await stopCurrentRecording()
             return failedStep(
                 name: name,
@@ -695,7 +707,6 @@ final class QAAutomationRunner {
 
         await sleep(seconds: duration)
         await stopCurrentRecording()
-        manager.tasks = originalTasks
 
         let recordings = newRecordings(since: before)
         let minimumBytes = minimumRecordingBytes(for: .microphone)

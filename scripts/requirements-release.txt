@@ -1,5 +1,10 @@
-# Pinned release-tool dependency. Update deliberately and verify appcast signatures before merging.
-cryptography==49.0.0
-cffi==2.0.0
-pycparser==2.23
-typing_extensions==4.16.0
+# Apple Silicon macOS / system Python 3.9 release-tool wheels.
+# Update deliberately from PyPI's official file digests and verify appcast signatures before merging.
+cryptography==49.0.0 \
+    --hash=sha256:ec5e529fb80935c94fe7b729f9972b50e351a0e6b50aa294fd5cabb109fcc29a
+cffi==2.0.0 \
+    --hash=sha256:de8dad4425a6ca6e4e5e297b27b5c824ecc7581910bf9aee86cb6835e6812aa7
+pycparser==2.23 \
+    --hash=sha256:e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934
+typing_extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

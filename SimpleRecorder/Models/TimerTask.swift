@@ -5,6 +5,7 @@
 //  Created by AI Assistant
 //
 
+import CryptoKit
 import Foundation
 
 // MARK: - 循环类型枚举
@@ -383,5 +384,69 @@ struct TimerTask: Identifiable, Codable, Equatable {
         }
 
         return false
+    }
+}
+
+// MARK: - 自动录音任务授权
+
+/// 授权覆盖整条任务，包括调度器维护的触发时间。
+/// 任何绕过应用内 CRUD 的持久化修改都会使授权失效。
+enum TimerTaskAuthorizationDigest {
+    static func make(for task: TimerTask) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+
+        guard let encodedTask = try? encoder.encode(task) else { return nil }
+        return Data(SHA256.hash(data: encodedTask))
+    }
+}
+
+protocol TimerTaskAuthorizationStore: AnyObject {
+    func authorizationDigest(for taskID: UUID) -> Data?
+    func setAuthorizationDigest(_ digest: Data, for taskID: UUID) -> Bool
+    func removeAuthorization(for taskID: UUID) -> Bool
+}
+
+struct TimerTaskAuthorizationController {
+    private let store: TimerTaskAuthorizationStore
+
+    init(store: TimerTaskAuthorizationStore) {
+        self.store = store
+    }
+
+    func isAuthorizedForAutomaticRecording(_ task: TimerTask) -> Bool {
+        guard task.actionType == .autoStart,
+            let expectedDigest = TimerTaskAuthorizationDigest.make(for: task),
+            let storedDigest = store.authorizationDigest(for: task.id)
+        else {
+            return false
+        }
+
+        return storedDigest == expectedDigest
+    }
+
+    /// 用户在应用内新增、编辑或启停任务时同步授权边界。
+    /// 纯提醒任务不依赖 Keychain；从自动录音改为提醒时必须先撤销旧授权。
+    func authorizeUserChange(from previousTask: TimerTask?, to task: TimerTask) -> Bool {
+        if task.actionType == .autoStart {
+            return synchronizeAutomaticRecordingState(task)
+        }
+        if previousTask?.actionType == .autoStart {
+            return store.removeAuthorization(for: task.id)
+        }
+        return true
+    }
+
+    /// 只有应用内的调度器状态更新可调用此方法。
+    func synchronizeAutomaticRecordingState(_ task: TimerTask) -> Bool {
+        guard task.actionType == .autoStart else { return false }
+        guard let digest = TimerTaskAuthorizationDigest.make(for: task) else {
+            return false
+        }
+        return store.setAuthorizationDigest(digest, for: task.id)
+    }
+
+    func revokeAuthorization(for taskID: UUID) -> Bool {
+        store.removeAuthorization(for: taskID)
     }
 }

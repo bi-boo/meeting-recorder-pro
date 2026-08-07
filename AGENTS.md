@@ -26,8 +26,20 @@
 - 自动更新说明：[docs/auto-update.md](docs/auto-update.md)
 - 回归测试细则：[docs/qa-regression.md](docs/qa-regression.md)
 - 独立分发说明：[docs/distribution.md](docs/distribution.md)
+- 1.0.6 发布复盘与防复发背景：[docs/release-retrospective-1.0.6.md](docs/release-retrospective-1.0.6.md)
 - 产品需求：[docs/prd.md](docs/prd.md)
 - 技术架构：[docs/architecture.md](docs/architecture.md)
+
+## 1.0.6 之后的防复发硬规则
+
+- 对外版本、内部构建号、主分支、Git 标签和 GitHub Release 是五个独立状态。普通界面只显示 `CFBundleShortVersionString`；Sparkle 使用递增的 `CFBundleVersion`。正式发布后必须回读主分支、远程标签、Latest Release 和 `latest/download/appcast.xml`，不能用其中一个状态代替完整发布验证。
+- 录音启动阶段允许 macOS 进行多轮设备路由和格式协商；必须把 `.starting` 与 `.recording` 分开处理。只有录音已稳定，且旧、新输入设备 ID 都已知并确实不同时，才按设备切换中断并保存。
+- 真实录音集成测试前先列出设备并做短时音量预检。设备存在但静音时不得进入完整测试；有多个设备时使用 `--input-pair` 和 `--output-pair` 显式指定，禁止按名称排序自动选择。环境没有变化时，不重复运行同一测试。
+- 任何安装、替换 App、完整 QA 或发布动作开始前，都要在系统权限环境检查 `SimpleRecorder` 进程，并用 `lsof` 检查是否持有 `.m4a`、`.mp3`、`.caf`、`.wav` 或临时录音文件。只要应用正在录音，就停止安装和会启动应用的测试，等待录音正常结束；不得移动或替换运行中的 App。
+- 公证前先用 Keychain profile 验证 Apple 凭据，再开始正式构建。Apple ID 和 App 专用密码只能通过系统隐藏输入或 `notarytool` 安全提示输入；不得放进聊天、命令行参数、项目文件或日志。凭据一旦暴露，发布后撤销并更新 Keychain profile。
+- 测试汇报必须给出 `passed / failed / skipped`、报告路径、失败或跳过原因，以及可直接打开的录音目录。数值判定不能代替人工试听入口。
+- 无法满足测试环境而发布负责人明确要求继续发布时，必须记录发布例外，不得伪造通过报告。P0/P1、Developer ID 签名、Apple 公证、Stapler、Gatekeeper、DMG 完整性和远程资产一致性不可豁免。
+- 正式资产上传后必须从 GitHub 回下载 DMG、`appcast.xml` 和 LAME 源码，复查 SHA-256、DMG 校验、公证、Gatekeeper、Sparkle 版本和下载 URL；本地上传成功日志不能代替远程回读。
 
 ## 稳定交付门槛
 

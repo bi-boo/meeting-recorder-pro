@@ -9,11 +9,15 @@ APP_PATH="${ROOT_DIR}/build/Release/SimpleRecorder.app"
 LAME_SOURCE_ARCHIVE="${ROOT_DIR}/SimpleRecorder/ThirdParty/lame/lame-3.100.tar.gz"
 LAME_SOURCE_SHA256="ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e"
 MOUNT_DIR=""
+RELEASE_VENV_DIR=""
 
 cleanup_mount() {
     if [[ -n "$MOUNT_DIR" && -d "$MOUNT_DIR" ]]; then
         hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
         rm -rf "$MOUNT_DIR"
+    fi
+    if [[ -n "$RELEASE_VENV_DIR" && "$RELEASE_VENV_DIR" == "$ROOT_DIR/build/release-venv."* ]]; then
+        rm -rf -- "$RELEASE_VENV_DIR"
     fi
 }
 trap cleanup_mount EXIT
@@ -79,6 +83,12 @@ if [[ ! -d "$APP_PATH" ]]; then
     echo "Release App 不存在: $APP_PATH" >&2
     exit 1
 fi
+
+/usr/bin/python3 "$ROOT_DIR/scripts/release_artifact_manifest.py" verify \
+    --manifest "$ROOT_DIR/build/release-artifact-manifest.json" \
+    --repo-root "$ROOT_DIR" \
+    --app "$APP_PATH" \
+    --dmg "$DMG_PATH"
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
 BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")"
@@ -206,8 +216,9 @@ MOUNT_DIR=""
     --app "$APP_PATH" \
     --dmg "$DMG_PATH"
 
-"$ROOT_DIR/scripts/setup_release_python.sh"
-"$ROOT_DIR/build/release-venv/bin/python" "$ROOT_DIR/scripts/generate_appcast.py" \
+RELEASE_PYTHON="$("$ROOT_DIR/scripts/setup_release_python.sh")"
+RELEASE_VENV_DIR="$(cd "$(dirname "$RELEASE_PYTHON")/.." && pwd)"
+"$RELEASE_PYTHON" -I "$ROOT_DIR/scripts/generate_appcast.py" \
     --dmg "$DMG_PATH" \
     --app "$APP_PATH" \
     --repo "$REPO" \

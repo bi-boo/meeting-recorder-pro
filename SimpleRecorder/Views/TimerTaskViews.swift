@@ -257,6 +257,8 @@ struct TimerTaskEditView: View {
     @State private var reminderMinutes: Int = 2
     @State private var showConflictAlert: Bool = false
     @State private var showMissingDaysAlert: Bool = false
+    @State private var showOperationFailureAlert: Bool = false
+    @State private var operationFailureMessage: String = ""
 
     // 1分钟粒度的分钟选项（方便测试）
     private let minuteOptions = stride(from: 0, to: 60, by: 1).map { $0 }
@@ -393,6 +395,11 @@ struct TimerTaskEditView: View {
         } message: {
             Text("每周重复至少需要选择一天。")
         }
+        .alert("操作未完成", isPresented: $showOperationFailureAlert) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(operationFailureMessage)
+        }
     }
 
     private func loadExistingTask() {
@@ -435,7 +442,7 @@ struct TimerTaskEditView: View {
             task.updatedAt = Date()
 
             guard manager.updateTask(task) else {
-                showConflictAlert = true
+                showSaveFailure(for: task)
                 return
             }
         } else {
@@ -450,7 +457,7 @@ struct TimerTaskEditView: View {
             )
 
             guard manager.addTask(task) else {
-                showConflictAlert = true
+                showSaveFailure(for: task)
                 return
             }
         }
@@ -461,8 +468,23 @@ struct TimerTaskEditView: View {
     private func deleteTask() {
         // 仅在编辑模式下有效
         guard let task = mode.existingTask else { return }
-        manager.deleteTask(id: task.id)
+        guard manager.deleteTask(id: task.id) else {
+            operationFailureMessage =
+                task.actionType == .autoStart
+                ? "无法安全删除自动录音计划，请重试。"
+                : "无法删除定时提醒，请重试。"
+            showOperationFailureAlert = true
+            return
+        }
         dismiss()
+    }
+
+    private func showSaveFailure(for task: TimerTask) {
+        operationFailureMessage =
+            task.actionType == .autoStart
+            ? "无法安全保存自动录音计划，请重试。"
+            : "无法保存定时提醒，请重试。"
+        showOperationFailureAlert = true
     }
 }
 

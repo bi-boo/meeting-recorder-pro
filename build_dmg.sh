@@ -21,6 +21,7 @@ PUBLISH_RELEASE=false
 PUBLISH_QA_EVIDENCE=""
 LAME_SOURCE_ARCHIVE="${PROJECT_DIR}/SimpleRecorder/ThirdParty/lame/lame-3.100.tar.gz"
 LAME_SOURCE_SHA256="ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e"
+RELEASE_ARTIFACT_MANIFEST="${BUILD_DIR}/release-artifact-manifest.json"
 
 cleanup_temporary_release_evidence() {
     if [ -n "${PUBLISH_QA_EVIDENCE}" ]; then
@@ -62,21 +63,31 @@ load_env_file() {
 
         local key="${line%%=*}"
         local value="${line#*=}"
-        key="$(echo "$key" | xargs)"
-        value="$(echo "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+        key="${key#"${key%%[![:space:]]*}"}"
+        key="${key%"${key##*[![:space:]]}"}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
         value="${value%\"}"
         value="${value#\"}"
         value="${value%\'}"
         value="${value#\'}"
 
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        export "$key=$value"
+        case "$key" in
+            RELEASE|PUBLISH_GITHUB_RELEASE|RELEASE_INTEGRATION_REPORT|PUBLISH_DMG_PATH|NOTARY_PROFILE|DEVELOPER_ID_CERT|GITHUB_REPOSITORY|RELEASE_TAG)
+                export "$key=$value"
+                ;;
+            *)
+                echo "已忽略 .env 中不支持的变量: ${key}" >&2
+                ;;
+        esac
     done < "$env_file"
 }
 
-if [ -f .env ]; then
-    load_env_file .env
-    echo "已从 .env 加载环境变量"
+ENV_FILE="${PROJECT_DIR}/.env"
+if [ -f "${ENV_FILE}" ]; then
+    load_env_file "${ENV_FILE}"
+    echo "已从项目根目录 .env 加载发布变量"
     parse_release_flag
     parse_publish_flag
 fi
@@ -84,6 +95,14 @@ fi
 if [ "${PUBLISH_RELEASE}" = true ] && [ "${RELEASE_BUILD}" != true ]; then
     echo "PUBLISH_GITHUB_RELEASE=1 必须与 RELEASE=1 同时使用，禁止发布未公证的开发包。" >&2
     exit 1
+fi
+
+if [ "${RELEASE_BUILD}" = true ] && [ "${PUBLISH_RELEASE}" != true ]; then
+    if [ -n "$(/usr/bin/git -C "${PROJECT_DIR}" status --porcelain --untracked-files=normal)" ]; then
+        echo "RELEASE=1 必须从干净的 Git 工作区构建，禁止将未提交源码带入发布产物。" >&2
+        /usr/bin/git -C "${PROJECT_DIR}" status --short >&2
+        exit 1
+    fi
 fi
 
 if [ "${PUBLISH_RELEASE}" = true ]; then
@@ -125,6 +144,12 @@ if [ "${PUBLISH_RELEASE}" = true ]; then
         echo "发布只使用已经完成真实录音测试的现成 App/DMG；请先执行 RELEASE=1 ./build_dmg.sh，再安装该包并运行录音集成测试。" >&2
         exit 1
     fi
+
+    /usr/bin/python3 "${PROJECT_DIR}/scripts/release_artifact_manifest.py" verify \
+        --manifest "${RELEASE_ARTIFACT_MANIFEST}" \
+        --repo-root "${PROJECT_DIR}" \
+        --app "${RELEASE_APP_PATH}" \
+        --dmg "${DMG_PATH}"
 
     echo "--- 校验待发布的现成 App/DMG（不会重新构建） ---"
     "${PROJECT_DIR}/scripts/verify_public_release.sh" "${RELEASE_APP_PATH}"
@@ -288,6 +313,14 @@ else
         exit 1
     fi
     echo "Gatekeeper: not accepted（通常是未公证或 ad-hoc 签名）。"
+fi
+
+if [ "${RELEASE_BUILD}" = true ]; then
+    /usr/bin/python3 "${PROJECT_DIR}/scripts/release_artifact_manifest.py" create \
+        --manifest "${RELEASE_ARTIFACT_MANIFEST}" \
+        --repo-root "${PROJECT_DIR}" \
+        --app "${RELEASE_APP_PATH}" \
+        --dmg "${DMG_PATH}"
 fi
 
 echo "--- 打包完成! ---"
