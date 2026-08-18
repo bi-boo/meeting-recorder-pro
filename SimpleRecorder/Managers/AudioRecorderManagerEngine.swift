@@ -574,8 +574,12 @@ extension AudioRecorderManager {
                 let framesWritten = self.framesCounter.withLock { $0 }
                 let durationStr = String(format: "%.1f", self.recordingDuration)
                 let stats = self.frameDropStatsSnapshot()
-                let hwFormat = self.audioEngine.inputNode.inputFormat(forBus: 0)
-                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 硬件格式: \(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
+                // 独立 AVCaptureSession 采集链路没有接入 audioEngine.inputNode。
+                // 录音进行中查询 inputNode 的硬件格式会重新触碰 AVAudioEngine
+                // 的输入路由，蓝牙麦克风场景下可能因此停止后续音频产帧。
+                let sampleRate = self.recordingInputSampleRate ?? self.recordingFormat.sampleRate
+                let channelCount = self.recordingInputChannelCount ?? self.recordingFormat.channelCount
+                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 硬件格式: \(sampleRate)Hz/\(channelCount)ch")
             }
         }
 
@@ -626,7 +630,7 @@ extension AudioRecorderManager {
 
         LogManager.shared.error(
             "录音采集疑似卡死 | \(String(format: "%.1f", audioStallTimeout))s 内无新增音频帧, 已写入帧数: \(framesWritten)")
-        handleRecordingInterruption(reason: .engineConfigurationChanged)
+        handleRecordingInterruption(reason: .audioCaptureStalled)
         return true
     }
 
@@ -917,6 +921,8 @@ extension AudioRecorderManager {
     }
 
     func enqueueMicrophoneAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard buffer.frameLength > 0 else { return }
+
         microphoneAudioQueueLock.lock()
         microphoneAudioBufferQueue.append(buffer)
         let overflow = microphoneAudioBufferQueue.count - microphoneAudioBufferHeadIndex
@@ -954,8 +960,18 @@ extension AudioRecorderManager {
             microphoneAudioBufferHeadIndex < microphoneAudioBufferQueue.count
         {
             let sourceBuffer = microphoneAudioBufferQueue[microphoneAudioBufferHeadIndex]
+            guard sourceBuffer.frameLength > 0,
+                microphoneAudioBufferReadOffset < sourceBuffer.frameLength
+            else {
+                // 防止异常空帧或过期偏移让渲染线程在同一个队首缓冲上原地循环。
+                microphoneAudioBufferHeadIndex += 1
+                microphoneAudioBufferReadOffset = 0
+                continue
+            }
+
             let framesAvailable = sourceBuffer.frameLength - microphoneAudioBufferReadOffset
             let framesToCopy = min(frameCount - framesCopied, framesAvailable)
+            guard framesToCopy > 0 else { break }
             let sourceBuffers = UnsafeMutableAudioBufferListPointer(
                 sourceBuffer.mutableAudioBufferList)
 

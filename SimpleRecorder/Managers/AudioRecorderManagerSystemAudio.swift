@@ -296,6 +296,7 @@ extension AudioRecorderManager {
         else { return }
 
         let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0 else { return }
         guard let srcFormat = AVAudioFormat(streamDescription: asbd) else { return }
         let dstFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
 
@@ -334,16 +335,22 @@ extension AudioRecorderManager {
             systemAudioQueueLock.unlock()
 
             guard let activeConverter = converter,
-                let finalBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: frameCount)
+                let finalBuffer = AVAudioPCMBuffer(
+                    pcmFormat: dstFormat,
+                    frameCapacity: max(
+                        AVAudioFrameCount(
+                            ceil(Double(frameCount) * dstFormat.sampleRate / srcFormat.sampleRate)
+                                + 32),
+                        1))
             else { return }
-            finalBuffer.frameLength = frameCount
 
             // 【性能重构】：AVAudioConverter 的 convert 运行在主采集线程，不再持有 systemAudioQueueLock。
             // 这样能够彻底消除由于采样率转换耗时导致的渲染线程（fillSystemAudioBuffer）阻塞，
             // 进而消除了由于锁竞争产生的“断续感”。
             var error: NSError?
             var hasProvided = false
-            activeConverter.convert(to: finalBuffer, error: &error) { inNumPackets, outStatus in
+            let conversionStatus = activeConverter.convert(to: finalBuffer, error: &error) {
+                _, outStatus in
                 if hasProvided {
                     outStatus.pointee = .noDataNow
                     return nil
@@ -353,9 +360,11 @@ extension AudioRecorderManager {
                 return tempBuffer
             }
 
-            if error == nil {
-                self.enqueueSystemAudioBuffer(finalBuffer)
-            }
+            guard conversionStatus != .error,
+                error == nil,
+                finalBuffer.frameLength > 0
+            else { return }
+            self.enqueueSystemAudioBuffer(finalBuffer)
 
         }
     }
@@ -400,9 +409,19 @@ extension AudioRecorderManager {
 
         while framesCopied < frameCount && systemAudioBufferHeadIndex < systemAudioBufferQueue.count {
             let buffer = systemAudioBufferQueue[systemAudioBufferHeadIndex]
+            guard buffer.frameLength > 0,
+                systemAudioBufferReadOffset < buffer.frameLength
+            else {
+                // 防止异常空帧或过期偏移让渲染线程在同一个队首缓冲上原地循环。
+                systemAudioBufferHeadIndex += 1
+                systemAudioBufferReadOffset = 0
+                continue
+            }
+
             let framesAvailable = buffer.frameLength - systemAudioBufferReadOffset
             let framesLeft = frameCount - framesCopied
             let framesToCopy = min(framesLeft, framesAvailable)
+            guard framesToCopy > 0 else { break }
 
             let srcPointer = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
 
@@ -432,6 +451,8 @@ extension AudioRecorderManager {
 
     // MARK: - 缓冲队列入队/清空
     func enqueueSystemAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard buffer.frameLength > 0 else { return }
+
         var didDropOldBuffer = false
 
         systemAudioQueueLock.lock()

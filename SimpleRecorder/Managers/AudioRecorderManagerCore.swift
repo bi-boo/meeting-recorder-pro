@@ -44,6 +44,7 @@ enum RecordingInterruptionReason {
     case deviceRemoved(deviceName: String)  // 当前麦克风设备被移除
     case deviceChanged  // 音频设备路由发生变更
     case engineConfigurationChanged  // 音频引擎配置变更
+    case audioCaptureStalled  // 音频采集停止产出帧
     case systemAudioStreamError(Error)  // 系统音频采集错误
     case diskSpaceFull  // 磁盘空间不足
     case writerFailed(Error?)  // 写入器失败
@@ -57,6 +58,8 @@ enum RecordingInterruptionReason {
             return "您的音频设备发生了变化（例如插拔耳机或连接蓝牙设备）"
         case .engineConfigurationChanged:
             return "您的音频设备发生了变化（例如插拔耳机或连接蓝牙设备）"
+        case .audioCaptureStalled:
+            return "录音采集异常停止，已自动保存当前录音"
         case .systemAudioStreamError:
             return "系统音频采集被中断（可能是权限被撤销）"
         case .diskSpaceFull:
