@@ -48,7 +48,7 @@ RELEASE=1 ./build_dmg.sh
 
 正式发布并同步自动更新源：
 
-先用 `RELEASE=1 ./build_dmg.sh` 生成并公证最终包，安装这份 App 后运行真实录音集成测试。确认报告通过后，再执行：
+先用 `RELEASE=1 ./build_dmg.sh` 生成并公证最终包，安装这份 App 后按本次改动选择真实录音集成测试 profile。普通版本使用 `smoke`；输入设备问题使用 `input-switch`；长时间采集问题使用 `long-recording`。确认对应报告通过后，再执行：
 
 ```bash
 RELEASE=1 PUBLISH_GITHUB_RELEASE=1 \

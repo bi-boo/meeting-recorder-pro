@@ -108,11 +108,30 @@ def main() -> None:
     if duplicate_names:
         errors.append(f"integration report has duplicate cases: {', '.join(duplicate_names)}")
 
-    required_restarts = {
-        f"restart/{mode}/{pass_name}"
-        for mode in ("microphone", "system_audio", "both")
-        for pass_name in ("first", "second")
-    }
+    profile = integration.get("profile")
+    valid_profiles = {"smoke", "restart", "input-switch", "long-recording", "full"}
+    if profile not in valid_profiles:
+        errors.append(
+            "integration report profile must be one of: "
+            + ", ".join(sorted(valid_profiles))
+        )
+
+    modes = integration.get("modes")
+    if not isinstance(modes, list) or not modes or any(
+        mode not in {"microphone", "system_audio", "both"} for mode in modes
+    ):
+        errors.append("integration report modes are missing or invalid")
+        modes = []
+    elif profile == "long-recording" and len(modes) != 1:
+        errors.append("long-recording evidence must target exactly one mode")
+
+    planned_cases = integration.get("planned_cases")
+    if not isinstance(planned_cases, list) or not planned_cases or any(
+        not isinstance(name, str) for name in planned_cases
+    ):
+        errors.append("integration report planned_cases are missing or invalid")
+        planned_cases = []
+
     by_name = {item.get("name"): item for item in result_objects}
 
     recordings_root_raw = integration.get("recordings_dir")
@@ -146,38 +165,71 @@ def main() -> None:
         if not isinstance(max_db, (int, float)) or max_db <= -80.0:
             errors.append(f"integration recording is silent or has no volume metrics: {name}")
 
-    for name in sorted(required_restarts):
-        item = by_name.get(name, {})
-        if item.get("status") != "passed":
-            errors.append(f"required integration case did not pass: {name}")
+    if isinstance(profile, str):
+        if profile == "smoke":
+            required_names = [f"smoke/{mode}" for mode in modes]
+        elif profile == "restart":
+            required_names = [
+                f"restart/{mode}/{pass_name}"
+                for mode in modes
+                for pass_name in ("first", "second")
+            ]
+        elif profile == "long-recording":
+            required_names = [f"long_recording/{mode}" for mode in modes]
         else:
-            validate_audio_case(item, name)
+            required_names = [
+                f"restart/{mode}/{pass_name}"
+                for mode in modes
+                for pass_name in ("first", "second")
+            ] if profile == "full" else []
 
-    input_switches = [
-        item
-        for item in result_objects
-        if str(item.get("name", "")).startswith("input_switch/")
-    ]
-    input_restarts = [
-        item
-        for item in result_objects
-        if str(item.get("name", "")).startswith("input_switch_restart/")
-    ]
-    if not input_switches or not input_restarts:
-        errors.append("integration report must include input-device switch and restart cases")
-    for item in input_switches + input_restarts:
-        if item.get("status") != "passed":
-            errors.append(f"input-device integration case did not pass: {item.get('name')}")
-        else:
-            validate_audio_case(item, str(item.get("name", "")))
+        if profile in {"input-switch", "full"}:
+            input_switches = [
+                name for name in planned_cases if name.startswith("input_switch/")
+            ]
+            input_restarts = [
+                name
+                for name in planned_cases
+                if name.startswith("input_switch_restart/")
+            ]
+            if not input_switches or not input_restarts:
+                errors.append(
+                    "input-switch and input-switch-restart cases are required "
+                    f"for profile {profile}"
+                )
+            required_names.extend(input_switches)
+            required_names.extend(input_restarts)
+
+        if profile == "long-recording":
+            for name in required_names:
+                item = by_name.get(name, {})
+                duration = item.get("duration")
+                if isinstance(duration, (int, float)) and duration < 30.0:
+                    errors.append(
+                        f"long-recording case is shorter than 30 seconds: {name}"
+                    )
+
+        for name in required_names:
+            item = by_name.get(name)
+            if not isinstance(item, dict):
+                errors.append(f"required integration case is missing: {name}")
+                continue
+            if item.get("status") != "passed":
+                errors.append(f"required integration case did not pass: {name}")
+            else:
+                validate_audio_case(item, name)
+
+        for name in planned_cases:
+            if name not in required_names:
+                errors.append(f"integration report contains an unrecognized case: {name}")
 
     for item in result_objects:
         status = item.get("status")
         name = str(item.get("name", ""))
         if status == "failed":
             errors.append(f"integration case failed: {name}")
-        if status == "skipped" and not name.startswith("output_switch/"):
-            errors.append(f"only output-device switch cases may be skipped: {name}")
+        if status == "skipped":
+            errors.append(f"integration case was skipped: {name}")
 
     actual = Counter(item.get("status") for item in result_objects)
     expected_summary = {

@@ -48,26 +48,52 @@
    cat "$latest/report.md"
    ```
 
-5. 根据改动范围执行人工冒烟测试。
+5. 根据改动范围选择录音集成测试 profile，不默认执行整套设备场景。
 
-   录音逻辑、设备变更处理或集成测试脚本发生变化时，还需安装本轮 Release App，
-   再执行真实录音与设备切换测试：
+   真实录音测试使用当前 Release App。系统声音相关模式会播放测试音，并检查录音文件
+   是否包含可听的系统声音；不测试输出设备切换。多个输入设备同时在线时，涉及输入
+   设备切换必须明确指定设备，禁止按名称自动选择。
+
+   | 改动类型 | 推荐 profile | 说明 |
+   |---|---|---|
+   | 普通录音、打包后短冒烟 | `smoke` | 每个指定模式录 1 段短音频 |
+   | 连续录音、停止后再次录音、文件名 | `restart` | 每个指定模式连续录 2 段 |
+   | 输入设备、蓝牙设备切换 | `input-switch` | 只验证切换中断保存，以及切换后重新录音 |
+   | 30 秒后停止、长时间采集 | `long-recording` | 每个指定模式只录 1 段，默认 40 秒 |
+   | 需要完整排查时 | `full` | `restart` 加输入设备切换，非默认流程 |
+
+   `scripts/run_full_qa.sh` 是核心功能门槛，负责短时验证设置、三种音源、暂停继续、
+   连续录音、MP3 和定时录音；它与真实设备集成 profile 分开。真实设备集成测试不应
+   再无条件追加全部 profile。
+
+   典型命令：
 
    ```bash
+   # 普通短冒烟：三种音源各录一段
    scripts/recording_integration_test.py \
      --app '/Applications/会议录音 Pro.app' \
-     --yes --quick --prompt-countdown 2 --start-attempts 3
-   ```
+     --profile smoke --modes microphone system_audio both \
+     --yes --prompt-countdown 2 --start-attempts 3
 
-   当自动排序选中的麦克风没有有效输入时，应先做输入电平预检，再明确指定两个
-   有声音且当前在线的设备，避免把静音硬件误报成应用失败：
-
-   ```bash
+   # 连续录音或文件名问题：只跑受影响模式
    scripts/recording_integration_test.py \
      --app '/Applications/会议录音 Pro.app' \
-     --yes --quick \
+     --profile restart --modes microphone \
+     --yes --prompt-countdown 2 --start-attempts 3
+
+   # 蓝牙输入设备问题：必须显式指定源和目标输入设备
+   scripts/recording_integration_test.py \
+     --app '/Applications/会议录音 Pro.app' \
+     --profile input-switch --modes microphone \
      --input-pair '源麦克风名称' '目标麦克风名称' \
-     --output-pair '源扬声器名称' '目标扬声器名称'
+     --yes --prompt-countdown 2 --start-attempts 3
+
+   # 30 秒稳定性问题：只对目标输入设备录 40 秒
+   scripts/recording_integration_test.py \
+     --app '/Applications/会议录音 Pro.app' \
+     --profile long-recording --modes microphone \
+     --input-device '目标麦克风名称' --long-seconds 40 \
+     --yes --prompt-countdown 2 --start-attempts 3
    ```
 
 6. 提交前检查：
@@ -133,12 +159,14 @@ scripts/run_audible_audio_modes_qa.sh
 
 | 编号 | 用例 | 操作 | 通过标准 |
 |---|---|---|---|
-| L1 | 30 分钟 M4A | M4A 模式录制 30 分钟 | 文件可播放，日志无写入失败 |
-| L2 | 30 分钟 MP3 | MP3 模式录制 30 分钟 | 转码完成，MP3 可播放，源 M4A 按预期移除 |
+| L1 | 30 分钟 M4A | 涉及录音写入、停止或磁盘边界时录制 30 分钟 | 文件可播放，日志无写入失败 |
+| L2 | 30 分钟 MP3 | 涉及 MP3 转码或源文件清理时录制 30 分钟 | 转码完成，MP3 可播放，源 M4A 按预期移除 |
 | L3 | 长录音暂停 | 录制中暂停 2 次再继续 | 文件可播放，状态不乱 |
 | L4 | 磁盘空间提示 | 设置较长最大时长并使用低空间测试盘 | 提示最小空间要求与实际门槛一致 |
 
-长录音不要求每次代码提交都跑；改动涉及录音写入、转码、停止、退出、磁盘检查时必须跑。
+长录音不要求每次代码提交都跑。30 秒稳定性问题优先使用 `long-recording` 的 40 秒
+专项；只有改动涉及录音写入、转码、停止、退出或磁盘检查时，才升级为 L1/L2 等更长
+测试。
 
 ## 失败处理
 

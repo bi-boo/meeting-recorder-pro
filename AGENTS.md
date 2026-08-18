@@ -34,7 +34,7 @@
 
 - 对外版本、内部构建号、主分支、Git 标签和 GitHub Release 是五个独立状态。普通界面只显示 `CFBundleShortVersionString`；Sparkle 使用递增的 `CFBundleVersion`。正式发布后必须回读主分支、远程标签、Latest Release 和 `latest/download/appcast.xml`，不能用其中一个状态代替完整发布验证。
 - 录音启动阶段允许 macOS 进行多轮设备路由和格式协商；必须把 `.starting` 与 `.recording` 分开处理。只有录音已稳定，且旧、新输入设备 ID 都已知并确实不同时，才按设备切换中断并保存。
-- 真实录音集成测试前先列出设备并做短时音量预检。设备存在但静音时不得进入完整测试；有多个设备时使用 `--input-pair` 和 `--output-pair` 显式指定，禁止按名称排序自动选择。环境没有变化时，不重复运行同一测试。
+- 真实录音集成测试前先列出输入设备并做短时音量预检。设备存在但静音时不得进入完整测试；涉及输入设备切换时，有多个输入设备必须使用 `--input-pair` 显式指定，禁止按名称自动选择。输出设备切换不属于录音软件的核心回归范围；系统声音模式只需确认测试音被录入并且录音文件可听。环境没有变化时，不重复运行同一测试。
 - 任何安装、替换 App、完整 QA 或发布动作开始前，都要在系统权限环境检查 `SimpleRecorder` 进程，并用 `lsof` 检查是否持有 `.m4a`、`.mp3`、`.caf`、`.wav` 或临时录音文件。只要应用正在录音，就停止安装和会启动应用的测试，等待录音正常结束；不得移动或替换运行中的 App。
 - 公证前先用 Keychain profile 验证 Apple 凭据，再开始正式构建。Apple ID 和 App 专用密码只能通过系统隐藏输入或 `notarytool` 安全提示输入；不得放进聊天、命令行参数、项目文件或日志。凭据一旦暴露，发布后撤销并更新 Keychain profile。
 - 测试汇报必须给出 `passed / failed / skipped`、报告路径、失败或跳过原因，以及可直接打开的录音目录。数值判定不能代替人工试听入口。
@@ -116,13 +116,13 @@ scripts/run_full_qa.sh
 RELEASE=1 ./build_dmg.sh
 ```
 
-录音集成测试：
+录音集成测试（默认短冒烟；按 Bug 类型选择 profile）：
 
 ```bash
-scripts/recording_integration_test.py --yes --quick --prompt-countdown 2 --start-attempts 3
+scripts/recording_integration_test.py --profile smoke --yes --prompt-countdown 2 --start-attempts 3
 ```
 
-改动涉及 app 代码、项目配置、录音逻辑、设备变更处理、权限、快捷键或 `scripts/recording_integration_test.py` 时，重新构建/安装应用后运行该测试。测试会真实录音；麦克风阶段需要提示用户对当前输入设备说话，系统音频阶段会自动播放测试音。
+改动涉及 app 代码、项目配置、录音逻辑、权限、快捷键或 `scripts/recording_integration_test.py` 时，重新构建/安装应用后，按改动选择 `smoke`、`restart`、`input-switch` 或 `long-recording`。只有需要完整排查时才使用 `full`。测试会真实录音；麦克风阶段需要提示用户对当前输入设备说话，系统音频阶段会自动播放测试音并检查录音文件是否可听。
 
 通过标准：
 
@@ -131,7 +131,7 @@ scripts/recording_integration_test.py --yes --quick --prompt-countdown 2 --start
 - 输入设备切换会中断并保存当前录音。
 - 输入设备切换后还能再次开始录音并录到声音。
 
-输出设备切换场景在少于两个输出设备时可以跳过。最终汇报必须说明 `passed / failed / skipped`，失败或跳过原因以 `test-results/recording-integration/<timestamp>/report.json` 和应用日志为依据。
+录音集成测试不包含输出设备切换场景。最终汇报必须说明 `passed / failed / skipped`，失败或跳过原因以 `test-results/recording-integration/<timestamp>/report.json` 和应用日志为依据。
 
 ## 编码规则
 

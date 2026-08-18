@@ -4,9 +4,19 @@ End-to-end smoke tests for SimpleRecorder's hardest audio paths.
 
 What this script checks:
 - microphone-only, system-audio-only, and mixed recording modes
-- a second recording after stop/restart
-- output-device switching while recording system audio
+- a second recording after stop/restart when the selected profile requires it
 - input-device switching while recording microphone audio, followed by a restart
+
+Profiles keep ordinary smoke tests separate from targeted regression tests:
+- smoke: one short recording per selected mode
+- restart: two consecutive recordings per selected mode
+- input-switch: input-device interruption and restart recovery
+- long-recording: one long recording per selected mode
+- full: restart coverage for selected modes plus input-device switching
+
+Output-device switching is intentionally outside the product regression scope.
+System-audio profiles still play a test tone and verify that the recording file
+contains audible system audio.
 
 The script drives the installed app through the global recording hotkey, then
 uses ffprobe/ffmpeg to verify that the generated files have duration and
@@ -18,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import itertools
 import json
 import plistlib
 import re
@@ -38,6 +47,7 @@ DEFAULT_APP_PATH = Path("/Applications/会议录音 Pro.app")
 DEFAULT_BUNDLE_ID = "com.meetingrecorderpro.app"
 PROCESS_NAME = "SimpleRecorder"
 MODES = ("microphone", "system_audio", "both")
+PROFILES = ("smoke", "restart", "input-switch", "long-recording", "full")
 RECORD_EXTENSIONS = (".m4a", ".mp3", ".wav", ".caf", ".aiff")
 
 
@@ -950,33 +960,6 @@ def list_ffmpeg_avfoundation_inputs() -> list[str]:
     return names
 
 
-def device_pairs(devices: list[str], quick: bool) -> list[tuple[str, str]]:
-    pairs = [(a, b) for a, b in itertools.permutations(devices, 2) if a != b]
-    if quick and pairs:
-        return [pairs[0]]
-    return pairs
-
-
-def requested_device_pairs(
-    devices: list[str],
-    quick: bool,
-    requested_pair: list[str] | None,
-    kind: str,
-) -> list[tuple[str, str]]:
-    if not requested_pair:
-        return device_pairs(devices, quick)
-
-    source, target = requested_pair
-    if source == target:
-        raise ValueError(f"{kind} source and target must be different devices.")
-    missing = [name for name in (source, target) if name not in devices]
-    if missing:
-        raise ValueError(
-            f"Unknown {kind} device: {', '.join(missing)}. Available: {', '.join(devices)}"
-        )
-    return [(source, target)]
-
-
 def run_input_switch_case(
     *,
     mode: str,
@@ -1094,92 +1077,6 @@ def run_input_switch_case(
     return [result, restart]
 
 
-def run_output_switch_case(
-    *,
-    mode: str,
-    source: str,
-    target: str,
-    args: argparse.Namespace,
-    recordings_dir: Path,
-    tone_path: Path,
-) -> CaseResult:
-    name = f"output_switch/{mode}/{source} -> {target}"
-    result = CaseResult(name=name, status="passed", mode=mode)
-    print_step(name)
-
-    if not args.manual_device_switch and not switch_audio_source("output", source):
-        result.status = "skipped"
-        result.note(f"Could not switch output to '{source}'.")
-        return result
-
-    quit_app(args.bundle_id, args.app)
-    configure_app_preferences(args.bundle_id, mode, recordings_dir)
-    launch_app(args.app)
-
-    try:
-        since_wall, recording_start = start_recording(
-            args.bundle_id,
-            args.hotkey_code,
-            args.start_timeout,
-            attempts=args.start_attempts,
-        )
-    except Exception as exc:
-        result.fail(str(exc))
-        return result
-
-    def elapsed() -> float:
-        return max(0.0, time.monotonic() - recording_start)
-
-    time.sleep(args.settle_seconds)
-    print("输出切换前：播放测试音。", flush=True)
-    before_start = elapsed()
-    play_tone(tone_path)
-
-    if args.manual_device_switch:
-        countdown(
-            args.prompt_countdown,
-            "请现在连接/断开耳机或切换输出设备；随后会再次播放测试音。",
-        )
-    else:
-        if not switch_audio_source("output", target):
-            result.fail(f"Could not switch output to '{target}'.")
-            stop_recording(
-                args.bundle_id,
-                args.hotkey_code,
-                recordings_dir,
-                since_wall,
-                args.stop_timeout,
-                assume_recording=True,
-            )
-            return result
-    time.sleep(args.switch_after_seconds)
-
-    if not recording_is_active(args.bundle_id):
-        result.fail("Recording stopped after output-device change; it should have continued.")
-        path = wait_for_new_recording(recordings_dir, since_wall, args.stop_timeout)
-        assert_audio_file(result, path, [], 1.0)
-        return result
-
-    print("输出切换后：播放测试音。", flush=True)
-    after_start = elapsed()
-    play_tone(tone_path)
-    path = stop_recording(
-        args.bundle_id,
-        args.hotkey_code,
-        recordings_dir,
-        since_wall,
-        args.stop_timeout,
-        assume_recording=True,
-    )
-
-    segments = [
-        Segment("system_before_output_switch", before_start, args.tone_seconds, args.system_threshold_db),
-        Segment("system_after_output_switch", after_start, args.tone_seconds, args.system_threshold_db),
-    ]
-    assert_audio_file(result, path, segments, args.tone_seconds * 1.2)
-    return result
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run SimpleRecorder integration tests against the installed macOS app."
@@ -1192,43 +1089,54 @@ def build_parser() -> argparse.ArgumentParser:
         default=REPO_ROOT / "test-results" / "recording-integration",
         help="Directory where reports and test recordings are written.",
     )
+    parser.add_argument(
+        "--profile",
+        choices=PROFILES,
+        default="smoke",
+        help=(
+            "Select the targeted test set: smoke, restart, input-switch, "
+            "long-recording, or full. Default: smoke."
+        ),
+    )
     parser.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
     parser.add_argument("--yes", action="store_true", help="Actually drive the app and record audio.")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned run and exit.")
     parser.add_argument("--list-devices", action="store_true", help="Print discovered audio devices and exit.")
-    parser.add_argument("--quick", action="store_true", help="Use only the first device pair per switch test.")
-    parser.add_argument("--skip-device-switch", action="store_true")
+    parser.add_argument(
+        "--input-device",
+        help="Pin baseline microphone recordings to this explicit input device.",
+    )
     parser.add_argument(
         "--input-pair",
         nargs=2,
         metavar=("SOURCE", "TARGET"),
         help=(
-            "Use one explicit input-device pair. SOURCE is pinned for baseline "
-            "recordings; switch cases follow the macOS system-default input."
+            "Use one explicit input-device pair for the input-switch or full profile. "
+            "SOURCE is used before the switch and TARGET after it; automatic device "
+            "selection is not used."
         ),
-    )
-    parser.add_argument(
-        "--output-pair",
-        nargs=2,
-        metavar=("SOURCE", "TARGET"),
-        help="Use one explicit output-device pair.",
     )
     parser.add_argument(
         "--manual-device-switch",
         action="store_true",
-        help="Prompt you to physically connect/disconnect devices instead of using SwitchAudioSource.",
+        help="Prompt for a physical input-device change instead of using SwitchAudioSource.",
     )
     parser.add_argument("--hotkey-code", type=int, default=23, help="macOS virtual key code for 5.")
     parser.add_argument("--start-attempts", type=int, default=2)
     parser.add_argument("--start-timeout", type=float, default=12.0)
     parser.add_argument("--stop-timeout", type=float, default=20.0)
     parser.add_argument("--settle-seconds", type=float, default=1.0)
-    parser.add_argument("--mic-seconds", type=float, default=4.0)
-    parser.add_argument("--tone-seconds", type=float, default=4.0)
+    parser.add_argument(
+        "--long-seconds",
+        type=float,
+        default=40.0,
+        help="Recording duration used by the long-recording profile unless overridden.",
+    )
+    parser.add_argument("--mic-seconds", type=float, default=None)
+    parser.add_argument("--tone-seconds", type=float, default=None)
     parser.add_argument("--phase-gap-seconds", type=float, default=0.8)
     parser.add_argument("--prompt-countdown", type=int, default=3)
     parser.add_argument("--switch-before-seconds", type=float, default=2.0)
-    parser.add_argument("--switch-after-seconds", type=float, default=1.0)
     parser.add_argument("--switch-observe-seconds", type=float, default=10.0)
     parser.add_argument("--mic-threshold-db", type=float, default=-60.0)
     parser.add_argument("--system-threshold-db", type=float, default=-55.0)
@@ -1256,9 +1164,7 @@ def collect_environment() -> dict:
         },
         "devices": {
             "switch_input": list_switch_audio_sources("input"),
-            "switch_output": list_switch_audio_sources("output"),
             "current_input": current_audio_source("input"),
-            "current_output": current_audio_source("output"),
             "avfoundation_input": [asdict(device) for device in list_avfoundation_inputs()],
             "ffmpeg_avfoundation_input": list_ffmpeg_avfoundation_inputs(),
         },
@@ -1271,10 +1177,6 @@ def print_devices(env: dict) -> None:
     for name in devices["switch_input"]:
         marker = "  *" if name == devices["current_input"] else "   "
         print(f"{marker} {name}")
-    print("\nSwitchAudioSource output:")
-    for name in devices["switch_output"]:
-        marker = "  *" if name == devices["current_output"] else "   "
-        print(f"{marker} {name}")
     print("\nAVFoundation input:")
     for device in devices["avfoundation_input"]:
         print(f"   {device['name']} [{device['unique_id']}]")
@@ -1283,13 +1185,13 @@ def print_devices(env: dict) -> None:
         print(f"   {name}")
 
 
-def validate_dependencies(env: dict) -> list[str]:
+def validate_dependencies(env: dict, *, needs_system_audio: bool) -> list[str]:
     missing = []
     deps = env["dependencies"]
     for name in ("ffmpeg", "ffprobe"):
         if not deps.get(name):
             missing.append(name)
-    if not deps.get("afplay") and not deps.get("ffplay"):
+    if needs_system_audio and not deps.get("afplay") and not deps.get("ffplay"):
         missing.append("afplay or ffplay")
     return missing
 
@@ -1305,13 +1207,28 @@ def main() -> int:
     args.app = args.app.expanduser().resolve()
     args.results_dir = args.results_dir.expanduser().resolve()
 
+    default_duration = args.long_seconds if args.profile == "long-recording" else 4.0
+    args.mic_seconds = (
+        default_duration if args.mic_seconds is None else args.mic_seconds
+    )
+    args.tone_seconds = (
+        default_duration if args.tone_seconds is None else args.tone_seconds
+    )
+    for option_name in ("long_seconds", "mic_seconds", "tone_seconds"):
+        if getattr(args, option_name) <= 0:
+            parser.error(f"--{option_name.replace('_', '-')} must be greater than 0")
+
     env = collect_environment()
 
     if args.list_devices:
         print_devices(env)
         return 0
 
-    missing = validate_dependencies(env)
+    if args.profile == "long-recording" and len(args.modes) != 1:
+        parser.error("--profile long-recording requires exactly one --modes value.")
+
+    needs_system_audio = any(mode in {"system_audio", "both"} for mode in args.modes)
+    missing = validate_dependencies(env, needs_system_audio=needs_system_audio)
     if missing:
         print(f"Missing required dependency: {', '.join(missing)}", file=sys.stderr)
         return 2
@@ -1320,48 +1237,99 @@ def main() -> int:
         print(f"App not found: {args.app}", file=sys.stderr)
         return 2
 
+    input_device_ids = {
+        device["name"]: device["unique_id"]
+        for device in env["devices"]["avfoundation_input"]
+        if device.get("unique_id")
+    }
+    input_switch_profile = args.profile in {"input-switch", "full"}
+    if input_switch_profile and not args.input_pair:
+        parser.error(
+            f"--profile {args.profile} requires an explicit --input-pair SOURCE TARGET; "
+            "automatic input-device selection is disabled."
+        )
+    if args.input_pair and args.input_device:
+        parser.error("Use either --input-device or --input-pair, not both.")
+
+    input_pairs: list[tuple[str, str]] = []
+    if args.input_pair:
+        source, target = args.input_pair
+        if source == target:
+            parser.error("Input source and target must be different devices.")
+        missing_switch = [
+            name for name in (source, target) if name not in env["devices"]["switch_input"]
+        ]
+        if input_switch_profile and missing_switch:
+            parser.error(
+                "Unknown input device for SwitchAudioSource: "
+                + ", ".join(missing_switch)
+            )
+        unresolved = [name for name in (source, target) if name not in input_device_ids]
+        if unresolved:
+            parser.error(
+                "Could not resolve stable AVFoundation IDs for input device: "
+                + ", ".join(unresolved)
+            )
+        input_pairs = [(source, target)]
+
+    baseline_input_name = args.input_device or (
+        args.input_pair[0] if args.input_pair else None
+    )
+    if baseline_input_name and baseline_input_name not in input_device_ids:
+        parser.error(
+            "Could not resolve stable AVFoundation ID for input device: "
+            + baseline_input_name
+        )
+    if (
+        args.profile == "long-recording"
+        and any(mode in {"microphone", "both"} for mode in args.modes)
+        and len(input_device_ids) > 1
+        and not baseline_input_name
+    ):
+        parser.error(
+            "--profile long-recording with microphone input requires "
+            "an explicit --input-device."
+        )
+
+    baseline_input_device_id = (
+        input_device_ids[baseline_input_name] if baseline_input_name else "default"
+    )
+    baseline_passes = {
+        "smoke": 1,
+        "restart": 2,
+        "long-recording": 1,
+        "full": 2,
+    }.get(args.profile, 0)
+    input_modes = [mode for mode in args.modes if mode in {"microphone", "both"}]
+    if input_switch_profile and not input_modes:
+        parser.error(
+            f"--profile {args.profile} requires --modes microphone and/or both."
+        )
+
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = args.results_dir / timestamp
     recordings_dir = run_dir / "recordings"
     report_path = run_dir / "report.json"
     tone_path = run_dir / f"system-tone-{args.tone_seconds:.0f}s.wav"
 
+    def baseline_case_name(mode: str, pass_index: int) -> str:
+        if args.profile == "smoke":
+            return f"smoke/{mode}"
+        if args.profile == "long-recording":
+            return f"long_recording/{mode}"
+        pass_name = "first" if pass_index == 0 else "second"
+        return f"restart/{mode}/{pass_name}"
+
     planned_cases: list[str] = []
-    for mode in args.modes:
-        planned_cases.append(f"restart/{mode}/first")
-        planned_cases.append(f"restart/{mode}/second")
-
-    try:
-        input_pairs = requested_device_pairs(
-            env["devices"]["switch_input"], args.quick, args.input_pair, "input"
-        )
-        output_pairs = requested_device_pairs(
-            env["devices"]["switch_output"], args.quick, args.output_pair, "output"
-        )
-    except ValueError as exc:
-        parser.error(str(exc))
-
-    input_device_ids = {
-        device["name"]: device["unique_id"]
-        for device in env["devices"]["avfoundation_input"]
-    }
-    baseline_input_device_id = "default"
-    if args.input_pair:
-        unresolved = [name for name in args.input_pair if name not in input_device_ids]
-        if unresolved:
-            parser.error(
-                "Could not resolve stable AVFoundation IDs for input device: "
-                + ", ".join(unresolved)
-            )
-        baseline_input_device_id = input_device_ids[args.input_pair[0]]
-    if not args.skip_device_switch:
-        for mode in [mode for mode in args.modes if mode in {"microphone", "both"}]:
+    if baseline_passes:
+        for mode in args.modes:
+            for pass_index in range(baseline_passes):
+                planned_cases.append(baseline_case_name(mode, pass_index))
+    if input_switch_profile:
+        for mode in input_modes:
             for source, target in input_pairs:
                 planned_cases.append(f"input_switch/{mode}/{source} -> {target}")
                 planned_cases.append(f"input_switch_restart/{mode}/after {target}")
-        for mode in [mode for mode in args.modes if mode in {"system_audio", "both"}]:
-            for source, target in output_pairs:
-                planned_cases.append(f"output_switch/{mode}/{source} -> {target}")
 
     print("Planned cases:")
     for case in planned_cases:
@@ -1375,12 +1343,12 @@ def main() -> int:
         return 2
 
     recordings_dir.mkdir(parents=True, exist_ok=True)
-    generate_tone(tone_path, args.tone_seconds)
+    if needs_system_audio:
+        generate_tone(tone_path, args.tone_seconds)
 
     assert_only_expected_app_is_running(args.app)
     was_running = app_running(args.app)
-    original_input = env["devices"]["current_input"]
-    original_output = env["devices"]["current_output"]
+    original_input = env["devices"]["current_input"] if input_switch_profile else None
     pref_backup = run_dir / "userdefaults-backup"
     backup_exists = export_preferences(args.bundle_id, pref_backup)
     if not backup_exists:
@@ -1391,6 +1359,8 @@ def main() -> int:
         **app_release_metadata(args.app),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "appPath": str(args.app),
+        "profile": args.profile,
+        "modes": args.modes,
         "environment": env,
         "planned_cases": planned_cases,
         "results_dir": str(run_dir),
@@ -1405,7 +1375,7 @@ def main() -> int:
                 "The app says a recording is already in progress. Stop it before running tests."
             )
 
-        for mode in args.modes:
+        for mode in args.modes if baseline_passes else []:
             quit_app(args.bundle_id, args.app)
             configure_app_preferences(
                 args.bundle_id,
@@ -1418,44 +1388,25 @@ def main() -> int:
                 ),
             )
             launch_app(args.app)
-            results.append(
-                run_mode_recording(
-                    name=f"restart/{mode}/first",
-                    mode=mode,
-                    args=args,
-                    recordings_dir=recordings_dir,
-                    tone_path=tone_path,
-                    manage_app=False,
+            for pass_index in range(baseline_passes):
+                results.append(
+                    run_mode_recording(
+                        name=baseline_case_name(mode, pass_index),
+                        mode=mode,
+                        args=args,
+                        recordings_dir=recordings_dir,
+                        tone_path=tone_path,
+                        manage_app=False,
+                    )
                 )
-            )
-            results.append(
-                run_mode_recording(
-                    name=f"restart/{mode}/second",
-                    mode=mode,
-                    args=args,
-                    recordings_dir=recordings_dir,
-                    tone_path=tone_path,
-                    manage_app=False,
-                )
-            )
             if log_recording_active():
-                raise RuntimeError(f"Mode {mode} still appears to be recording after restart tests.")
+                raise RuntimeError(
+                    f"Mode {mode} still appears to be recording after the selected profile."
+                )
             quit_app(args.bundle_id, args.app)
 
-        if not args.skip_device_switch:
-            if args.manual_device_switch and not input_pairs:
-                input_pairs = [("manual-current-input", "manual-new-input")]
-            for mode in [mode for mode in args.modes if mode in {"microphone", "both"}]:
-                if not input_pairs:
-                    results.append(
-                        CaseResult(
-                            name=f"input_switch/{mode}",
-                            status="skipped",
-                            mode=mode,
-                            notes=["Fewer than two input devices were available."],
-                        )
-                    )
-                    continue
+        if input_switch_profile:
+            for mode in input_modes:
                 for source, target in input_pairs:
                     results.extend(
                         run_input_switch_case(
@@ -1466,31 +1417,6 @@ def main() -> int:
                             recordings_dir=recordings_dir,
                             tone_path=tone_path,
                             input_device_ids=input_device_ids,
-                        )
-                    )
-
-            if args.manual_device_switch and not output_pairs:
-                output_pairs = [("manual-current-output", "manual-new-output")]
-            for mode in [mode for mode in args.modes if mode in {"system_audio", "both"}]:
-                if not output_pairs:
-                    results.append(
-                        CaseResult(
-                            name=f"output_switch/{mode}",
-                            status="skipped",
-                            mode=mode,
-                            notes=["Fewer than two output devices were available."],
-                        )
-                    )
-                    continue
-                for source, target in output_pairs:
-                    results.append(
-                        run_output_switch_case(
-                            mode=mode,
-                            source=source,
-                            target=target,
-                            args=args,
-                            recordings_dir=recordings_dir,
-                            tone_path=tone_path,
                         )
                     )
     except KeyboardInterrupt:
@@ -1524,8 +1450,6 @@ def main() -> int:
             restore_preferences(args.bundle_id, pref_backup)
             if original_input:
                 switch_audio_source("input", original_input)
-            if original_output:
-                switch_audio_source("output", original_output)
             if was_running:
                 launch_app(args.app)
         else:
