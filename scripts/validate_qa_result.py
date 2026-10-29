@@ -113,6 +113,9 @@ def main() -> None:
             errors.append(f"cannot resolve recordingsPath: {error}")
 
     non_recording_steps = {"3.x 5.x settings-round-trip", "manual-remainder"}
+    # 系统声音场景播放测试音，要求可听；麦克风场景无人说话，只排除数字静音。
+    # 与 QAAutomationRunner 的 QAAudioLevelRequirement 保持一致。
+    audible_steps = {"4.3 system-audio", "4.4 mixed-audio", "7.5 interruption-autorestart"}
     valid_statuses = {"passed", "failed", "skipped"}
     for step in normalized_steps:
         name = step["name"]
@@ -149,14 +152,17 @@ def main() -> None:
             if not path.is_file():
                 errors.append(f"{name}: referenced recording is missing: {path}")
                 continue
+            minimum_peak, minimum_rms = (
+                (0.001, 0.0001) if name in audible_steps else (0.00005, 0.000005)
+            )
             if (
                 item.get("validationError") in (None, "")
                 and isinstance(item.get("durationSeconds"), (int, float))
                 and item["durationSeconds"] > 0
                 and isinstance(item.get("peakAmplitude"), (int, float))
-                and item["peakAmplitude"] >= 0.001
+                and item["peakAmplitude"] >= minimum_peak
                 and isinstance(item.get("rmsAmplitude"), (int, float))
-                and item["rmsAmplitude"] >= 0.0001
+                and item["rmsAmplitude"] >= minimum_rms
             ):
                 valid_recording_found = True
         if not valid_recording_found:

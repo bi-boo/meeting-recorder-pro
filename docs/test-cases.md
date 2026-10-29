@@ -69,11 +69,11 @@
    典型命令：
 
    ```bash
-   # 普通短冒烟：三种音源各录一段
+   # 发布前冒烟：混合模式一次录音同时覆盖真人说话和系统声音，只需说一次话
    scripts/recording_integration_test.py \
      --app '/Applications/会议录音 Pro.app' \
-     --profile smoke --modes microphone system_audio both \
-     --yes --prompt-countdown 2 --start-attempts 3
+     --profile smoke --modes both \
+     --yes --prompt-countdown 3 --start-attempts 3
 
    # 连续录音或文件名问题：只跑受影响模式
    scripts/recording_integration_test.py \

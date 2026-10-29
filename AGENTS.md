@@ -116,20 +116,23 @@ scripts/run_full_qa.sh
 RELEASE=1 ./build_dmg.sh
 ```
 
-录音集成测试（默认短冒烟；按 Bug 类型选择 profile）：
+录音集成测试（需要人对着麦克风说话，只在下面三种时机运行）：
 
 ```bash
-scripts/recording_integration_test.py --profile smoke --yes --prompt-countdown 2 --start-attempts 3
+scripts/recording_integration_test.py --app '/Applications/会议录音 Pro.app' --profile smoke --modes both --yes --prompt-countdown 3 --start-attempts 3
 ```
 
-改动涉及 app 代码、项目配置、录音逻辑、权限、快捷键或 `scripts/recording_integration_test.py` 时，重新构建/安装应用后，按改动选择 `smoke`、`restart`、`input-switch` 或 `long-recording`。只有需要完整排查时才使用 `full`。测试会真实录音；麦克风阶段需要提示用户对当前输入设备说话，系统音频阶段会自动播放测试音并检查录音文件是否可听。
+测试分工：
+
+- 日常改 app 代码：跑单元测试和完整 QA 即可，不跑录音集成测试。完整 QA 已用 QA 构建自动覆盖三种音源、暂停继续、连续录音、手动选择麦克风、MP3、中断续录和定时录音，不需要人说话。
+- 发布前：安装 `RELEASE=1` 产物后跑一次上面的 `smoke --modes both`。混合模式一次录音同时验证真人说话和系统声音，只需要说一次话。
+- 改动涉及设备切换、快捷键或长时间采集，且完整 QA 覆盖不到时：按改动选择 `input-switch`、`restart` 或 `long-recording`，只跑受影响的模式。只有需要完整排查时才使用 `full`。
 
 通过标准：
 
 - `failed = 0`
-- 麦克风、系统声音、混合模式都生成有效时长且非静音的音频文件。
-- 输入设备切换会中断并保存当前录音。
-- 输入设备切换后还能再次开始录音并录到声音。
+- 发布证据必须同时录到真人说话和系统声音（`both` 模式，或 `microphone` 加 `system_audio`）。
+- 运行 `input-switch` 时：输入设备切换会中断并保存当前录音，之后自动开始新一段并录到声音。
 
 录音集成测试不包含输出设备切换场景。最终汇报必须说明 `passed / failed / skipped`，失败或跳过原因以 `test-results/recording-integration/<timestamp>/report.json` 和应用日志为依据。
 

@@ -113,8 +113,12 @@ if [[ -n "$RECORDINGS_DIR" ]]; then
   while IFS= read -r -d '' file; do
     found=1
     echo "-- $file"
+    # 这里只检查每个文件可解码、时长达标、不是数字静音；系统声音场景的可听音量
+    # 由 validate_qa_result.py 按场景检查，麦克风场景无人说话时只有底噪。
     if ! scripts/verify_audio_file.py \
       --minimum-duration "$MINIMUM_AUDIO_DURATION_SECONDS" \
+      --minimum-peak 0.00005 \
+      --minimum-rms 0.000005 \
       "$file"; then
       invalid=$((invalid + 1))
     fi

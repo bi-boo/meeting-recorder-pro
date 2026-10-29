@@ -297,7 +297,8 @@ final class QAAutomationRunner {
         let passed = recordings.contains {
             $0.isValid(
                 minimumBytes: minimumBytes,
-                minimumDuration: minimumRecordingDuration(expected: duration)
+                minimumDuration: minimumRecordingDuration(expected: duration),
+                level: audioLevelRequirement(for: source)
             )
         }
         return QAStepResult(
@@ -363,7 +364,8 @@ final class QAAutomationRunner {
         let fileIsValid = recordings.contains {
             $0.isValid(
                 minimumBytes: minimumBytes,
-                minimumDuration: minimumRecordingDuration(expected: duration)
+                minimumDuration: minimumRecordingDuration(expected: duration),
+                level: .nonSilent
             )
         }
         let defaultUnchanged = defaultAfter == defaultBefore
@@ -442,7 +444,8 @@ final class QAAutomationRunner {
         let passed = recordings.contains {
             $0.isValid(
                 minimumBytes: minimumBytes,
-                minimumDuration: minimumRecordingDuration(expected: expectedDuration)
+                minimumDuration: minimumRecordingDuration(expected: expectedDuration),
+                level: .nonSilent
             )
         }
         return QAStepResult(
@@ -813,6 +816,7 @@ final class QAAutomationRunner {
             extensionName: "mp3",
             minimumBytes: minimumBytes,
             minimumDuration: minimumRecordingDuration(expected: duration),
+            level: .nonSilent,
             timeout: 20.0
         )
         settings.outputFormat = .m4a
@@ -821,7 +825,8 @@ final class QAAutomationRunner {
             $0.extensionName == "mp3"
                 && $0.isValid(
                     minimumBytes: minimumBytes,
-                    minimumDuration: minimumRecordingDuration(expected: duration)
+                    minimumDuration: minimumRecordingDuration(expected: duration),
+                    level: .nonSilent
                 )
         }
         return QAStepResult(
@@ -899,7 +904,8 @@ final class QAAutomationRunner {
         let passed = recordings.contains {
             $0.isValid(
                 minimumBytes: minimumBytes,
-                minimumDuration: minimumRecordingDuration(expected: duration)
+                minimumDuration: minimumRecordingDuration(expected: duration),
+                level: .nonSilent
             )
         }
         return QAStepResult(
@@ -1015,6 +1021,12 @@ final class QAAutomationRunner {
         try file.write(from: buffer)
     }
 
+    /// 系统声音场景会播放测试音，必须达到可听音量；麦克风场景无人说话，
+    /// 只要求不是数字静音（采集链路断开时写出的全零数据），人声由真实录音集成测试验证。
+    private func audioLevelRequirement(for source: AudioSource) -> QAAudioLevelRequirement {
+        source == .microphone ? .nonSilent : .audible
+    }
+
     private func minimumRecordingBytes(for source: AudioSource) -> Int64 {
         switch source {
         case .microphone:
@@ -1123,6 +1135,7 @@ final class QAAutomationRunner {
         extensionName: String,
         minimumBytes: Int64,
         minimumDuration: TimeInterval,
+        level: QAAudioLevelRequirement,
         timeout: TimeInterval
     ) async -> [QARecording] {
         let deadline = Date().addingTimeInterval(timeout)
@@ -1133,7 +1146,8 @@ final class QAAutomationRunner {
                 $0.extensionName == extensionName
                     && $0.isValid(
                         minimumBytes: minimumBytes,
-                        minimumDuration: minimumDuration
+                        minimumDuration: minimumDuration,
+                        level: level
                     )
             }) {
                 return recordings
@@ -1437,15 +1451,19 @@ private struct QARecording: Codable {
     var rmsAmplitude: Double?
     var validationError: String?
 
-    func isValid(minimumBytes: Int64, minimumDuration: TimeInterval) -> Bool {
+    func isValid(
+        minimumBytes: Int64,
+        minimumDuration: TimeInterval,
+        level: QAAudioLevelRequirement = .audible
+    ) -> Bool {
         guard validationError == nil,
             bytes >= minimumBytes,
             let durationSeconds,
             durationSeconds >= minimumDuration,
             let peakAmplitude,
-            peakAmplitude >= 0.001,
+            peakAmplitude >= level.minimumPeak,
             let rmsAmplitude,
-            rmsAmplitude >= 0.0001
+            rmsAmplitude >= level.minimumRMS
         else {
             return false
         }
@@ -1473,3 +1491,25 @@ private extension RecordingState {
 }
 
 #endif
+
+/// QA 录音的音量门槛。与 scripts/validate_qa_result.py、scripts/qa_artifact_check.sh 保持一致。
+enum QAAudioLevelRequirement {
+    /// 播放测试音或真人说话，必须可听（约 -60 dBFS 以上）。
+    case audible
+    /// 只排除数字静音（约 -86 dBFS 以下），任何真实麦克风的底噪都能通过。
+    case nonSilent
+
+    var minimumPeak: Double {
+        switch self {
+        case .audible: return 0.001
+        case .nonSilent: return 0.00005
+        }
+    }
+
+    var minimumRMS: Double {
+        switch self {
+        case .audible: return 0.0001
+        case .nonSilent: return 0.000005
+        }
+    }
+}

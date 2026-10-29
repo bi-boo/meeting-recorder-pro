@@ -80,8 +80,9 @@ RELEASE=1 ./build_dmg.sh
 
 正式发布并同步自动更新源：
 
-1. 先执行上面的 `RELEASE=1 ./build_dmg.sh`，安装这次生成的 App，并按本次 Bug 类型运行对应的真实录音集成测试 profile。普通发布使用 `smoke`；输入设备改动使用 `input-switch`；长时间采集改动使用 `long-recording`；只有需要完整排查时使用 `full`。
+1. 先执行上面的 `RELEASE=1 ./build_dmg.sh`，安装这次生成的 App，运行一次真实录音集成测试 `smoke --modes both`（一次说话同时覆盖麦克风和系统声音）。只有本次改动涉及设备切换或长时间采集，且测试机能执行对应场景时，再加跑 `input-switch` 或 `long-recording`。
 2. 将通过的 `report.json` 交给发布命令；发布命令复用同一份现成 App/DMG，不会重新构建。
+3. 发布前不需要另跑 `scripts/run_full_qa.sh`：发布命令会对最终 DMG 跑一次完整 QA 并把结果绑定为发布证据，提前再跑一次只会重复录音。
 
 ```bash
 RELEASE=1 PUBLISH_GITHUB_RELEASE=1 \

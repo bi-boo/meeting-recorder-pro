@@ -124,6 +124,11 @@ def main() -> None:
         modes = []
     elif profile == "long-recording" and len(modes) != 1:
         errors.append("long-recording evidence must target exactly one mode")
+    elif profile in {"smoke", "restart", "full"} and not (
+        "both" in modes or {"microphone", "system_audio"} <= set(modes)
+    ):
+        # 发布证据必须同时录到真人说话和系统声音；混合模式一次录音即可覆盖两者。
+        errors.append("integration evidence must cover microphone and system audio")
 
     planned_cases = integration.get("planned_cases")
     if not isinstance(planned_cases, list) or not planned_cases or any(
