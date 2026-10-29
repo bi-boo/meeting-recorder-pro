@@ -129,14 +129,10 @@ extension AudioRecorderManager {
         }
     }
 
-    func showRecordingErrorAlert(message: String) {
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "录音启动失败"
-            alert.informativeText = message
-            alert.alertStyle = .critical
-            alert.addButton(withTitle: "确定")
-            alert.runModal()
+    /// 录音没有开始时用右上角非阻塞通知告知原因，不用模态框卡住主线程。
+    func showRecordingStartFailedNotification(message: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.notificationController.showRecordingStartFailedNotification(message: message)
         }
     }
 
@@ -176,7 +172,8 @@ extension AudioRecorderManager {
 
     // MARK: - 录音中断处理
 
-    /// 统一的录音中断处理方法
+    /// 统一的录音中断处理：保存当前段，然后自动开始新一段录音。
+    /// 用户主动停止（含到达时长上限）不经过这里，所以不会被自动续录。
     /// - Parameter reason: 中断原因
     func handleRecordingInterruption(reason: RecordingInterruptionReason) {
         // 防止重复处理
@@ -184,25 +181,119 @@ extension AudioRecorderManager {
             LogManager.shared.warning("中断处理正在进行中，忽略重复调用")
             return
         }
-        guard isRecording else {
-            LogManager.shared.info("非录音状态，忽略中断处理")
+        // 正在停止说明用户已经主动结束，这时的设备或引擎变化不需要保存，也不能续录。
+        guard recordingState == .recording || recordingState == .paused else {
+            LogManager.shared.info("非录音状态，忽略中断处理 | 当前状态: \(recordingState)")
             return
         }
 
         isHandlingInterruption = true
-        LogManager.shared.error("录音中断 | 原因: \(reason.localizedDescription)")
+        LogManager.shared.error("录音中断 | 原因: \(reason.localizedDescription) | 保存后将自动开始新一段录音")
 
-        // 紧急保存，完成后再弹提醒（避免在写入未完成时就弹窗）
-        saveRecordingImmediately { [weak self] in
-            self?.showRecordingInterruptionAlert(reason: reason)
-            self?.isHandlingInterruption = false
+        saveInterruptedRecording { [weak self] in
+            guard let self = self else { return }
+            self.isHandlingInterruption = false
+            self.scheduleAutomaticRestart(after: reason, attempt: 1)
         }
     }
 
-    /// 显示录音中断提醒弹窗
+    /// 中断保存完成后按策略延迟重启录音。设备路由刚变化时立即启动容易再次失败，
+    /// 所以先等待，再逐次拉长间隔；用尽次数后回退为需要用户点击的中断提示。
+    func scheduleAutomaticRestart(after reason: RecordingInterruptionReason, attempt: Int) {
+        pendingAutomaticRestartWorkItem?.cancel()
+        automaticRestartGeneration += 1
+        let generation = automaticRestartGeneration
+
+        guard let delay = RecordingAutomaticRestartPolicy.delay(forAttempt: attempt) else {
+            LogManager.shared.error(
+                "自动续录多次失败，等待用户手动重新开始 | 原因: \(reason.localizedDescription)")
+            showRecordingInterruptionAlert(reason: reason)
+            return
+        }
+
+        LogManager.shared.info(
+            "将在 \(Int(delay)) 秒后自动开始新一段录音 | 第 \(attempt) 次尝试")
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, self.automaticRestartGeneration == generation else { return }
+            self.pendingAutomaticRestartWorkItem = nil
+
+            guard self.recordingState == .idle, !self.isRecoveringInterruptedRecording else {
+                LogManager.shared.info(
+                    "自动续录已取消，录音状态已被其他操作改变 | 当前状态: \(self.recordingState)")
+                return
+            }
+            guard self.startRecording() else {
+                LogManager.shared.warning("自动续录启动请求被拒绝 | 第 \(attempt) 次尝试")
+                self.scheduleAutomaticRestart(after: reason, attempt: attempt + 1)
+                return
+            }
+            self.confirmAutomaticRestart(
+                after: reason,
+                attempt: attempt,
+                generation: generation,
+                remainingAttempts: TimerRecordingStartConfirmationPolicy.maxAttempts
+            )
+        }
+        pendingAutomaticRestartWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    /// 启动是异步的（权限、系统声音、稳定门禁），只有真正进入 recording 才算续录成功。
+    private func confirmAutomaticRestart(
+        after reason: RecordingInterruptionReason,
+        attempt: Int,
+        generation: Int,
+        remainingAttempts: Int
+    ) {
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + TimerRecordingStartConfirmationPolicy.retryInterval
+        ) { [weak self] in
+            guard let self = self, self.automaticRestartGeneration == generation else { return }
+
+            let observation: TimerRecordingStartObservation
+            switch self.recordingState {
+            case .idle: observation = .idle
+            case .starting: observation = .starting
+            case .recording, .paused, .stopping: observation = .recording
+            }
+
+            switch TimerRecordingStartConfirmationPolicy.decision(
+                for: observation, remainingAttempts: remainingAttempts
+            ) {
+            case .confirmed:
+                LogManager.shared.info("中断后已自动开始新一段录音 | 原因: \(reason.localizedDescription)")
+                self.notificationController.showRecordingRestartedNotification(
+                    reason: reason.localizedDescription,
+                    onStop: { [weak self] in
+                        LogManager.shared.info("用户在自动续录提示中选择停止录音")
+                        self?.stopRecording()
+                    }
+                )
+            case .wait:
+                self.confirmAutomaticRestart(
+                    after: reason,
+                    attempt: attempt,
+                    generation: generation,
+                    remainingAttempts: remainingAttempts - 1
+                )
+            case .failed:
+                LogManager.shared.warning("自动续录未能进入录音状态 | 第 \(attempt) 次尝试")
+                self.scheduleAutomaticRestart(after: reason, attempt: attempt + 1)
+            }
+        }
+    }
+
+    /// 退出应用或用户主动保存时调用，让仍在等待的自动续录失效。
+    func cancelPendingAutomaticRestart() {
+        automaticRestartGeneration += 1
+        pendingAutomaticRestartWorkItem?.cancel()
+        pendingAutomaticRestartWorkItem = nil
+    }
+
+    /// 自动续录用尽次数后，显示需要用户点击的中断提示
     /// - Parameter reason: 中断原因
     func showRecordingInterruptionAlert(reason: RecordingInterruptionReason) {
-        // 【关键修复】使用非阻塞式通知，避免阻塞主线程，确保后续定时任务能正常触发
+        // 非阻塞式通知，避免阻塞主线程，确保后续定时任务能正常触发
         notificationController.showRecordingInterruptedNotification(
             reason: reason.localizedDescription,
             onRestart: { [weak self] in

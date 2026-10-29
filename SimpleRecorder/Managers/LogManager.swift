@@ -6,6 +6,31 @@
 //
 
 import Foundation
+import os.log
+
+protocol LogFileSink: AnyObject {
+    func seekToEnd() throws -> UInt64
+    func write(contentsOf data: Data) throws
+    func synchronize() throws
+    func close() throws
+}
+
+extension FileHandle: LogFileSink {}
+
+private let logFileWriteLog = OSLog(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.meetingrecorderpro.app",
+    category: "LogManager"
+)
+
+private func reportLogFileOperationFailure(_ operation: String, error: Error) {
+    os_log(
+        "日志文件操作失败 | 操作: %{public}@ | 错误: %{public}@",
+        log: logFileWriteLog,
+        type: .error,
+        operation,
+        error.localizedDescription
+    )
+}
 
 // MARK: - 日志级别
 enum LogLevel: String {
@@ -35,6 +60,8 @@ enum LogLevel: String {
 class LogManager {
     static let shared = LogManager()
 
+    typealias FileSinkFactory = (URL) throws -> LogFileSink
+
     /// 日志文件保留天数
     private let retentionDays = 7
 
@@ -43,6 +70,14 @@ class LogManager {
 
     /// 日志目录
     private lazy var logDirectory: URL = {
+        if let configuredLogDirectory {
+            try? FileManager.default.createDirectory(
+                at: configuredLogDirectory,
+                withIntermediateDirectories: true
+            )
+            return configuredLogDirectory
+        }
+
         let bundleDirectory = Bundle.main.bundleIdentifier ?? "com.meetingrecorderpro.app"
         let logDir = FileManager.default.urls(
             for: .applicationSupportDirectory,
@@ -65,7 +100,11 @@ class LogManager {
     }
 
     /// 文件写入句柄
-    private var fileHandle: FileHandle?
+    private var fileHandle: LogFileSink?
+
+    /// 可选的日志目录和文件 sink，仅用于测试时注入临时目录与可控故障。
+    private let configuredLogDirectory: URL?
+    private let fileSinkFactory: FileSinkFactory
 
     /// 当前打开的日志文件日期
     private var currentFileDate: String = ""
@@ -80,9 +119,20 @@ class LogManager {
         return formatter
     }()
 
-    private init() {
+    init(
+        logDirectory: URL? = nil,
+        fileSinkFactory: @escaping FileSinkFactory = { url in
+            try FileHandle(forWritingTo: url)
+        },
+        startupLoggingEnabled: Bool = true
+    ) {
+        configuredLogDirectory = logDirectory
+        self.fileSinkFactory = fileSinkFactory
+
         // 启动时清理旧日志
         cleanupOldLogs()
+
+        guard startupLoggingEnabled else { return }
 
         // 记录启动日志（包含系统信息）
         let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
@@ -91,12 +141,18 @@ class LogManager {
         let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
 
         log(.info, "========== 应用启动 ==========")
-        log(.info, "日志系统初始化完成 | 日志目录: \(logDirectory.path)")
+        log(.info, "日志系统初始化完成 | 日志目录: \(self.logDirectory.path)")
         log(.info, "系统信息 | macOS: \(osVersion), 应用版本: \(appVersion) (\(buildNumber))")
     }
 
     deinit {
-        fileHandle?.closeFile()
+        if let fileHandle {
+            do {
+                try fileHandle.close()
+            } catch {
+                reportLogFileOperationFailure("关闭日志文件（析构）", error: error)
+            }
+        }
     }
 
     // MARK: - 会话管理
@@ -190,7 +246,7 @@ class LogManager {
     /// 强制刷新日志缓冲区到磁盘（用于关键时刻如录音停止）
     func flush() {
         writeQueue.sync { [weak self] in
-            try? self?.fileHandle?.synchronize()
+            self?.synchronizeFileHandle()
         }
     }
 
@@ -207,9 +263,23 @@ class LogManager {
 
         // 如果日期变了，重新打开文件
         if today != currentFileDate {
-            fileHandle?.closeFile()
+            if let fileHandle {
+                closeFileHandle(fileHandle, operation: "日期切换关闭日志文件")
+            }
             fileHandle = nil
             currentFileDate = today
+        }
+
+        guard let data = content.data(using: .utf8) else {
+            reportLogFileOperationFailure(
+                "UTF-8 编码日志内容",
+                error: NSError(
+                    domain: "LogManager",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "日志内容无法编码为 UTF-8"]
+                )
+            )
+            return
         }
 
         // 确保文件句柄可用
@@ -218,21 +288,68 @@ class LogManager {
 
             // 如果文件不存在则创建
             if !FileManager.default.fileExists(atPath: filePath) {
-                FileManager.default.createFile(atPath: filePath, contents: nil)
+                guard FileManager.default.createFile(atPath: filePath, contents: nil) else {
+                    reportLogFileOperationFailure(
+                        "创建日志文件",
+                        error: NSError(
+                            domain: NSCocoaErrorDomain,
+                            code: NSFileWriteUnknownError,
+                            userInfo: [NSLocalizedDescriptionKey: "无法创建日志文件: \(filePath)"]
+                        )
+                    )
+                    return
+                }
             }
 
-            fileHandle = FileHandle(forWritingAtPath: filePath)
-            fileHandle?.seekToEndOfFile()
+            do {
+                let newFileHandle = try fileSinkFactory(currentLogFile)
+                do {
+                    _ = try newFileHandle.seekToEnd()
+                    fileHandle = newFileHandle
+                } catch {
+                    reportLogFileOperationFailure("定位日志文件末尾", error: error)
+                    closeFileHandle(newFileHandle, operation: "定位失败后关闭日志文件")
+                    return
+                }
+            } catch {
+                reportLogFileOperationFailure("打开日志文件", error: error)
+                return
+            }
         }
 
         // 写入日志
-        if let data = content.data(using: .utf8) {
-            fileHandle?.write(data)
+        guard let fileHandle else { return }
+        do {
+            try fileHandle.write(contentsOf: data)
 
             // 对于错误级别，同步写入确保崩溃前数据已保存
             if sync {
-                try? fileHandle?.synchronize()
+                try fileHandle.synchronize()
             }
+        } catch {
+            reportLogFileOperationFailure("写入或同步日志文件", error: error)
+            closeFileHandle(fileHandle, operation: "写入失败后关闭日志文件")
+            self.fileHandle = nil
+        }
+    }
+
+    private func synchronizeFileHandle() {
+        guard let fileHandle else { return }
+
+        do {
+            try fileHandle.synchronize()
+        } catch {
+            reportLogFileOperationFailure("同步日志文件", error: error)
+            closeFileHandle(fileHandle, operation: "同步失败后关闭日志文件")
+            self.fileHandle = nil
+        }
+    }
+
+    private func closeFileHandle(_ fileHandle: LogFileSink, operation: String) {
+        do {
+            try fileHandle.close()
+        } catch {
+            reportLogFileOperationFailure(operation, error: error)
         }
     }
 

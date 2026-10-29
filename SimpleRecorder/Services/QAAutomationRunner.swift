@@ -122,6 +122,14 @@ final class QAAutomationRunner {
                     )
                 }
 
+                if scenario.includeSystemAudio {
+                    report.steps.append(
+                        await runInterruptionAutoRestartStep(
+                            duration: max(2.0, scenario.recordDuration / 2)
+                        )
+                    )
+                }
+
                 if scenario.includeTimer {
                     report.steps.append(
                         await runTimerAutoStartStep(duration: scenario.recordDuration)
@@ -360,13 +368,9 @@ final class QAAutomationRunner {
         )
     }
 
+    /// 系统声音场景共用的前置条件；不满足时返回对应的 skipped 结果。
     @MainActor
-    private func runSystemAudioStep(
-        name: String,
-        source: AudioSource,
-        duration: TimeInterval
-    ) async -> QAStepResult {
-        let startedAt = Date()
+    private func systemAudioPrerequisiteSkip(name: String, startedAt: Date) async -> QAStepResult? {
         guard AppSettings.isSystemAudioSupported else {
             return skippedStep(
                 name: name,
@@ -394,12 +398,105 @@ final class QAAutomationRunner {
                 details: availability.details
             )
         }
+        return nil
+    }
+
+    @MainActor
+    private func runSystemAudioStep(
+        name: String,
+        source: AudioSource,
+        duration: TimeInterval
+    ) async -> QAStepResult {
+        let startedAt = Date()
+        if let skipped = await systemAudioPrerequisiteSkip(name: name, startedAt: startedAt) {
+            return skipped
+        }
 
         return await runRecordingStep(
             name: name,
             source: source,
             duration: duration,
             playSystemAudio: true
+        )
+    }
+
+    /// 用系统声音模式验证异常中断后的自动续录：中断由代码触发，录音链路、保存和重启都是真实路径。
+    /// 选系统声音是因为测试音能保证两段文件都有可验证的声音，不依赖本机麦克风环境。
+    @MainActor
+    private func runInterruptionAutoRestartStep(duration: TimeInterval) async -> QAStepResult {
+        let name = "7.5 interruption-autorestart"
+        let startedAt = Date()
+        if let skipped = await systemAudioPrerequisiteSkip(name: name, startedAt: startedAt) {
+            return skipped
+        }
+
+        let before = audioFiles()
+        let recorder = AudioRecorderManager.shared
+        AppSettings.shared.audioSource = .systemAudio
+        AppSettings.shared.outputFormat = .m4a
+        AppSettings.shared.openFolderAfterRecording = false
+
+        guard recorder.startRecording() else {
+            return failedStep(name: name, startedAt: startedAt, message: "录音启动 API 返回失败")
+        }
+        guard await waitForState(.recording, timeout: 12.0) else {
+            await stopCurrentRecording()
+            return failedStep(
+                name: name, startedAt: startedAt, message: "录音未在超时时间内进入 recording 状态")
+        }
+
+        playSystemAudioPrompt(name)
+        await sleep(seconds: duration)
+
+        let interruptedAt = Date()
+        recorder.handleRecordingInterruption(reason: .systemAudioCaptureStalled)
+
+        guard await waitForState(.idle, timeout: 15.0) else {
+            await stopCurrentRecording()
+            return failedStep(
+                name: name, startedAt: startedAt, message: "中断后录音未在超时时间内保存并回到 idle")
+        }
+        let restartDeadline = RecordingAutomaticRestartPolicy.delays.reduce(0, +) + 20.0
+        guard await waitForState(.recording, timeout: restartDeadline) else {
+            await stopCurrentRecording()
+            return failedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "中断保存后应用没有自动开始新一段录音",
+                details: ["restartDeadlineSeconds": String(format: "%.0f", restartDeadline)]
+            )
+        }
+        let restartSeconds = Date().timeIntervalSince(interruptedAt)
+
+        playSystemAudioPrompt(name)
+        await sleep(seconds: duration)
+        await stopCurrentRecording()
+
+        let recordings = newRecordings(since: before)
+        let minimumBytes = minimumRecordingBytes(for: .systemAudio)
+        let validCount = recordings.filter {
+            $0.isValid(
+                minimumBytes: minimumBytes,
+                minimumDuration: minimumRecordingDuration(expected: duration)
+            )
+        }.count
+        let passed = recordings.count == 2 && validCount == 2
+        return QAStepResult(
+            name: name,
+            status: passed ? .passed : .failed,
+            startedAt: startedAt,
+            finishedAt: Date(),
+            message: passed
+                ? "中断后已保存第一段并自动开始新一段，两段文件均有效"
+                : "中断自动续录未生成两段有效文件（文件数 \(recordings.count)，有效 \(validCount)）",
+            details: currentRecorderDetails(source: .systemAudio).merging(
+                [
+                    "minimumFileBytes": "\(minimumBytes)",
+                    "restartSeconds": String(format: "%.1f", restartSeconds),
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            recordings: recordings
         )
     }
 

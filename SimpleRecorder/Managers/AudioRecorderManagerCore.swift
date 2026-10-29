@@ -45,6 +45,7 @@ enum RecordingInterruptionReason {
     case deviceChanged  // 音频设备路由发生变更
     case engineConfigurationChanged  // 音频引擎配置变更
     case audioCaptureStalled  // 音频采集停止产出帧
+    case systemAudioCaptureStalled  // 系统声音采集停止产出数据
     case systemAudioStreamError(Error)  // 系统音频采集错误
     case diskSpaceFull  // 磁盘空间不足
     case writerFailed(Error?)  // 写入器失败
@@ -59,9 +60,11 @@ enum RecordingInterruptionReason {
         case .engineConfigurationChanged:
             return "您的音频设备发生了变化（例如插拔耳机或连接蓝牙设备）"
         case .audioCaptureStalled:
-            return "录音采集异常停止，已自动保存当前录音"
+            return "录音采集异常停止"
+        case .systemAudioCaptureStalled:
+            return "系统声音采集停止产出数据（例如屏幕锁定或显示器断开）"
         case .systemAudioStreamError:
-            return "系统音频采集被中断（可能是权限被撤销）"
+            return "系统声音采集被中断（可能是权限被撤销）"
         case .diskSpaceFull:
             return "磁盘空间不足"
         case .writerFailed:
@@ -108,8 +111,13 @@ class AudioRecorderManager: NSObject, ObservableObject {
 
     // 状态管理
     var isWriterStarted = false
-    private var outputFinalizationCompletions: [() -> Void] = []
-    private var outputFinalizationCount = 0
+    private lazy var outputFinalizer: RecordingOutputFinalizer = {
+        let finalizer = RecordingOutputFinalizer()
+        finalizer.onPendingChanged = { [weak self] pending in
+            self?.isFinalizingOutput = pending
+        }
+        return finalizer
+    }()
     // 使用 OSAllocatedUnfairLock 保护 totalFramesWritten（realtime 音频线程与主线程共同访问）
     let framesCounter = OSAllocatedUnfairLock<Int64>(initialState: 0)
     let audioBufferAcceptanceLock = OSAllocatedUnfairLock<Bool>(initialState: false)
@@ -238,10 +246,13 @@ class AudioRecorderManager: NSObject, ObservableObject {
     let diskCheckInterval: TimeInterval = 30  // 磁盘空间检查间隔（秒）
     var lastStatsLogTime: TimeInterval = 0  // 上次统计日志时间
     var isHandlingInterruption = false  // 防止中断处理重入
-    var lastObservedFrameCount: Int64 = 0
-    var audioStallBeganAt: TimeInterval?
-    let audioStallGracePeriod: TimeInterval = 6
-    let audioStallTimeout: TimeInterval = 8
+    var captureProgressMonitor = RecordingCaptureProgressMonitor()
+    // 系统声音回调帧数：SCStream 回调线程写入，主线程 timer 读取。
+    let capturedSystemAudioFrameCount = OSAllocatedUnfairLock<Int64>(initialState: 0)
+
+    // 异常中断后的自动续录。代次用于让退出或用户手动操作使挂起的续录失效。
+    var automaticRestartGeneration = 0
+    var pendingAutomaticRestartWorkItem: DispatchWorkItem?
 
     // 丢帧诊断计数：音频 tap、写入队列和主线程 timer 都会访问，必须用锁保护。
     let droppedFrameCounter = OSAllocatedUnfairLock<Int>(initialState: 0)
@@ -445,32 +456,18 @@ class AudioRecorderManager: NSObject, ObservableObject {
     }
 
     func beginOutputFinalization() {
-        outputFinalizationCount += 1
-        if outputFinalizationCount == 1 {
-            isFinalizingOutput = true
-        }
+        outputFinalizer.begin()
     }
 
     func endOutputFinalization() {
-        guard outputFinalizationCount > 0 else {
+        guard outputFinalizer.finish() else {
             LogManager.shared.warning("忽略不匹配的输出转码完成回调")
             return
         }
-        outputFinalizationCount -= 1
-        guard outputFinalizationCount == 0 else { return }
-
-        let completions = outputFinalizationCompletions
-        outputFinalizationCompletions.removeAll()
-        isFinalizingOutput = false
-        completions.forEach { $0() }
     }
 
     func waitForOutputFinalization(completion: @escaping () -> Void) {
-        if isFinalizingOutput {
-            outputFinalizationCompletions.append(completion)
-        } else {
-            completion()
-        }
+        outputFinalizer.wait(completion: completion)
     }
 
     // MARK: - 公开 API：启动录音
@@ -748,7 +745,6 @@ class AudioRecorderManager: NSObject, ObservableObject {
         // 1. 暂停计时器
         recordingTimer?.invalidate()
         recordingTimer = nil
-        audioStallBeganAt = nil
 
         // 2. 统计当前已录制时间段并更新累计时长
         if let startDate = currentSegmentStartTime {
@@ -799,51 +795,36 @@ class AudioRecorderManager: NSObject, ObservableObject {
         resetSystemAudioStateForResume()
         clearMicrophoneAudioState()
         recordingState = .recording
-        lastObservedFrameCount = framesCounter.withLock { $0 }
-        audioStallBeganAt = nil
+        resetAudioCaptureProgress()
 
         // 3. 恢复计时器
         currentSegmentStartTime = Date()
-        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, let startDate = self.currentSegmentStartTime else { return }
-            self.recordingDuration = self.accumulatedDuration + Date().timeIntervalSince(startDate)
-            if self.recordingDuration >= self.maxDuration {
-                self.isAutoStoppedByLimit = true
-                self.stopRecording()
-                return
-            }
-
-            let currentTime = Date().timeIntervalSince1970
-            if currentTime - self.lastDiskCheckTime >= self.diskCheckInterval {
-                self.lastDiskCheckTime = currentTime
-                let activeRecordingDirectory =
-                    self.currentRecordingURL?.deletingLastPathComponent()
-                    ?? AppSettings.shared.recordingsPath
-                if !self.checkDiskSpace(at: activeRecordingDirectory) {
-                    self.handleRecordingInterruption(reason: .diskSpaceFull)
-                    return
-                }
-            }
-
-            if let writer = self.assetWriter, writer.status == .failed {
-                self.handleRecordingInterruption(reason: .writerFailed(writer.error))
-                return
-            }
-
-            if self.checkAudioCaptureProgress(currentTime: currentTime) {
-                return
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        recordingTimer = timer
+        startRecordingTimer()
 
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
     }
 
     // MARK: - 公开 API：紧急保存
 
-    /// 立即保存当前录音（异步，完成后在主线程回调）
+    /// 立即保存当前录音并等待全部输出收尾（用于退出，完成后在主线程回调）
     func saveRecordingImmediately(completion: (() -> Void)? = nil) {
+        cancelPendingAutomaticRestart()
+        saveCurrentRecordingImmediately(waitForOutputConversion: true) { [self] in
+            // 当前录音结束不代表前一段 MP3 也已转完，所有退出路径共用同一门禁。
+            waitForOutputFinalization { completion?() }
+        }
+    }
+
+    /// 异常中断时保存当前段。文件固化并验证后立即回调，MP3 转码在后台继续，
+    /// 不让转码时长推迟自动续录。
+    func saveInterruptedRecording(completion: @escaping () -> Void) {
+        saveCurrentRecordingImmediately(waitForOutputConversion: false, completion: completion)
+    }
+
+    private func saveCurrentRecordingImmediately(
+        waitForOutputConversion: Bool,
+        completion: (() -> Void)?
+    ) {
         // 启动稳定窗口内尚未接收音频 buffer，也未写入恢复标记。
         // 退出应用时应取消这次启动并删除空容器，不能让异步启动回调在退出过程中继续运行。
         if recordingState == .starting {
@@ -882,13 +863,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
             observerBox.token = NotificationCenter.default.addObserver(
                 forName: .recordingStateChanged, object: nil, queue: .main
             ) { _ in
+                guard self.recordingState != .stopping else { return }
                 if let token = observerBox.token {
                     NotificationCenter.default.removeObserver(token)
                     observerBox.token = nil
                 }
-                self.waitForOutputFinalization {
-                    completion?()
-                }
+                completion?()
             }
             return
         }
@@ -983,6 +963,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
                                 completion?()
                                 return
                             }
+                            let shouldConvertToMP3 = AppSettings.shared.outputFormat == .mp3
+                                && MP3Encoder.isEncodingAvailable
+                            // cleanup 会同步通知等待中的退出请求，必须先登记本次转码。
+                            if shouldConvertToMP3 { self.beginOutputFinalization() }
                             self.recordingState = .idle
                             self.clearRecordingState()
                             LogManager.shared.info(
@@ -998,17 +982,15 @@ class AudioRecorderManager: NSObject, ObservableObject {
                                 completion?()
                             }
 
-                            if AppSettings.shared.outputFormat == .mp3
-                                && MP3Encoder.isEncodingAvailable
-                            {
-                                self.beginOutputFinalization()
+                            if shouldConvertToMP3 {
                                 self.convertToMP3(from: finalURL) { mp3URL in
                                     if mp3URL == nil {
                                         self.showMP3ConversionFailedAlert(m4aURL: finalURL)
                                     }
                                     self.endOutputFinalization()
-                                    completeSave()
+                                    if waitForOutputConversion { completeSave() }
                                 }
+                                if !waitForOutputConversion { completeSave() }
                                 return
                             }
                             completeSave()

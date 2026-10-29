@@ -38,6 +38,14 @@
 		036 /* RecordingCorePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153; };
 		037 /* RecordingStartupStabilityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154; };
 		038 /* RecordingStartupStabilityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154; };
+		039 /* RecordingCaptureProgressMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 155; };
+		040 /* RecordingCaptureProgressMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 155; };
+		041 /* RecordingLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 156; };
+		042 /* FileWriteFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 157; };
+		043 /* MP3Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146; };
+		044 /* NativeMP3Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124; };
+		045 /* LogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104; };
+		046 /* libmp3lame.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 147; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -73,6 +81,9 @@
 		152 /* RecordingFinalizationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFinalizationPolicy.swift; sourceTree = "<group>"; };
 		153 /* RecordingCorePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingCorePolicyTests.swift; sourceTree = "<group>"; };
 		154 /* RecordingStartupStabilityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStartupStabilityPolicy.swift; sourceTree = "<group>"; };
+		155 /* RecordingCaptureProgressMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingCaptureProgressMonitor.swift; sourceTree = "<group>"; };
+		156 /* RecordingLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingLifecycleTests.swift; sourceTree = "<group>"; };
+		157 /* FileWriteFailureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileWriteFailureTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +101,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				046 /* libmp3lame.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,6 +151,7 @@
 				102 /* AudioRecorderManagerCore.swift */,
 				152 /* RecordingFinalizationPolicy.swift */,
 				154 /* RecordingStartupStabilityPolicy.swift */,
+				155 /* RecordingCaptureProgressMonitor.swift */,
 				140 /* AudioRecorderManagerEngine.swift */,
 				141 /* AudioRecorderManagerSystemAudio.swift */,
 				142 /* AudioRecorderManagerWriter.swift */,
@@ -210,6 +223,8 @@
 			children = (
 				150 /* TimerTaskTests.swift */,
 				153 /* RecordingCorePolicyTests.swift */,
+				156 /* RecordingLifecycleTests.swift */,
+				157 /* FileWriteFailureTests.swift */,
 			);
 			path = SimpleRecorderTests;
 			sourceTree = "<group>";
@@ -325,6 +340,7 @@
 				002 /* AudioRecorderManagerCore.swift in Sources */,
 				034 /* RecordingFinalizationPolicy.swift in Sources */,
 				037 /* RecordingStartupStabilityPolicy.swift in Sources */,
+				039 /* RecordingCaptureProgressMonitor.swift in Sources */,
 				020 /* AudioRecorderManagerEngine.swift in Sources */,
 				021 /* AudioRecorderManagerSystemAudio.swift in Sources */,
 				022 /* AudioRecorderManagerWriter.swift in Sources */,
@@ -352,6 +368,12 @@
 				031 /* TimerTask.swift in Sources */,
 				035 /* RecordingFinalizationPolicy.swift in Sources */,
 				038 /* RecordingStartupStabilityPolicy.swift in Sources */,
+				040 /* RecordingCaptureProgressMonitor.swift in Sources */,
+				041 /* RecordingLifecycleTests.swift in Sources */,
+				042 /* FileWriteFailureTests.swift in Sources */,
+				043 /* MP3Encoder.swift in Sources */,
+				044 /* NativeMP3Encoder.swift in Sources */,
+				045 /* LogManager.swift in Sources */,
 				032 /* TimerTaskTests.swift in Sources */,
 				036 /* RecordingCorePolicyTests.swift in Sources */,
 			);
@@ -544,6 +566,9 @@
 					CODE_SIGN_STYLE = Automatic;
 					CURRENT_PROJECT_VERSION = 9;
 					GENERATE_INFOPLIST_FILE = YES;
+					HEADER_SEARCH_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
+					LIBRARY_SEARCH_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
+					SWIFT_INCLUDE_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
 					LD_RUNPATH_SEARCH_PATHS = (
 						"$(inherited)",
 						"@executable_path/../Frameworks",
@@ -563,6 +588,9 @@
 					CODE_SIGN_STYLE = Automatic;
 					CURRENT_PROJECT_VERSION = 9;
 					GENERATE_INFOPLIST_FILE = YES;
+					HEADER_SEARCH_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
+					LIBRARY_SEARCH_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
+					SWIFT_INCLUDE_PATHS = "$(SRCROOT)/SimpleRecorder/ThirdParty/lame";
 					LD_RUNPATH_SEARCH_PATHS = (
 						"$(inherited)",
 						"@executable_path/../Frameworks",

@@ -8,6 +8,84 @@
 import AVFoundation
 import Foundation
 import lame
+import os.log
+
+protocol MP3OutputSink: AnyObject {
+    func write(contentsOf data: Data) throws
+    func synchronize() throws
+    func close() throws
+}
+
+extension FileHandle: MP3OutputSink {}
+
+private let mp3OutputLog = OSLog(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.meetingrecorderpro.app",
+    category: "MP3Output"
+)
+
+/// 封装 MP3 输出文件的写入、固化和关闭边界，便于注入故障进行回归测试。
+final class MP3OutputFileWriter {
+    private let sink: MP3OutputSink
+    private var closeAttempted = false
+    private var closeSucceeded = false
+
+    private(set) var lastError: Error?
+
+    init(sink: MP3OutputSink) {
+        self.sink = sink
+    }
+
+    @discardableResult
+    func append(_ data: Data) -> Bool {
+        do {
+            try sink.write(contentsOf: data)
+            return true
+        } catch {
+            lastError = error
+            closeAfterFailure()
+            return false
+        }
+    }
+
+    @discardableResult
+    func finish() -> Bool {
+        do {
+            try sink.synchronize()
+            guard closeIfNeeded() else { return false }
+            return true
+        } catch {
+            lastError = error
+            closeAfterFailure()
+            return false
+        }
+    }
+
+    func closeAfterFailure() {
+        _ = closeIfNeeded()
+    }
+
+    private func closeIfNeeded() -> Bool {
+        if closeAttempted {
+            return closeSucceeded
+        }
+
+        closeAttempted = true
+        do {
+            try sink.close()
+            closeSucceeded = true
+            return true
+        } catch {
+            lastError = error
+            os_log(
+                "MP3 输出文件关闭失败 | %{public}@",
+                log: mp3OutputLog,
+                type: .error,
+                error.localizedDescription
+            )
+            return false
+        }
+    }
+}
 
 enum MP3Encoder {
     static var isEncodingAvailable: Bool {
@@ -133,17 +211,28 @@ private enum LameMP3Encoder {
         }
 
         try? FileManager.default.removeItem(at: destinationURL)
-        guard FileManager.default.createFile(atPath: destinationURL.path, contents: nil),
-            let outputHandle = try? FileHandle(forWritingTo: destinationURL)
-        else {
+        guard FileManager.default.createFile(atPath: destinationURL.path, contents: nil) else {
             LogManager.shared.error("LameMP3Encoder: 无法创建目标 MP3 文件")
+            return false
+        }
+
+        let outputWriter: MP3OutputFileWriter
+        do {
+            outputWriter = MP3OutputFileWriter(
+                sink: try FileHandle(forWritingTo: destinationURL)
+            )
+        } catch {
+            LogManager.shared.error(
+                "LameMP3Encoder: 无法打开目标 MP3 文件 - \(error.localizedDescription)"
+            )
+            try? FileManager.default.removeItem(at: destinationURL)
             return false
         }
 
         var didComplete = false
         defer {
-            try? outputHandle.close()
             if !didComplete {
+                outputWriter.closeAfterFailure()
                 reader.cancelReading()
                 try? FileManager.default.removeItem(at: destinationURL)
             }
@@ -188,7 +277,12 @@ private enum LameMP3Encoder {
             }
 
             if encodedBytes > 0 {
-                outputHandle.write(Data(mp3Buffer.prefix(Int(encodedBytes))))
+                guard outputWriter.append(Data(mp3Buffer.prefix(Int(encodedBytes)))) else {
+                    LogManager.shared.error(
+                        "LameMP3Encoder: MP3 数据写入失败 - \(outputWriter.lastError?.localizedDescription ?? "未知错误")"
+                    )
+                    return false
+                }
             }
 
             processedFrames += frames
@@ -214,7 +308,19 @@ private enum LameMP3Encoder {
         }
 
         if flushBytes > 0 {
-            outputHandle.write(Data(flushBuffer.prefix(Int(flushBytes))))
+            guard outputWriter.append(Data(flushBuffer.prefix(Int(flushBytes)))) else {
+                LogManager.shared.error(
+                    "LameMP3Encoder: MP3 flush 数据写入失败 - \(outputWriter.lastError?.localizedDescription ?? "未知错误")"
+                )
+                return false
+            }
+        }
+
+        guard outputWriter.finish() else {
+            LogManager.shared.error(
+                "LameMP3Encoder: MP3 输出文件固化或关闭失败 - \(outputWriter.lastError?.localizedDescription ?? "未知错误")"
+            )
+            return false
         }
 
         didComplete = true

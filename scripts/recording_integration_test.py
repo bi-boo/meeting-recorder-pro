@@ -10,7 +10,7 @@ What this script checks:
 Profiles keep ordinary smoke tests separate from targeted regression tests:
 - smoke: one short recording per selected mode
 - restart: two consecutive recordings per selected mode
-- input-switch: input-device interruption and restart recovery
+- input-switch: input-device interruption, then automatic restart of a new segment
 - long-recording: one long recording per selected mode
 - full: restart coverage for selected modes plus input-device switching
 
@@ -874,7 +874,20 @@ def switch_audio_source(kind: str, device_name: str) -> bool:
     if not switcher:
         return False
     proc = run([switcher, "-t", kind, "-s", device_name], check=False)
-    return proc.returncode == 0
+    if proc.returncode != 0:
+        return False
+    # Some macOS builds accept the request and keep the old device. Read the
+    # default back so a silently ignored switch does not get blamed on the app.
+    time.sleep(1.0)
+    actual = current_audio_source(kind)
+    if actual != device_name:
+        print(
+            f"Default {kind} device did not change: requested '{device_name}', "
+            f"system still reports '{actual}'.",
+            flush=True,
+        )
+        return False
+    return True
 
 
 def current_audio_source(kind: str) -> str | None:
@@ -1031,6 +1044,8 @@ def run_input_switch_case(
     )
 
     time.sleep(args.switch_before_seconds)
+    log_path = current_log_path()
+    switch_log_offset = log_offset(log_path)
     if args.manual_device_switch:
         countdown(
             args.prompt_countdown,
@@ -1049,13 +1064,21 @@ def run_input_switch_case(
             )
             return [result]
 
-    interrupted = wait_for_recording_state(args.bundle_id, False, args.switch_observe_seconds)
+    # The app saves the interrupted segment and then starts a new one on its own.
+    # The interruption is confirmed from the log rather than the recording flag,
+    # because the flag can flip back to true before a 0.25 s poll observes it.
+    interrupted_line, _ = wait_for_log_line(
+        log_path,
+        switch_log_offset,
+        contains=("录音中断 |",),
+        timeout=args.switch_observe_seconds,
+    )
     path = wait_for_new_recording(recordings_dir, since_wall, args.stop_timeout)
-    if interrupted:
-        result.note("Recording stopped after input-device change, as expected.")
+    if interrupted_line is not None:
+        result.note("Recording was interrupted after the input-device change, as expected.")
     else:
         result.fail(
-            "Recording was still marked active after the input-device change observation window."
+            "No recording interruption was logged within the input-device change observation window."
         )
         stop_recording(args.bundle_id, args.hotkey_code, recordings_dir, since_wall, args.stop_timeout)
 
@@ -1065,14 +1088,85 @@ def run_input_switch_case(
         [audible_segment],
         min_duration=max(1.0, audible_segment.duration * 0.55),
     )
+    if interrupted_line is None:
+        return [result]
 
-    restart = run_mode_recording(
-        name=f"input_switch_restart/{mode}/after {target}",
-        mode=mode,
-        args=args,
-        recordings_dir=recordings_dir,
-        tone_path=tone_path,
-        selected_device_id="default",
+    restart = CaseResult(
+        name=f"input_switch_autorestart/{mode}/after {target}", status="passed", mode=mode
+    )
+    print_step(restart.name)
+    restarted_line, _ = wait_for_log_line(
+        log_path,
+        switch_log_offset,
+        contains=("中断后已自动开始新一段录音",),
+        failures=("自动续录多次失败",),
+        timeout=args.autorestart_timeout,
+    )
+    if restarted_line is None:
+        restart.fail(
+            f"The app did not start a new segment on its own within {args.autorestart_timeout:.0f}s "
+            "after the interruption."
+        )
+        if recording_is_active(args.bundle_id):
+            stop_recording(
+                args.bundle_id,
+                args.hotkey_code,
+                recordings_dir,
+                time.time(),
+                args.stop_timeout,
+                assume_recording=True,
+            )
+        return [result, restart]
+
+    restart_since_wall = time.time()
+    restart_start = time.monotonic()
+    segments: list[Segment] = []
+    time.sleep(args.settle_seconds)
+    if mode in {"microphone", "both"}:
+        start = max(0.0, time.monotonic() - restart_start)
+        if args.mic_prompt:
+            countdown(
+                args.prompt_countdown,
+                "自动续录验证：请对着当前输入设备持续说几秒话。",
+            )
+        else:
+            print("自动续录验证：未启用人工提示，将依赖环境声音。", flush=True)
+        time.sleep(args.mic_seconds)
+        segments.append(
+            Segment(
+                name="mic_after_autorestart",
+                start=start,
+                duration=max(args.mic_seconds, time.monotonic() - restart_start - start),
+                threshold_db=args.mic_threshold_db,
+            )
+        )
+    if mode in {"system_audio", "both"}:
+        time.sleep(args.phase_gap_seconds)
+        print("系统声音测试阶段：播放测试音。", flush=True)
+        start = max(0.0, time.monotonic() - restart_start)
+        play_tone(tone_path)
+        segments.append(
+            Segment(
+                name="system_after_autorestart",
+                start=start,
+                duration=args.tone_seconds,
+                threshold_db=args.system_threshold_db,
+            )
+        )
+
+    restart_path = stop_recording(
+        args.bundle_id,
+        args.hotkey_code,
+        recordings_dir,
+        restart_since_wall,
+        args.stop_timeout,
+        assume_recording=True,
+    )
+    assert_audio_file(
+        restart,
+        restart_path,
+        segments,
+        max(1.0, sum(segment.duration for segment in segments) * 0.55),
     )
     return [result, restart]
 
@@ -1120,6 +1214,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--manual-device-switch",
         action="store_true",
         help="Prompt for a physical input-device change instead of using SwitchAudioSource.",
+    )
+    parser.add_argument(
+        "--autorestart-timeout",
+        type=float,
+        default=45.0,
+        help="Seconds to wait for the app to start a new segment after an interruption.",
     )
     parser.add_argument("--hotkey-code", type=int, default=23, help="macOS virtual key code for 5.")
     parser.add_argument("--start-attempts", type=int, default=2)

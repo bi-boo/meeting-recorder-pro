@@ -98,6 +98,22 @@ struct TimerTaskListView: View {
                     .foregroundColor(.secondary)
             }
 
+            // 自动录音迟到补录
+            Section {
+                Stepper(
+                    "计划时间后 \(settings.timerAutoStartLateGraceMinutes) 分钟内仍补录",
+                    value: $settings.timerAutoStartLateGraceMinutes,
+                    in: TimerTaskTriggerWindowPolicy.minimumAutoStartLateGraceMinutes...TimerTaskTriggerWindowPolicy.maximumAutoStartLateGraceMinutes
+                )
+            } header: {
+                Text("自动录音")
+                    .padding(.bottom, 4)
+            } footer: {
+                Text("电脑睡眠或应用未运行时错过了计划时间，只要仍在补录期内，自动录音会在唤醒或启动后立即开始并提示迟到了多久；启动失败会在补录期内每 15 秒重试一次。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             // 开机与唤醒开关
             Section {
                 Toggle("开机自动启动", isOn: $settings.launchAtLogin)
@@ -174,6 +190,13 @@ struct TimerTaskRow: View {
                 if task.enabled, task.nextTriggerTime != nil {
                     Text(task.nextTriggerDisplay)
                         .font(.subheadline)
+                        .foregroundColor(.orange)
+                }
+
+                // 授权记录与计划不一致而暂停的自动录音，需要用户重新启用
+                if manager.tasksNeedingReauthorization.contains(task.id) {
+                    Text("需重新确认后才会自动录音")
+                        .font(.caption)
                         .foregroundColor(.orange)
                 }
 

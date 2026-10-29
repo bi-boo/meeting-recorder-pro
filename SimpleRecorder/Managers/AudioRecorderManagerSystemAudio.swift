@@ -297,6 +297,8 @@ extension AudioRecorderManager {
 
         let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
         guard frameCount > 0 else { return }
+        // 只要 SCStream 持续回调就算系统声音采集存活；静音帧同样计数。
+        capturedSystemAudioFrameCount.withLock { $0 += Int64(frameCount) }
         guard let srcFormat = AVAudioFormat(streamDescription: asbd) else { return }
         let dstFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
 

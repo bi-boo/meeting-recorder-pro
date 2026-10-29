@@ -25,6 +25,8 @@ class ReminderWindowController: NSObject {
     private var isTimerReminderActive = false
     private var activeTimerReminderOccurrence: TimerTaskOccurrence?
     private var pendingTimerReminders: [PendingTimerReminder] = []
+    // 定时提醒显示期间到达的录音状态通知先排队，提醒结束后依次显示，不能直接丢弃。
+    private var pendingStatusNotifications: [() -> Void] = []
 
     /// 显示提醒弹窗
     func showReminder(
@@ -176,7 +178,7 @@ class ReminderWindowController: NSObject {
     }
 
     /// 显示自动录音通知（5秒后自动消失）
-    func showAutoStartNotification(for task: TimerTask) {
+    func showAutoStartNotification(for task: TimerTask, lateMinutes: Int = 0) {
         guard !isTimerReminderActive else {
             LogManager.shared.info("定时提醒显示中，跳过非必要的自动录音通知 | 任务: \(task.timeDisplay)")
             return
@@ -184,7 +186,7 @@ class ReminderWindowController: NSObject {
         dismissReminder()
 
         // 创建通知视图
-        let notificationView = AutoStartNotificationView(task: task)
+        let notificationView = AutoStartNotificationView(task: task, lateMinutes: lateMinutes)
 
         // 创建 NSWindow
         let window = NSWindow(
@@ -293,13 +295,15 @@ class ReminderWindowController: NSObject {
     ///   - onRestart: 用户点击"再次开始录音"时的回调
     func showRecordingInterruptedNotification(reason: String, onRestart: @escaping () -> Void) {
         guard !isTimerReminderActive else {
-            LogManager.shared.info("定时提醒显示中，跳过录音中断通知 | 原因: \(reason)")
+            LogManager.shared.info("定时提醒显示中，录音中断通知已排队 | 原因: \(reason)")
+            pendingStatusNotifications.append { [weak self] in
+                self?.showRecordingInterruptedNotification(reason: reason, onRestart: onRestart)
+            }
             return
         }
 
         // 记录回调
         self.onStartRecordingCallback = onRestart
-        self.isTimerReminderActive = false
 
         // 如果已有弹窗，先关闭
         dismissReminder()
@@ -364,9 +368,136 @@ class ReminderWindowController: NSObject {
     }
 
     private func showNextQueuedTimerReminder() {
-        guard !isTimerReminderActive, !pendingTimerReminders.isEmpty else { return }
-        let nextReminder = pendingTimerReminders.removeFirst()
-        presentTimerReminder(nextReminder)
+        guard !isTimerReminderActive else { return }
+        if !pendingTimerReminders.isEmpty {
+            let nextReminder = pendingTimerReminders.removeFirst()
+            presentTimerReminder(nextReminder)
+            return
+        }
+        if !pendingStatusNotifications.isEmpty {
+            let present = pendingStatusNotifications.removeFirst()
+            present()
+        }
+    }
+
+    /// 没有定时提醒时直接显示；否则排队等提醒结束。
+    private func presentStatusNotificationOrQueue(
+        logDescription: String,
+        present: @escaping () -> Void
+    ) {
+        guard !isTimerReminderActive else {
+            LogManager.shared.info("定时提醒显示中，\(logDescription)已排队")
+            pendingStatusNotifications.append(present)
+            return
+        }
+        present()
+    }
+
+    /// 右上角通用状态窗口：创建、定位、淡入并在超时后自动关闭。
+    private func presentStatusWindow<Content: View>(
+        _ content: Content,
+        height: CGFloat,
+        autoDismissAfter timeout: TimeInterval
+    ) {
+        dismissReminder()
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: height),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: content)
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = true
+        window.level = .floating
+        window.isReleasedWhenClosed = false
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        positionWindowTopRight(window)
+
+        window.alphaValue = 0
+        window.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+        }
+        reminderWindow = window
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self, weak window] in
+            if let self = self, self.reminderWindow === window {
+                self.dismissReminder()
+                self.showNextQueuedTimerReminder()
+            }
+        }
+    }
+
+    /// 异常中断后已自动开始新一段录音的通知（非阻塞，可直接停止录音）
+    func showRecordingRestartedNotification(reason: String, onStop: @escaping () -> Void) {
+        presentStatusNotificationOrQueue(logDescription: "自动续录通知") { [weak self] in
+            guard let self = self else { return }
+            LogManager.shared.info("显示自动续录通知（非阻塞）| 原因: \(reason)")
+            self.presentStatusWindow(
+                RecordingRestartedView(
+                    reason: reason,
+                    onDismiss: { [weak self] in
+                        self?.dismissReminder()
+                        self?.showNextQueuedTimerReminder()
+                    },
+                    onStop: { [weak self] in
+                        self?.dismissReminder()
+                        self?.showNextQueuedTimerReminder()
+                        onStop()
+                    }
+                ),
+                height: 170,
+                autoDismissAfter: 120
+            )
+        }
+    }
+
+    /// 录音未能开始的通知（非阻塞）
+    func showRecordingStartFailedNotification(message: String) {
+        presentStatusNotificationOrQueue(logDescription: "录音未能开始通知") { [weak self] in
+            guard let self = self else { return }
+            LogManager.shared.info("显示录音未能开始通知（非阻塞）| 原因: \(message)")
+            self.presentStatusWindow(
+                RecordingStartFailedView(
+                    message: message,
+                    onDismiss: { [weak self] in
+                        self?.dismissReminder()
+                        self?.showNextQueuedTimerReminder()
+                    }
+                ),
+                height: 150,
+                autoDismissAfter: 60
+            )
+        }
+    }
+
+    /// 自动录音计划需要用户重新确认的通知（非阻塞，可直接打开设置）
+    func showTimerTasksNeedReauthorizationNotification(count: Int) {
+        presentStatusNotificationOrQueue(logDescription: "定时任务重新确认通知") { [weak self] in
+            guard let self = self else { return }
+            LogManager.shared.info("显示定时任务重新确认通知（非阻塞）| 数量: \(count)")
+            self.presentStatusWindow(
+                TimerTasksNeedReauthorizationView(
+                    count: count,
+                    onDismiss: { [weak self] in
+                        self?.dismissReminder()
+                        self?.showNextQueuedTimerReminder()
+                    },
+                    onOpenSettings: { [weak self] in
+                        self?.dismissReminder()
+                        self?.showNextQueuedTimerReminder()
+                        NotificationCenter.default.post(name: .openSettingsWindow, object: nil)
+                    }
+                ),
+                height: 150,
+                autoDismissAfter: 120
+            )
+        }
     }
 
     private func consumeTimerReminderIgnoreCallback() -> (() -> Void)? {
@@ -455,6 +586,13 @@ struct ReminderView: View {
 
 struct AutoStartNotificationView: View {
     let task: TimerTask
+    var lateMinutes: Int = 0
+
+    private var detailText: String {
+        lateMinutes > 0
+            ? "定时计划 \(task.timeDisplay) 已触发，迟到 \(lateMinutes) 分钟补录"
+            : "定时计划 \(task.timeDisplay) 已触发"
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -468,9 +606,10 @@ struct AutoStartNotificationView: View {
                 .font(.system(size: 14, weight: .semibold))
 
             // 副标题 - 计划时间
-            Text("定时计划 \(task.timeDisplay) 已触发")
+            Text(detailText)
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
@@ -585,6 +724,155 @@ struct RecordingInterruptedView: View {
 
                 Button(action: onRestart) {
                     Text("再次录音")
+                        .frame(width: 90)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .frame(width: 280)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(NSColor.windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - 自动续录通知视图（非阻塞）
+
+struct RecordingRestartedView: View {
+    let reason: String
+    let onDismiss: () -> Void
+    let onStop: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "record.circle.fill")
+                .font(.system(size: 24))
+                .foregroundColor(.orange)
+
+            Text("录音已自动继续")
+                .font(.system(size: 14, weight: .semibold))
+
+            Text("上一段已保存，已开始新一段。原因：\(reason)")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+
+            HStack(spacing: 12) {
+                Button(action: onStop) {
+                    Text("停止录音")
+                        .frame(width: 80)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+
+                Button(action: onDismiss) {
+                    Text("知道了")
+                        .frame(width: 90)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .frame(width: 280)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(NSColor.windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - 录音未能开始通知视图（非阻塞）
+
+struct RecordingStartFailedView: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "xmark.octagon.fill")
+                .font(.system(size: 24))
+                .foregroundColor(.red)
+
+            Text("录音未能开始")
+                .font(.system(size: 14, weight: .semibold))
+
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+
+            Button(action: onDismiss) {
+                Text("知道了")
+                    .frame(width: 90)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .frame(width: 280)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(NSColor.windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - 定时任务需要重新确认通知视图（非阻塞）
+
+struct TimerTasksNeedReauthorizationView: View {
+    let count: Int
+    let onDismiss: () -> Void
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: 24))
+                .foregroundColor(.orange)
+
+            Text("自动录音计划需要重新确认")
+                .font(.system(size: 14, weight: .semibold))
+
+            Text("\(count) 个自动录音计划的授权记录与保存的计划不一致，已暂停，请在设置中重新启用。")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+
+            HStack(spacing: 12) {
+                Button(action: onDismiss) {
+                    Text("知道了")
+                        .frame(width: 80)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+
+                Button(action: onOpenSettings) {
+                    Text("打开设置")
                         .frame(width: 90)
                 }
                 .buttonStyle(.borderedProminent)

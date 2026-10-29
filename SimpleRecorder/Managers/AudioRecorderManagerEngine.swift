@@ -120,6 +120,7 @@ extension AudioRecorderManager {
         } catch {
             setAcceptingAudioBuffers(false)
             LogManager.shared.error("麦克风录音启动失败 | 错误: \(error.localizedDescription)")
+            showRecordingStartFailedNotification(message: "麦克风录音未能开始：\(error.localizedDescription)")
 
             // 轻量级清理：只清理本次录音创建的资源，不调用 reset() 避免破坏引擎状态
             // 移除可能已安装的 tap
@@ -223,6 +224,8 @@ extension AudioRecorderManager {
             }
             setAcceptingAudioBuffers(false)
             LogManager.shared.error("系统音频录音启动失败 | 错误: \(error.localizedDescription)")
+            showRecordingStartFailedNotification(
+                message: "\(currentAudioSource.displayName)录音未能开始：\(error.localizedDescription)")
 
             // 轻量级清理：只清理本次录音创建的资源
             // 移除可能已安装的 tap
@@ -472,7 +475,7 @@ extension AudioRecorderManager {
         recordingState = .idle
         LogManager.shared.error("录音启动稳定性检查失败 | \(message)")
         NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
-        showRecordingErrorAlert(message: message)
+        showRecordingStartFailedNotification(message: message)
     }
 
     // MARK: - 录音启动完成处理
@@ -502,8 +505,6 @@ extension AudioRecorderManager {
         lastDiskCheckTime = Date().timeIntervalSince1970
         isHandlingInterruption = false
         engineConfigurationRecoveryAttempts = 0
-        lastObservedFrameCount = 0
-        audioStallBeganAt = nil
         resetFrameDropStats()
 
         hasPrintedFirstSample = false
@@ -531,7 +532,24 @@ extension AudioRecorderManager {
             recordingInputChannelCount = nil
         }
         resetRecordingStartupStabilityState()
+        resetAudioCaptureProgress()
 
+        startRecordingTimer()
+
+        // 录音时始终禁止系统睡眠
+        setupSleepPrevention()
+        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
+
+        let deviceSelection =
+            AppSettings.shared.selectedDeviceID == "default" ? "系统默认" : "用户已选择"
+        LogManager.shared.info(
+            "录音已启动 | 会话ID: \(sessionID), 音源: \(currentAudioSource.displayName), 输入设备: \(deviceSelection), 格式: \(fileURL.pathExtension.uppercased())"
+        )
+    }
+
+    /// 开始和暂停恢复共用计时、磁盘检查及采集监测，避免两条路径行为分叉。
+    func startRecordingTimer() {
+        recordingTimer?.invalidate()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self, let startDate = self.currentSegmentStartTime else { return }
             self.recordingDuration = self.accumulatedDuration + Date().timeIntervalSince(startDate)
@@ -564,7 +582,7 @@ extension AudioRecorderManager {
 
             // 【录音中断检测】设备切换后 AVAudioEngine 可能仍显示 running，
             // 但录制 tap 已经不再产出音频帧。用帧数增长检测这种“假运行”。
-            if self.checkAudioCaptureProgress(currentTime: currentTime) {
+            if self.checkAudioCaptureProgress() {
                 return
             }
 
@@ -579,58 +597,41 @@ extension AudioRecorderManager {
                 // 的输入路由，蓝牙麦克风场景下可能因此停止后续音频产帧。
                 let sampleRate = self.recordingInputSampleRate ?? self.recordingFormat.sampleRate
                 let channelCount = self.recordingInputChannelCount ?? self.recordingFormat.channelCount
-                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 硬件格式: \(sampleRate)Hz/\(channelCount)ch")
+                let systemAudioFrames = self.capturedSystemAudioFrameCount.withLock { $0 }
+                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 系统声音帧数: \(systemAudioFrames), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 硬件格式: \(sampleRate)Hz/\(channelCount)ch")
             }
         }
 
         RunLoop.main.add(timer, forMode: .common)
         recordingTimer = timer
+    }
 
-        // 录音时始终禁止系统睡眠
-        setupSleepPrevention()
-        NotificationCenter.default.post(name: .recordingStateChanged, object: nil)
-
-        let deviceSelection =
-            AppSettings.shared.selectedDeviceID == "default" ? "系统默认" : "用户已选择"
-        LogManager.shared.info(
-            "录音已启动 | 会话ID: \(sessionID), 音源: \(currentAudioSource.displayName), 输入设备: \(deviceSelection), 格式: \(fileURL.pathExtension.uppercased())"
+    func resetAudioCaptureProgress() {
+        captureProgressMonitor.reset(
+            renderedFrames: framesCounter.withLock { $0 },
+            microphoneFrames: microphoneCaptureSession == nil
+                ? nil : capturedMicrophoneFrameCount.withLock { $0 },
+            systemAudioFrames: currentAudioSource == .microphone
+                ? nil : capturedSystemAudioFrameCount.withLock { $0 },
+            now: ProcessInfo.processInfo.systemUptime
         )
     }
 
-    /// 检查录音 tap 是否还在持续产出帧。
-    /// 返回 true 表示已触发中断处理，调用方应停止后续计时器逻辑。
-    func checkAudioCaptureProgress(currentTime: TimeInterval) -> Bool {
-        guard recordingState == .recording else {
-            return false
-        }
+    /// 独立输入或系统声音断流时 SourceNode 仍输出静音，必须分别检查各路输入帧，不能只看混音帧。
+    func checkAudioCaptureProgress() -> Bool {
+        guard recordingState == .recording else { return false }
+        guard let source = captureProgressMonitor.stalledSource(
+            renderedFrames: framesCounter.withLock { $0 },
+            microphoneFrames: microphoneCaptureSession == nil
+                ? nil : capturedMicrophoneFrameCount.withLock { $0 },
+            systemAudioFrames: currentAudioSource == .microphone
+                ? nil : capturedSystemAudioFrameCount.withLock { $0 },
+            now: ProcessInfo.processInfo.systemUptime
+        ) else { return false }
 
-        let framesWritten = framesCounter.withLock { $0 }
-        if framesWritten > lastObservedFrameCount {
-            lastObservedFrameCount = framesWritten
-            audioStallBeganAt = nil
-            return false
-        }
-
-        guard recordingDuration >= audioStallGracePeriod else {
-            return false
-        }
-
-        if audioStallBeganAt == nil {
-            audioStallBeganAt = currentTime
-            LogManager.shared.warning(
-                "录音采集暂无新增帧，开始观察 | 已写入帧数: \(framesWritten)")
-            return false
-        }
-
-        guard let stallBeganAt = audioStallBeganAt,
-            currentTime - stallBeganAt >= audioStallTimeout
-        else {
-            return false
-        }
-
-        LogManager.shared.error(
-            "录音采集疑似卡死 | \(String(format: "%.1f", audioStallTimeout))s 内无新增音频帧, 已写入帧数: \(framesWritten)")
-        handleRecordingInterruption(reason: .audioCaptureStalled)
+        LogManager.shared.error("录音采集疑似卡死 | \(source.rawValue) 8 秒内无新增帧")
+        handleRecordingInterruption(
+            reason: source == .systemAudio ? .systemAudioCaptureStalled : .audioCaptureStalled)
         return true
     }
 

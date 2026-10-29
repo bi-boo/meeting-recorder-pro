@@ -1,5 +1,51 @@
 import Foundation
 
+/// 在主线程管理所有并行输出任务。退出必须等到最后一个任务结束。
+final class RecordingOutputFinalizer {
+    private var pendingCount = 0
+    private var completions: [() -> Void] = []
+    var onPendingChanged: ((Bool) -> Void)?
+    var isPending: Bool { pendingCount > 0 }
+
+    func begin() {
+        pendingCount += 1
+        if pendingCount == 1 { onPendingChanged?(true) }
+    }
+
+    @discardableResult
+    func finish() -> Bool {
+        guard pendingCount > 0 else { return false }
+        pendingCount -= 1
+        guard pendingCount == 0 else { return true }
+        let waiting = completions
+        completions.removeAll()
+        onPendingChanged?(false)
+        // 状态观察者可能同步登记新任务；重新经过等待门禁，不能提前通知退出。
+        waiting.forEach { wait(completion: $0) }
+        return true
+    }
+
+    func wait(completion: @escaping () -> Void) {
+        if isPending {
+            completions.append(completion)
+        } else {
+            completion()
+        }
+    }
+}
+
+/// 异常中断后的自动续录节奏：先给设备路由留出稳定时间，再逐次拉长间隔。
+/// 时长上限到达属于用户设定的正常停止，不走这条路径。
+enum RecordingAutomaticRestartPolicy {
+    static let delays: [TimeInterval] = [2, 5, 10]
+
+    /// 第 attempt 次（从 1 开始）尝试前应等待的秒数；超过次数上限返回 nil。
+    static func delay(forAttempt attempt: Int) -> TimeInterval? {
+        guard attempt >= 1, attempt <= delays.count else { return nil }
+        return delays[attempt - 1]
+    }
+}
+
 enum RecordingPermissionPolicy {
     static func requiresMicrophonePermission(isSystemAudioOnly: Bool) -> Bool {
         !isSystemAudioOnly

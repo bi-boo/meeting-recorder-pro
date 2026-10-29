@@ -20,7 +20,7 @@ private enum TimerRecordingStartResult {
 private final class KeychainTimerTaskAuthorizationStore: TimerTaskAuthorizationStore {
     private let service = "com.meetingrecorderpro.app.timer-task-authorization.v1"
 
-    func authorizationDigest(for taskID: UUID) -> Data? {
+    func authorizationDigest(for taskID: UUID) -> TimerTaskAuthorizationLookup {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -32,16 +32,18 @@ private final class KeychainTimerTaskAuthorizationStore: TimerTaskAuthorizationS
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess else {
-            if status != errSecItemNotFound {
-                LogManager.shared.warning(
-                    "读取定时任务授权失败 | ID: \(taskID) | 错误码: \(status)"
-                )
-            }
-            return nil
+        switch status {
+        case errSecSuccess:
+            guard let digest = result as? Data else { return .notFound }
+            return .found(digest)
+        case errSecItemNotFound:
+            return .notFound
+        default:
+            LogManager.shared.warning(
+                "读取定时任务授权失败 | ID: \(taskID) | 错误码: \(status)"
+            )
+            return .unavailable(status: status)
         }
-
-        return result as? Data
     }
 
     func setAuthorizationDigest(_ digest: Data, for taskID: UUID) -> Bool {
@@ -119,6 +121,17 @@ class TimerTaskManager: ObservableObject {
     )
     private var reminderController: ReminderWindowController?
 
+    /// 授权记录与保存的计划不一致而被暂停的自动录音任务；用户在应用内重新启用后清除。
+    @Published private(set) var tasksNeedingReauthorization: Set<UUID> = []
+    private var pendingReauthorizationNoticeCount = 0
+
+    // 自动录音启动失败后在补录期内的重试计时，按计划去重。
+    private var autoStartRetryWorkItems: [TimerTaskOccurrence: DispatchWorkItem] = [:]
+
+    private var autoStartLateGrace: TimeInterval {
+        Double(AppSettings.shared.timerAutoStartLateGraceMinutes) * 60
+    }
+
 #if QA_AUTOMATION
     private var qaAutomaticRecordingAuthorizationDigests: [UUID: Data] = [:]
 #endif
@@ -136,10 +149,15 @@ class TimerTaskManager: ObservableObject {
 
     private func clearTriggeredOccurrences(for taskID: UUID) {
         triggeredTaskOccurrences = triggeredTaskOccurrences.filter { $0.taskID != taskID }
+        for (occurrence, workItem) in autoStartRetryWorkItems where occurrence.taskID == taskID {
+            workItem.cancel()
+            autoStartRetryWorkItems.removeValue(forKey: occurrence)
+        }
     }
 
     private func clearTriggeredOccurrence(_ occurrence: TimerTaskOccurrence) {
         triggeredTaskOccurrences.remove(occurrence)
+        autoStartRetryWorkItems.removeValue(forKey: occurrence)?.cancel()
     }
 
     private func isCurrentOccurrence(_ occurrence: TimerTaskOccurrence) -> Bool {
@@ -147,19 +165,19 @@ class TimerTaskManager: ObservableObject {
         return TimerTaskOccurrence(task: task) == occurrence
     }
 
-    private func isAuthorizedForAutomaticRecording(_ task: TimerTask) -> Bool {
+    private func automaticRecordingAuthorizationState(_ task: TimerTask) -> TimerTaskAuthorizationState {
 #if QA_AUTOMATION
         if QAAutomationRunner.isActive,
             let expectedDigest = TimerTaskAuthorizationDigest.make(for: task),
             qaAutomaticRecordingAuthorizationDigests[task.id] == expectedDigest
         {
-            return true
+            return .authorized
         }
 #endif
-        return taskAuthorization.isAuthorizedForAutomaticRecording(task)
+        return taskAuthorization.authorizationState(for: task)
     }
 
-    /// 以失败关闭方式处理缺少授权或持久化数据被改写的自动录音任务。
+    /// 授权记录与保存的计划不一致时按失败关闭处理：暂停任务、撤销旧记录，并提示用户重新确认。
     private func disableUnauthorizedAutomaticRecordingTask(id: UUID, reason: String) {
         guard let index = tasks.firstIndex(where: { $0.id == id }),
             tasks[index].actionType == .autoStart
@@ -173,41 +191,22 @@ class TimerTaskManager: ObservableObject {
         updatedTasks[index].updatedAt = Date()
         tasks = updatedTasks
         clearTriggeredOccurrences(for: id)
+        _ = taskAuthorization.revokeAuthorization(for: id)
+        tasksNeedingReauthorization.insert(id)
         saveTasks()
 
         LogManager.shared.warning(
-            "已停用未获授权的自动录音任务 | ID: \(id) | 原因: \(reason)"
+            "已暂停未获授权的自动录音任务，等待用户重新确认 | ID: \(id) | 原因: \(reason)"
         )
+        showReauthorizationNotice(count: 1)
     }
 
-    private func synchronizeAuthorizationOrDisable(
-        _ taskList: inout [TimerTask],
-        at index: Int,
-        context: String
-    ) {
-        guard taskList[index].actionType == .autoStart else { return }
-#if QA_AUTOMATION
-        if QAAutomationRunner.isActive,
-            qaAutomaticRecordingAuthorizationDigests[taskList[index].id] != nil
-        {
-            guard let digest = TimerTaskAuthorizationDigest.make(for: taskList[index]) else {
-                taskList[index].enabled = false
-                taskList[index].nextTriggerTime = nil
-                return
-            }
-            qaAutomaticRecordingAuthorizationDigests[taskList[index].id] = digest
-            return
+    private func showReauthorizationNotice(count: Int) {
+        guard count > 0 else { return }
+        if reminderController == nil {
+            reminderController = ReminderWindowController()
         }
-#endif
-        guard taskAuthorization.synchronizeAutomaticRecordingState(taskList[index]) else {
-            taskList[index].enabled = false
-            taskList[index].nextTriggerTime = nil
-            taskList[index].updatedAt = Date()
-            LogManager.shared.warning(
-                "定时任务授权同步失败，已停用自动录音 | ID: \(taskList[index].id) | 场景: \(context)"
-            )
-            return
-        }
+        reminderController?.showTimerTasksNeedReauthorizationNotification(count: count)
     }
 
     // MARK: - 初始化
@@ -277,6 +276,7 @@ class TimerTaskManager: ObservableObject {
         var updatedTasks = tasks
         updatedTasks[index] = updatedTask
         tasks = updatedTasks
+        tasksNeedingReauthorization.remove(task.id)
         saveTasks()
 
         // 移除触发记录，允许重新触发
@@ -310,6 +310,7 @@ class TimerTaskManager: ObservableObject {
         }
         tasks = tasks.filter { $0.id != id }
         clearTriggeredOccurrences(for: id)
+        tasksNeedingReauthorization.remove(id)
         saveTasks()
 
         LogManager.shared.info("删除定时任务 | ID: \(id)")
@@ -344,6 +345,7 @@ class TimerTaskManager: ObservableObject {
             return
         }
         tasks = updatedTasks
+        tasksNeedingReauthorization.remove(id)
         saveTasks()
 
         LogManager.shared.info("切换任务状态 | ID: \(id) | 启用: \(updatedTasks[index].enabled)")
@@ -386,6 +388,11 @@ class TimerTaskManager: ObservableObject {
         updateSleepPreventionState()
 
         LogManager.shared.info("定时任务调度器已启动（精准触发模式）")
+
+        // 启动时发现的授权不一致在这里提示，init 阶段窗口还不能显示。
+        let noticeCount = pendingReauthorizationNoticeCount
+        pendingReauthorizationNoticeCount = 0
+        showReauthorizationNotice(count: noticeCount)
     }
 
     /// 停止调度器
@@ -407,8 +414,10 @@ class TimerTaskManager: ObservableObject {
         updateSleepPreventionState()
 
         // 如果某个任务已经进入触发窗口，立即检查，避免因为睡眠/启动延迟漏触发。
+        let lateGrace = autoStartLateGrace
         let hasDueTask = tasks.contains { task in
-            task.enabled && !isTriggered(task) && task.shouldTriggerReminder(at: now)
+            task.enabled && !isTriggered(task)
+                && task.shouldTriggerReminder(at: now, autoStartLateGrace: lateGrace)
         }
 
         if hasDueTask {
@@ -482,6 +491,7 @@ class TimerTaskManager: ObservableObject {
     /// 检查并触发提醒或自动录音
     func checkAndTriggerReminders() {
         let now = Date()
+        let lateGrace = autoStartLateGrace
 
         for index in tasks.indices {
             let task = tasks[index]
@@ -489,13 +499,13 @@ class TimerTaskManager: ObservableObject {
             // 跳过已禁用或本轮已触发的任务
             guard task.enabled,
                 !isTriggered(task),
-                task.shouldTriggerReminder(at: now)
+                task.shouldTriggerReminder(at: now, autoStartLateGrace: lateGrace)
             else {
                 continue
             }
 
             if task.actionType == .autoStart,
-                !isAuthorizedForAutomaticRecording(task)
+                automaticRecordingAuthorizationState(task) == .unauthorized
             {
                 disableUnauthorizedAutomaticRecordingTask(
                     id: task.id,
@@ -537,14 +547,27 @@ class TimerTaskManager: ObservableObject {
             scheduleNextTrigger()
             return
         }
-        guard let currentTask = tasks.first(where: { $0.id == occurrence.taskID }),
-            isAuthorizedForAutomaticRecording(currentTask)
-        else {
+        guard let currentTask = tasks.first(where: { $0.id == occurrence.taskID }) else {
+            clearTriggeredOccurrence(occurrence)
+            scheduleNextTrigger()
+            return
+        }
+        switch automaticRecordingAuthorizationState(currentTask) {
+        case .authorized:
+            break
+        case .unauthorized:
             disableUnauthorizedAutomaticRecordingTask(
                 id: occurrence.taskID,
                 reason: "录音启动前授权校验失败"
             )
             scheduleNextTrigger()
+            return
+        case .unavailable(let status):
+            // Keychain 暂时读不到不等于篡改：不停用任务，按启动失败在补录期内重试。
+            handleAutoStartFailure(
+                occurrence: occurrence,
+                reason: "无法读取自动录音授权记录（错误码 \(status)）"
+            )
             return
         }
         let startResult = startRecordingForTimerTask(taskID: task.id, taskDisplay: task.timeDisplay)
@@ -561,7 +584,7 @@ class TimerTaskManager: ObservableObject {
             markTaskAsTriggered(taskID: occurrence.taskID)
             scheduleNextTrigger()
         case .rejected:
-            markAutoStartTaskAsMissed(
+            handleAutoStartFailure(
                 occurrence: occurrence,
                 reason: "录音启动请求被拒绝"
             )
@@ -578,6 +601,11 @@ class TimerTaskManager: ObservableObject {
         if recorderManager.recordingState == .starting {
             LogManager.shared.info("录音启动仍在处理中，继续等待 | 任务: \(taskDisplay)")
             return .requested
+        }
+
+        if recorderManager.recordingState == .stopping {
+            LogManager.shared.info("上一段录音正在保存，稍后重试定时启动 | 任务: \(taskDisplay)")
+            return .rejected
         }
 
         if recorderManager.isRecording {
@@ -618,7 +646,13 @@ class TimerTaskManager: ObservableObject {
             ) {
             case .confirmed:
                 _ = self.markTaskAsTriggered(taskID: occurrence.taskID)
-                self.showAutoStartNotification(for: task)
+                let lateSeconds = Date().timeIntervalSince(occurrence.scheduledTime)
+                let lateMinutes = lateSeconds >= 60 ? Int(lateSeconds / 60) : 0
+                if lateMinutes > 0 {
+                    LogManager.shared.warning(
+                        "自动录音迟到开始 | ID: \(task.id) | 迟到: \(lateMinutes) 分钟")
+                }
+                self.showAutoStartNotification(for: task, lateMinutes: lateMinutes)
                 self.scheduleNextTrigger()
             case .wait:
                 self.confirmAutoStartRecording(
@@ -627,7 +661,7 @@ class TimerTaskManager: ObservableObject {
                     remainingAttempts: remainingAttempts - 1
                 )
             case .failed:
-                self.markAutoStartTaskAsMissed(
+                self.handleAutoStartFailure(
                     occurrence: occurrence,
                     reason: "等待录音进入 recording 超时"
                 )
@@ -646,7 +680,8 @@ class TimerTaskManager: ObservableObject {
         }
     }
 
-    private func markAutoStartTaskAsMissed(
+    /// 自动录音启动失败：补录期内每隔固定间隔重试；补录期结束才推进到下一次并提示用户。
+    private func handleAutoStartFailure(
         occurrence: TimerTaskOccurrence,
         reason: String
     ) {
@@ -657,10 +692,25 @@ class TimerTaskManager: ObservableObject {
             return
         }
 
-        if let task = markTaskAsTriggered(taskID: occurrence.taskID) {
+        let retryAt = Date().addingTimeInterval(TimerTaskTriggerWindowPolicy.autoStartRetryInterval)
+        let windowEnd = occurrence.scheduledTime.addingTimeInterval(autoStartLateGrace)
+        if retryAt < windowEnd {
             LogManager.shared.warning(
-                "自动录音未能启动，本次计划已跳过并推进到下一次 | ID: \(task.id) | 原因: \(reason)"
+                "自动录音未能启动，\(Int(TimerTaskTriggerWindowPolicy.autoStartRetryInterval)) 秒后重试 | ID: \(occurrence.taskID) | 原因: \(reason)"
             )
+            scheduleAutoStartRetry(occurrence: occurrence)
+            return
+        }
+
+        if let task = markTaskAsTriggered(taskID: occurrence.taskID) {
+            LogManager.shared.error(
+                "自动录音在补录期内始终未能启动，本次计划已跳过并推进到下一次 | ID: \(task.id) | 原因: \(reason)"
+            )
+            if reminderController == nil {
+                reminderController = ReminderWindowController()
+            }
+            reminderController?.showRecordingStartFailedNotification(
+                message: "定时计划 \(task.timeDisplay) 的自动录音未能开始，本次已跳过。原因：\(reason)")
         } else {
             clearTriggeredOccurrence(occurrence)
             LogManager.shared.warning(
@@ -670,13 +720,33 @@ class TimerTaskManager: ObservableObject {
         scheduleNextTrigger()
     }
 
-    /// 显示自动录音通知（5秒后自动消失）
-    private func showAutoStartNotification(for task: TimerTask) {
+    private func scheduleAutoStartRetry(occurrence: TimerTaskOccurrence) {
+        autoStartRetryWorkItems[occurrence]?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.autoStartRetryWorkItems.removeValue(forKey: occurrence)
+            guard self.isCurrentOccurrence(occurrence),
+                let task = self.tasks.first(where: { $0.id == occurrence.taskID })
+            else {
+                self.clearTriggeredOccurrence(occurrence)
+                return
+            }
+            self.handleAutoStartRecording(task: task, occurrence: occurrence)
+        }
+        autoStartRetryWorkItems[occurrence] = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + TimerTaskTriggerWindowPolicy.autoStartRetryInterval,
+            execute: workItem
+        )
+    }
+
+    /// 显示自动录音通知（5秒后自动消失）；迟到补录时写明迟到了多久
+    private func showAutoStartNotification(for task: TimerTask, lateMinutes: Int) {
         if reminderController == nil {
             reminderController = ReminderWindowController()
         }
 
-        reminderController?.showAutoStartNotification(for: task)
+        reminderController?.showAutoStartNotification(for: task, lateMinutes: lateMinutes)
     }
 
     /// 显示提醒弹窗
@@ -783,11 +853,6 @@ class TimerTaskManager: ObservableObject {
 
         var updatedTasks = tasks
         updatedTasks[index].markAsTriggered()
-        synchronizeAuthorizationOrDisable(
-            &updatedTasks,
-            at: index,
-            context: "触发后推进计划"
-        )
         let updatedTask = updatedTasks[index]
         tasks = updatedTasks
         clearTriggeredOccurrences(for: taskID)
@@ -822,47 +887,57 @@ class TimerTaskManager: ObservableObject {
         do {
             let decoder = JSONDecoder()
             var loadedTasks = try decoder.decode([TimerTask].self, from: data)
-            var authorizedAutomaticTaskIDs: Set<UUID> = []
+            var needingReauthorization: Set<UUID> = []
             var disabledUnapprovedTaskCount = 0
+            var unavailableAuthorizationCount = 0
 
-            // 必须在重算派生时间前校验完整持久化状态，否则会把外部改写的
-            // nextTriggerTime 解释为应用自身的正常调度更新。
             for index in loadedTasks.indices {
-                guard loadedTasks[index].actionType == .autoStart,
-                    loadedTasks[index].enabled
-                else {
-                    continue
+                guard loadedTasks[index].actionType == .autoStart else { continue }
+
+                // 保存的触发时间和用户设定不一致，说明不是应用自己写的，重算而不是沿用。
+                if !loadedTasks[index].nextTriggerTimeMatchesSchedule() {
+                    LogManager.shared.warning(
+                        "自动录音任务的下次触发时间与计划不一致，已重算 | ID: \(loadedTasks[index].id)")
+                    loadedTasks[index].nextTriggerTime = nil
                 }
 
-                if taskAuthorization.isAuthorizedForAutomaticRecording(loadedTasks[index]) {
-                    authorizedAutomaticTaskIDs.insert(loadedTasks[index].id)
-                } else {
+                switch taskAuthorization.authorizationState(for: loadedTasks[index]) {
+                case .authorized:
+                    continue
+                case .unavailable:
+                    // Keychain 读取失败不是篡改，保留任务；触发时会再次校验。
+                    unavailableAuthorizationCount += 1
+                case .unauthorized:
+                    guard loadedTasks[index].enabled else {
+                        // 应用内停用的任务仍有授权记录；没有记录的停用任务需要用户重新启用。
+                        needingReauthorization.insert(loadedTasks[index].id)
+                        continue
+                    }
                     loadedTasks[index].enabled = false
                     loadedTasks[index].nextTriggerTime = nil
                     loadedTasks[index].updatedAt = Date()
+                    _ = taskAuthorization.revokeAuthorization(for: loadedTasks[index].id)
+                    needingReauthorization.insert(loadedTasks[index].id)
                     disabledUnapprovedTaskCount += 1
                 }
             }
 
             refreshTaskSchedules(&loadedTasks, preservingDueTriggersAt: Date())
 
-            // 合法任务重算触发时间后，同步新的完整状态摘要。
-            for index in loadedTasks.indices
-            where authorizedAutomaticTaskIDs.contains(loadedTasks[index].id) {
-                synchronizeAuthorizationOrDisable(
-                    &loadedTasks,
-                    at: index,
-                    context: "启动时刷新计划"
-                )
-            }
-
             // 重新赋值整个数组，触发 @Published 响应式更新
             tasks = loadedTasks
+            tasksNeedingReauthorization = needingReauthorization
+            pendingReauthorizationNoticeCount = disabledUnapprovedTaskCount
 
             LogManager.shared.info("加载定时任务成功 | 数量: \(tasks.count)")
             if disabledUnapprovedTaskCount > 0 {
                 LogManager.shared.warning(
-                    "旧版或已变更的自动录音任务已停用 | 数量: \(disabledUnapprovedTaskCount) | 需在应用内重新启用"
+                    "授权记录与计划不一致的自动录音任务已暂停 | 数量: \(disabledUnapprovedTaskCount) | 需在应用内重新启用"
+                )
+            }
+            if unavailableAuthorizationCount > 0 {
+                LogManager.shared.warning(
+                    "启动时无法读取自动录音授权记录，任务保留，触发时重新校验 | 数量: \(unavailableAuthorizationCount)"
                 )
             }
 
@@ -893,10 +968,13 @@ class TimerTaskManager: ObservableObject {
         _ taskList: inout [TimerTask],
         preservingDueTriggersAt date: Date
     ) {
+        let lateGrace = autoStartLateGrace
         for index in taskList.indices {
             let oldTime = taskList[index].nextTriggerTime
 
-            if taskList[index].enabled, taskList[index].shouldTriggerReminder(at: date) {
+            if taskList[index].enabled,
+                taskList[index].shouldTriggerReminder(at: date, autoStartLateGrace: lateGrace)
+            {
                 LogManager.shared.info(
                     "保留待触发任务时间 | ID: \(taskList[index].id.uuidString.prefix(8)) | "
                         + "时间: \(oldTime?.description ?? "nil")"
@@ -951,13 +1029,6 @@ class TimerTaskManager: ObservableObject {
         // 使用临时数组更新后重新赋值，触发 @Published 通知
         var updatedTasks = tasks
         refreshTaskSchedules(&updatedTasks, preservingDueTriggersAt: Date())
-        for index in updatedTasks.indices {
-            synchronizeAuthorizationOrDisable(
-                &updatedTasks,
-                at: index,
-                context: "系统时间变化"
-            )
-        }
         tasks = updatedTasks
 
         saveTasks()
@@ -971,13 +1042,6 @@ class TimerTaskManager: ObservableObject {
         // 使用临时数组更新后重新赋值，触发 @Published 通知
         var updatedTasks = tasks
         refreshTaskSchedules(&updatedTasks, preservingDueTriggersAt: Date())
-        for index in updatedTasks.indices {
-            synchronizeAuthorizationOrDisable(
-                &updatedTasks,
-                at: index,
-                context: "系统唤醒"
-            )
-        }
         tasks = updatedTasks
 
         saveTasks()

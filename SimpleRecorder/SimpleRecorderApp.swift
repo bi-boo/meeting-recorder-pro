@@ -193,6 +193,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // 中断后等待自动续录的计时不能在退出过程中开启新录音。
+        recordingManager.cancelPendingAutomaticRestart()
+
         if recordingManager.isFinalizingOutput {
             LogManager.shared.info("应用退出 | 正在等待录音文件收尾...")
             TimerTaskManager.shared.stopScheduler()

@@ -192,6 +192,20 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(timerReminderMinutes, forKey: "timerReminderMinutes") }
     }
 
+    /// 自动录音在计划时间之后仍允许迟到补录的分钟数（1-30）
+    @Published var timerAutoStartLateGraceMinutes: Int {
+        didSet {
+            let clamped = TimerTaskTriggerWindowPolicy.clampedAutoStartLateGraceMinutes(
+                timerAutoStartLateGraceMinutes)
+            if clamped != timerAutoStartLateGraceMinutes {
+                timerAutoStartLateGraceMinutes = clamped
+                return
+            }
+            UserDefaults.standard.set(clamped, forKey: "timerAutoStartLateGraceMinutes")
+            NotificationCenter.default.post(name: .scheduleSettingsChanged, object: nil)
+        }
+    }
+
     // MARK: - 睡眠控制设置
     @Published var preventSleepDuringRecording: Bool {
         didSet {
@@ -365,6 +379,10 @@ class AppSettings: ObservableObject {
         }
         self.timerReminderMinutes =
             UserDefaults.standard.object(forKey: "timerReminderMinutes") as? Int ?? 2  // 默认2分钟
+        self.timerAutoStartLateGraceMinutes =
+            TimerTaskTriggerWindowPolicy.clampedAutoStartLateGraceMinutes(
+                UserDefaults.standard.object(forKey: "timerAutoStartLateGraceMinutes") as? Int
+                    ?? TimerTaskTriggerWindowPolicy.defaultAutoStartLateGraceMinutes)
 
         // 加载睡眠控制设置
         self.preventSleepDuringRecording =

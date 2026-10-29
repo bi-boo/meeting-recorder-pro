@@ -119,6 +119,17 @@ if SwitchAudioSource -a -t input | grep -Fxq "LarkAudioDevice" \
   SwitchAudioSource -s LarkAudioDevice -t input >/dev/null
   SwitchAudioSource -s LarkAudioDevice -t output >/dev/null
   SwitchAudioSource -s LarkAudioDevice -t system >/dev/null || true
+  sleep 1
+  # 切换命令返回成功不代表系统真的切了；部分 macOS 版本会静默忽略默认设备变更。
+  # 回读不一致时必须停止，否则麦克风段会从别的设备录音，结果会被误读成应用问题。
+  ACTUAL_INPUT="$(SwitchAudioSource -c -t input 2>/dev/null || true)"
+  ACTUAL_OUTPUT="$(SwitchAudioSource -c -t output 2>/dev/null || true)"
+  if [[ "$ACTUAL_INPUT" != "LarkAudioDevice" || "$ACTUAL_OUTPUT" != "LarkAudioDevice" ]]; then
+    echo "默认音频设备切换未生效：输入=${ACTUAL_INPUT:-unknown}，输出=${ACTUAL_OUTPUT:-unknown}。" >&2
+    echo "本机无法把麦克风测试源送入默认输入，可听 QA 的麦克风结果不可信，已停止。" >&2
+    echo "可改用 QA_AUDIBLE_USE_LARK=false 并接入真实麦克风后重跑。" >&2
+    exit 2
+  fi
   ROUTE_NOTE="默认输入/输出临时切到 LarkAudioDevice，用虚拟设备把麦克风测试源送入默认输入"
 fi
 

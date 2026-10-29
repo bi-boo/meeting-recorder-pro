@@ -223,7 +223,6 @@ extension AudioRecorderManager {
         recordingDeviceName = nil
         recordingInputSampleRate = nil
         recordingInputChannelCount = nil
-        audioStallBeganAt = nil
         activeInputDeviceID = nil
         activeInputDeviceName = nil
         expectedDefaultInputDeviceID = nil

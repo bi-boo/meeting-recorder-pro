@@ -182,12 +182,98 @@ final class TimerTaskTests: XCTestCase {
             repeatType: .daily,
             actionType: .autoStart
         )
-        task.nextTriggerTime = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertTrue(controller.authorizeUserChange(from: nil, to: task))
 
-        task.nextTriggerTime = Date(timeIntervalSince1970: 1_000_060)
+        task.hour = 10
 
         XCTAssertFalse(controller.isAuthorizedForAutomaticRecording(task))
+    }
+
+    func testSchedulerMaintainedFieldsDoNotAffectAuthorization() {
+        let store = InMemoryTimerTaskAuthorizationStore()
+        let controller = TimerTaskAuthorizationController(store: store)
+        var task = TimerTask(hour: 9, minute: 30, repeatType: .daily, actionType: .autoStart)
+        XCTAssertTrue(controller.authorizeUserChange(from: nil, to: task))
+
+        // 触发推进、唤醒重算只改这些字段，不能让已授权的任务失效。
+        task.nextTriggerTime = Date(timeIntervalSince1970: 1_000_060)
+        task.lastTriggerTime = Date(timeIntervalSince1970: 999_000)
+        task.updatedAt = Date(timeIntervalSince1970: 1_000_000)
+
+        XCTAssertEqual(controller.authorizationState(for: task), .authorized)
+        XCTAssertEqual(store.setCallCount, 1)
+    }
+
+    func testTamperedNextTriggerTimeDoesNotMatchSchedule() throws {
+        var task = TimerTask(daysOfWeek: [1, 3], hour: 9, minute: 30, repeatType: .weekly, actionType: .autoStart)
+        let calendar = Calendar(identifier: .gregorian)
+
+        // 2026-10-26 是周一 09:30，与计划一致
+        var components = DateComponents(year: 2026, month: 10, day: 26, hour: 9, minute: 30)
+        task.nextTriggerTime = try XCTUnwrap(calendar.date(from: components))
+        XCTAssertTrue(task.nextTriggerTimeMatchesSchedule(calendar: calendar))
+
+        // 时间被改成 09:31
+        components.minute = 31
+        task.nextTriggerTime = try XCTUnwrap(calendar.date(from: components))
+        XCTAssertFalse(task.nextTriggerTimeMatchesSchedule(calendar: calendar))
+
+        // 周二 09:30 不在所选星期内
+        components = DateComponents(year: 2026, month: 10, day: 27, hour: 9, minute: 30)
+        task.nextTriggerTime = try XCTUnwrap(calendar.date(from: components))
+        XCTAssertFalse(task.nextTriggerTimeMatchesSchedule(calendar: calendar))
+
+        task.nextTriggerTime = nil
+        XCTAssertTrue(task.nextTriggerTimeMatchesSchedule(calendar: calendar))
+    }
+
+    func testKeychainUnavailableIsDistinctFromUnauthorized() {
+        let store = InMemoryTimerTaskAuthorizationStore()
+        let controller = TimerTaskAuthorizationController(store: store)
+        let task = TimerTask(actionType: .autoStart)
+        XCTAssertTrue(controller.authorizeUserChange(from: nil, to: task))
+
+        store.lookupFailureStatus = -25_308
+        XCTAssertEqual(controller.authorizationState(for: task), .unavailable(status: -25_308))
+        XCTAssertFalse(controller.isAuthorizedForAutomaticRecording(task))
+
+        store.lookupFailureStatus = nil
+        XCTAssertEqual(controller.authorizationState(for: task), .authorized)
+    }
+
+    func testAutoStartTriggersWithinLateGraceButReminderKeepsOneMinuteWindow() {
+        let scheduled = Date(timeIntervalSince1970: 1_000_000)
+
+        var autoStartTask = TimerTask(repeatType: .daily, actionType: .autoStart)
+        autoStartTask.nextTriggerTime = scheduled
+        XCTAssertTrue(autoStartTask.shouldTriggerReminder(at: scheduled.addingTimeInterval(5 * 60), autoStartLateGrace: 600))
+        XCTAssertTrue(autoStartTask.shouldTriggerReminder(at: scheduled.addingTimeInterval(599), autoStartLateGrace: 600))
+        XCTAssertFalse(autoStartTask.shouldTriggerReminder(at: scheduled.addingTimeInterval(600), autoStartLateGrace: 600))
+        XCTAssertFalse(autoStartTask.shouldTriggerReminder(at: scheduled.addingTimeInterval(-1), autoStartLateGrace: 600))
+
+        var reminderTask = TimerTask(repeatType: .daily, actionType: .remind, reminderMinutes: 2)
+        reminderTask.nextTriggerTime = scheduled
+        XCTAssertTrue(reminderTask.shouldTriggerReminder(at: scheduled.addingTimeInterval(59), autoStartLateGrace: 600))
+        XCTAssertFalse(reminderTask.shouldTriggerReminder(at: scheduled.addingTimeInterval(60), autoStartLateGrace: 600))
+    }
+
+    func testLateAutoStartDoesNotRetriggerAfterItWasHandled() {
+        let scheduled = Date(timeIntervalSince1970: 1_000_000)
+        var task = TimerTask(repeatType: .daily, actionType: .autoStart)
+        task.nextTriggerTime = scheduled
+        task.lastTriggerTime = scheduled.addingTimeInterval(5 * 60)
+
+        XCTAssertFalse(task.shouldTriggerReminder(at: scheduled.addingTimeInterval(6 * 60), autoStartLateGrace: 600))
+
+        // 昨天触发过的任务今天仍然要触发
+        task.lastTriggerTime = scheduled.addingTimeInterval(-24 * 60 * 60)
+        XCTAssertTrue(task.shouldTriggerReminder(at: scheduled.addingTimeInterval(60), autoStartLateGrace: 600))
+    }
+
+    func testLateGraceMinutesAreClamped() {
+        XCTAssertEqual(TimerTaskTriggerWindowPolicy.clampedAutoStartLateGraceMinutes(0), 1)
+        XCTAssertEqual(TimerTaskTriggerWindowPolicy.clampedAutoStartLateGraceMinutes(10), 10)
+        XCTAssertEqual(TimerTaskTriggerWindowPolicy.clampedAutoStartLateGraceMinutes(99), 30)
     }
 
     func testChangingPersistedAutomaticRecordingEnabledStateInvalidatesAuthorization() {
@@ -249,11 +335,16 @@ private final class InMemoryTimerTaskAuthorizationStore: TimerTaskAuthorizationS
     private var digests: [UUID: Data] = [:]
     var shouldFailSet = false
     var shouldFailRemoval = false
+    var lookupFailureStatus: Int32?
     private(set) var setCallCount = 0
     private(set) var removeCallCount = 0
 
-    func authorizationDigest(for taskID: UUID) -> Data? {
-        digests[taskID]
+    func authorizationDigest(for taskID: UUID) -> TimerTaskAuthorizationLookup {
+        if let lookupFailureStatus {
+            return .unavailable(status: lookupFailureStatus)
+        }
+        guard let digest = digests[taskID] else { return .notFound }
+        return .found(digest)
     }
 
     func setAuthorizationDigest(_ digest: Data, for taskID: UUID) -> Bool {

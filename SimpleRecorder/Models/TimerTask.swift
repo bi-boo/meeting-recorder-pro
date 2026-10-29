@@ -97,6 +97,20 @@ struct TimerTaskSleepPreventionPolicy {
     }
 }
 
+/// 触发窗口：提醒任务保留 1 分钟缓冲；自动录音允许在计划时间后的补录期内迟到开始，
+/// 避免系统睡眠或应用未运行超过 1 分钟就直接跳到下一次。
+enum TimerTaskTriggerWindowPolicy {
+    static let reminderGrace: TimeInterval = 60
+    static let defaultAutoStartLateGraceMinutes = 10
+    static let minimumAutoStartLateGraceMinutes = 1
+    static let maximumAutoStartLateGraceMinutes = 30
+    static let autoStartRetryInterval: TimeInterval = 15
+
+    static func clampedAutoStartLateGraceMinutes(_ minutes: Int) -> Int {
+        min(max(minutes, minimumAutoStartLateGraceMinutes), maximumAutoStartLateGraceMinutes)
+    }
+}
+
 struct TimerReminderPresentationPolicy {
     static func timeout(for task: TimerTask, at date: Date = Date()) -> TimeInterval {
         let configuredTimeout = Double(task.reminderMinutes) * 60
@@ -362,47 +376,95 @@ struct TimerTask: Identifiable, Codable, Equatable {
     }
 
     /// 检查是否应该触发（根据任务自己的定时类型和提醒时间）
-    func shouldTriggerReminder(at date: Date = Date()) -> Bool {
+    /// - Parameter autoStartLateGrace: 自动录音在计划时间之后仍允许补录的秒数
+    func shouldTriggerReminder(
+        at date: Date = Date(),
+        autoStartLateGrace: TimeInterval = Double(
+            TimerTaskTriggerWindowPolicy.defaultAutoStartLateGraceMinutes) * 60
+    ) -> Bool {
         guard enabled, let next = nextTriggerTime else { return false }
 
         let leadTimeMinutes = actionType == .remind ? reminderMinutes : 0
 
         // 计算触发检查时间
         let triggerCheckTime = next.addingTimeInterval(-Double(leadTimeMinutes) * 60)
+        let windowEnd = next.addingTimeInterval(
+            actionType == .autoStart
+                ? autoStartLateGrace : TimerTaskTriggerWindowPolicy.reminderGrace)
 
-        // 检查当前时间是否在触发窗口内（触发检查时间 到 触发时间+1分钟）
-        // 给一个1分钟的缓冲窗口防止错过
-        let windowEnd = next.addingTimeInterval(60)
+        guard date >= triggerCheckTime && date < windowEnd else { return false }
 
-        if date >= triggerCheckTime && date < windowEnd {
-            // 检查是否已经在本周期触发过
-            if let last = lastTriggerTime {
-                // 如果上次触发时间与本次触发时间差距小于触发窗口，说明已触发
-                return abs(last.timeIntervalSince(next)) > Double(leadTimeMinutes + 1) * 60
-            }
-            return true
+        // 上次触发落在本次计划的窗口内，说明本次已经处理过（含迟到补录）。
+        if let last = lastTriggerTime, last >= triggerCheckTime {
+            return false
         }
+        return true
+    }
 
-        return false
+    /// 持久化的下次触发时间必须和用户设定的时间、星期一致；
+    /// 外部改写 UserDefaults 把时间挪到当前时刻时，启动时会重算而不是直接触发。
+    func nextTriggerTimeMatchesSchedule(calendar: Calendar = .current) -> Bool {
+        guard let next = nextTriggerTime else { return true }
+        let components = calendar.dateComponents([.hour, .minute, .weekday], from: next)
+        guard components.hour == hour, components.minute == minute else { return false }
+        guard repeatType == .weekly, let weekday = components.weekday else { return true }
+        let adjustedWeekday = weekday == 1 ? 7 : weekday - 1
+        return daysOfWeek.contains(adjustedWeekday)
     }
 }
 
 // MARK: - 自动录音任务授权
 
-/// 授权覆盖整条任务，包括调度器维护的触发时间。
-/// 任何绕过应用内 CRUD 的持久化修改都会使授权失效。
+/// 授权只覆盖用户在应用内设定的字段。调度器维护的 nextTriggerTime、lastTriggerTime
+/// 和 updatedAt 不进入摘要，所以触发、唤醒和时间变化都不需要重写 Keychain，
+/// 也不会因为两份持久化状态错开而误判为篡改。绕过应用改写时间、星期、动作或启用状态仍会使授权失效。
 enum TimerTaskAuthorizationDigest {
+    private struct AuthorizedFields: Encodable {
+        let id: UUID
+        let enabled: Bool
+        let daysOfWeek: [Int]
+        let hour: Int
+        let minute: Int
+        let repeatType: RepeatType
+        let actionType: TimerActionType
+        let reminderMinutes: Int
+    }
+
     static func make(for task: TimerTask) -> Data? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
 
-        guard let encodedTask = try? encoder.encode(task) else { return nil }
-        return Data(SHA256.hash(data: encodedTask))
+        let fields = AuthorizedFields(
+            id: task.id,
+            enabled: task.enabled,
+            daysOfWeek: task.daysOfWeek,
+            hour: task.hour,
+            minute: task.minute,
+            repeatType: task.repeatType,
+            actionType: task.actionType,
+            reminderMinutes: task.reminderMinutes
+        )
+        guard let encodedFields = try? encoder.encode(fields) else { return nil }
+        return Data(SHA256.hash(data: encodedFields))
     }
 }
 
+/// 读取授权记录的结果。读取失败（Keychain 暂时不可用）和没有记录必须区分：
+/// 前者不能当作篡改去停用任务。
+enum TimerTaskAuthorizationLookup: Equatable {
+    case found(Data)
+    case notFound
+    case unavailable(status: Int32)
+}
+
+enum TimerTaskAuthorizationState: Equatable {
+    case authorized
+    case unauthorized
+    case unavailable(status: Int32)
+}
+
 protocol TimerTaskAuthorizationStore: AnyObject {
-    func authorizationDigest(for taskID: UUID) -> Data?
+    func authorizationDigest(for taskID: UUID) -> TimerTaskAuthorizationLookup
     func setAuthorizationDigest(_ digest: Data, for taskID: UUID) -> Bool
     func removeAuthorization(for taskID: UUID) -> Bool
 }
@@ -414,15 +476,25 @@ struct TimerTaskAuthorizationController {
         self.store = store
     }
 
-    func isAuthorizedForAutomaticRecording(_ task: TimerTask) -> Bool {
+    func authorizationState(for task: TimerTask) -> TimerTaskAuthorizationState {
         guard task.actionType == .autoStart,
-            let expectedDigest = TimerTaskAuthorizationDigest.make(for: task),
-            let storedDigest = store.authorizationDigest(for: task.id)
+            let expectedDigest = TimerTaskAuthorizationDigest.make(for: task)
         else {
-            return false
+            return .unauthorized
         }
 
-        return storedDigest == expectedDigest
+        switch store.authorizationDigest(for: task.id) {
+        case .found(let storedDigest):
+            return storedDigest == expectedDigest ? .authorized : .unauthorized
+        case .notFound:
+            return .unauthorized
+        case .unavailable(let status):
+            return .unavailable(status: status)
+        }
+    }
+
+    func isAuthorizedForAutomaticRecording(_ task: TimerTask) -> Bool {
+        authorizationState(for: task) == .authorized
     }
 
     /// 用户在应用内新增、编辑或启停任务时同步授权边界。
@@ -437,7 +509,7 @@ struct TimerTaskAuthorizationController {
         return true
     }
 
-    /// 只有应用内的调度器状态更新可调用此方法。
+    /// 只在应用内的用户操作后写入授权记录。
     func synchronizeAutomaticRecordingState(_ task: TimerTask) -> Bool {
         guard task.actionType == .autoStart else { return false }
         guard let digest = TimerTaskAuthorizationDigest.make(for: task) else {

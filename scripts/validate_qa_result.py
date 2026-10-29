@@ -70,6 +70,8 @@ def main() -> None:
         expected.append("4.3 system-audio")
     if args.expect_mixed_audio:
         expected.append("4.4 mixed-audio")
+    if args.expect_system_audio:
+        expected.append("7.5 interruption-autorestart")
     if args.expect_timer:
         expected.append("6.2 timer-auto-start")
     expected.append("manual-remainder")
