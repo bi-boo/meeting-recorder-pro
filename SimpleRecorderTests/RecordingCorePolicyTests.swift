@@ -17,6 +17,41 @@ final class RecordingCorePolicyTests: XCTestCase {
         )
     }
 
+    func testInputThatIsNotSystemDefaultAlwaysUsesIndependentCapture() {
+        // 手动选择或替代的麦克风不是系统默认输入，不论输出是什么设备都独立采集，
+        // 应用不再通过修改系统默认输入来让 AVAudioEngine 采到它。
+        for transport in [nil, kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeUSB,
+                          kAudioDeviceTransportTypeBluetooth] as [UInt32?] {
+            XCTAssertTrue(
+                RecordingInputRoutePolicy.requiresIndependentCapture(
+                    outputTransportType: transport,
+                    inputFollowsSystemDefault: false
+                )
+            )
+        }
+    }
+
+    func testSystemDefaultInputUsesEngineUnlessOutputIsWireless() {
+        XCTAssertFalse(
+            RecordingInputRoutePolicy.requiresIndependentCapture(
+                outputTransportType: kAudioDeviceTransportTypeBuiltIn,
+                inputFollowsSystemDefault: true
+            )
+        )
+        XCTAssertFalse(
+            RecordingInputRoutePolicy.requiresIndependentCapture(
+                outputTransportType: nil,
+                inputFollowsSystemDefault: true
+            )
+        )
+        XCTAssertTrue(
+            RecordingInputRoutePolicy.requiresIndependentCapture(
+                outputTransportType: kAudioDeviceTransportTypeBluetooth,
+                inputFollowsSystemDefault: true
+            )
+        )
+    }
+
     func testWiredOrUnknownOutputsKeepStandardMicrophoneCapture() {
         XCTAssertFalse(
             RecordingInputRoutePolicy.requiresIndependentCapture(

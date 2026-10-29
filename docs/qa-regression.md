@@ -24,7 +24,7 @@ scripts/run_full_qa.sh
 - 生成本轮 `qa-runs/YYYYMMDD-HHMMSS/` 目录。
 - 执行 `./build_dmg.sh`，构建不含自动化入口的公开 Release 包。
 - 单独构建定义 `QA_AUTOMATION` 的本机 QA App，只有该构建接受 `--qa-scenario`。
-- 自动覆盖设置回读、麦克风录音、暂停继续、连续录音、系统声音、混合音源、中断自动续录和定时自动录音。
+- 自动覆盖设置回读、麦克风录音、暂停继续、连续录音、手动选择麦克风、系统声音、混合音源、中断自动续录和定时自动录音。
 - 运行 `scripts/qa_artifact_check.sh` 校验 DMG、签名，并强制确认录音可解码、时长达标且非静音。
 - 输出 `qa-result.json`、`report.md`、构建日志、应用 stdout/stderr 和包校验日志。
 

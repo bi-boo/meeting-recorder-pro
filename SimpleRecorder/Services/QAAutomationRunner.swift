@@ -96,6 +96,10 @@ final class QAAutomationRunner {
                     )
                 )
 
+                report.steps.append(
+                    await runExplicitMicrophoneStep(duration: max(2.0, scenario.recordDuration / 2))
+                )
+
                 if scenario.includeMP3 {
                     report.steps.append(
                         await runMP3OutputStep(duration: max(2.0, scenario.recordDuration / 2))
@@ -304,6 +308,91 @@ final class QAAutomationRunner {
             message: passed ? "录音已生成有效文件" : "未发现达到有效阈值的录音文件",
             details: currentRecorderDetails(source: source).merging(
                 ["minimumFileBytes": "\(minimumBytes)"], uniquingKeysWith: { _, new in new }),
+            recordings: recordings
+        )
+    }
+
+    /// 手动选择麦克风：录音必须走独立采集链路，且不改动系统默认输入。
+    /// 选当前默认设备对应的物理麦克风，音量条件与其他麦克风场景一致；
+    /// 默认输入不是可采集的物理设备时，改选第一个物理麦克风。
+    @MainActor
+    private func runExplicitMicrophoneStep(duration: TimeInterval) async -> QAStepResult {
+        let name = "4.6 microphone-explicit-device"
+        let startedAt = Date()
+        let recorder = AudioRecorderManager.shared
+        let settings = AppSettings.shared
+
+        settings.refreshInputDevices()
+        let physicalDevices = settings.availableInputDevices.filter { $0.id != "default" }
+        let defaultBefore = recorder.currentDefaultInputDeviceInfo()?.id
+        guard
+            let device = physicalDevices.first(where: { $0.id == defaultBefore })
+                ?? physicalDevices.first
+        else {
+            return failedStep(name: name, startedAt: startedAt, message: "没有可手动选择的物理麦克风")
+        }
+
+        let originalSelection = settings.selectedDeviceID
+        defer { settings.selectedDeviceID = originalSelection }
+        settings.selectedDeviceID = device.id
+        settings.audioSource = .microphone
+        settings.outputFormat = .m4a
+        settings.openFolderAfterRecording = false
+
+        let before = audioFiles()
+        guard recorder.startRecording() else {
+            return failedStep(name: name, startedAt: startedAt, message: "录音启动 API 返回失败")
+        }
+        guard await waitForState(.recording, timeout: 12.0) else {
+            await stopCurrentRecording()
+            return failedStep(
+                name: name,
+                startedAt: startedAt,
+                message: "手动选择麦克风后录音未进入 recording 状态",
+                details: ["deviceID": device.id]
+            )
+        }
+        let usedIndependentCapture = recorder.microphoneCaptureSession != nil
+
+        await sleep(seconds: duration)
+        await stopCurrentRecording()
+        let defaultAfter = recorder.currentDefaultInputDeviceInfo()?.id
+
+        let recordings = newRecordings(since: before)
+        let minimumBytes = minimumRecordingBytes(for: .microphone)
+        let fileIsValid = recordings.contains {
+            $0.isValid(
+                minimumBytes: minimumBytes,
+                minimumDuration: minimumRecordingDuration(expected: duration)
+            )
+        }
+        let defaultUnchanged = defaultAfter == defaultBefore
+        let passed = fileIsValid && usedIndependentCapture && defaultUnchanged
+
+        let message: String
+        if passed {
+            message = "手动选择的麦克风经独立采集录音成功，系统默认输入未被修改"
+        } else if !usedIndependentCapture {
+            message = "手动选择麦克风时没有走独立采集链路"
+        } else if !defaultUnchanged {
+            message = "录音修改了系统默认输入设备"
+        } else {
+            message = "手动选择麦克风后未生成有效文件"
+        }
+        return QAStepResult(
+            name: name,
+            status: passed ? .passed : .failed,
+            startedAt: startedAt,
+            finishedAt: Date(),
+            message: message,
+            details: [
+                "deviceID": device.id,
+                "deviceName": device.name,
+                "usedIndependentCapture": "\(usedIndependentCapture)",
+                "defaultInputBefore": defaultBefore ?? "nil",
+                "defaultInputAfter": defaultAfter ?? "nil",
+                "minimumFileBytes": "\(minimumBytes)",
+            ],
             recordings: recordings
         )
     }

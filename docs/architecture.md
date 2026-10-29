@@ -37,7 +37,9 @@
 - **零合并恢复**：崩溃后文件本身就是合法的 MP4 流，直接读取即可
 
 ### H3 多音频源架构（macOS 13.0+）
-- **麦克风采集**：通过 `AVAudioEngine.inputNode` 采集硬件输入
+- **麦克风采集**：选择“系统默认”且默认输入可采集时，通过 `AVAudioEngine.inputNode` 采集；手动选择的麦克风、系统默认不可采集时的替代麦克风，以及蓝牙或 AirPlay 输出场景，改用独立的 `AVCaptureSession` 直接采集指定设备，再经 `AVAudioSourceNode` 接入混音器
+- **不修改系统默认输入**：录音从不改写用户的系统默认输入设备。macOS 27 上设置默认输入会返回成功但不生效，旧做法会让手动选择的麦克风启动失败
+- **独立采集诊断**：渲染线程取不到足够麦克风帧时补静音，补静音帧数写入每 30 秒的进度日志和结束录音日志，用于判断采集时钟抖动
 - **系统音频采集**：使用 `ScreenCaptureKit` 的 `SCStream` 采集系统音频输出
 - **混音处理**：通过 `AVAudioMixerNode` 将麦克风和系统音频混合
 - **无监听设计**：独立 `recordingMixer` 节点不连接输出，杜绝回声
@@ -94,7 +96,7 @@
 - **存储路径**：支持安全书签（Security-Scoped Bookmark）持久化路径权限
 - **录音上限**：小时 + 分钟组合设置（5 分钟到 9 小时 55 分钟）
 - **音频源**：三种模式（microphone / systemAudio / both）
-- **输入设备**：通过 `AVCaptureDevice.DiscoverySession` 枚举可用麦克风
+- **输入设备**：通过 `AVCaptureDevice.DiscoverySession` 枚举可用麦克风；手动选择的设备在录音中固定不变，不随系统默认输入切换，设备拔出时按中断处理并自动续录
 - **输出格式**：默认 M4A；支持录音结束后异步转为 MP3
 - **录音后动作**：自动打开 Finder 定位文件开关
 - **图标样式**：支持 `microphone` / `circle_dot` / `waveform` 三种样式切换

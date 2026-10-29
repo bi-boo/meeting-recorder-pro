@@ -49,12 +49,10 @@ extension AudioRecorderManager {
         startupGeneration: Int,
         reuseSystemAudioCapture: Bool = false
     ) async throws {
-        // 1. AirPods 等蓝牙输出与外接麦克风并用时，使用独立采集链路，
-        // 避免 AVAudioEngine 的隐式聚合设备返回静音帧。
+        // 1. 手动选择的麦克风、替代麦克风或蓝牙输出时，使用独立采集链路；
+        // 其余情况由 AVAudioEngine 输入节点采集系统默认输入。
+        resolveRecordingInputDevice()
         let useIndependentMicrophoneCapture = shouldUseIndependentMicrophoneCapture()
-        if !useIndependentMicrophoneCapture {
-            try updateInputDevice()
-        }
         setupRecordingMixer()
 
         // 2. 混合录制：开启弹性缓冲以对齐异构时钟

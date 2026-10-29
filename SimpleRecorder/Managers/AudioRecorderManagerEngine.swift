@@ -311,7 +311,7 @@ extension AudioRecorderManager {
                 })
             else { return false }
 
-            if AppSettings.shared.selectedDeviceID == "default" {
+            if activeInputFollowsSystemDefault {
                 return currentDefaultInputDeviceInfo()?.id == activeInputDeviceID
             }
             return true
@@ -466,7 +466,6 @@ extension AudioRecorderManager {
         recordingInputChannelCount = nil
         activeInputDeviceID = nil
         activeInputDeviceName = nil
-        expectedDefaultInputDeviceID = nil
         resetRecordingStartupStabilityState()
         engineConfigurationRecoveryAttempts = 0
         try? FileManager.default.removeItem(at: fileURL)
@@ -497,6 +496,7 @@ extension AudioRecorderManager {
         setAcceptingAudioBuffers(true)
         recordingDuration = 0
         framesCounter.withLock { $0 = 0 }
+        microphoneUnderrunFrameCount.withLock { $0 = 0 }
         systemAudioBufferHeadIndex = 0
         systemAudioBufferReadOffset = 0
         // 初始缓冲状态：仅在混合模式下默认开启以平滑时钟，仅系统音频模式下将由 setup 逻辑显式关闭
@@ -598,7 +598,8 @@ extension AudioRecorderManager {
                 let sampleRate = self.recordingInputSampleRate ?? self.recordingFormat.sampleRate
                 let channelCount = self.recordingInputChannelCount ?? self.recordingFormat.channelCount
                 let systemAudioFrames = self.capturedSystemAudioFrameCount.withLock { $0 }
-                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 系统声音帧数: \(systemAudioFrames), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 硬件格式: \(sampleRate)Hz/\(channelCount)ch")
+                let microphoneUnderrunFrames = self.microphoneUnderrunFrameCount.withLock { $0 }
+                LogManager.shared.debug("录音进度 | 时长: \(durationStr)s, 已写入帧数: \(framesWritten), 系统声音帧数: \(systemAudioFrames), 独立麦克风补静音帧数: \(microphoneUnderrunFrames), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 硬件格式: \(sampleRate)Hz/\(channelCount)ch")
             }
         }
 
@@ -696,6 +697,7 @@ extension AudioRecorderManager {
 
     // MARK: - 仅麦克风录音配置
     func setupMicrophoneOnlyRecording() throws {
+        resolveRecordingInputDevice()
         if shouldUseIndependentMicrophoneCapture() {
             setupRecordingMixer()
             try setupIndependentMicrophoneCapture(toBus: 0)
@@ -703,10 +705,7 @@ extension AudioRecorderManager {
             return
         }
 
-        // 1. 设置硬件输入设备（如果选择了特定设备）
-        try updateInputDevice()
-
-        // 2. 获取输入节点的输出格式。对 2 声道 USB/蓝牙麦克风，后续交给 mixer 转为统一录制格式。
+        // 跟随系统默认输入：获取输入节点的输出格式。对 2 声道 USB/蓝牙麦克风，后续交给 mixer 转为统一录制格式。
         let inputNode = audioEngine.inputNode
         let micFormat = inputNode.outputFormat(forBus: 0)
         guard micFormat.sampleRate > 0, micFormat.channelCount > 0 else {
@@ -725,11 +724,10 @@ extension AudioRecorderManager {
         installRecordingTap()
     }
 
-    // MARK: - 蓝牙输出下的独立麦克风采集
+    // MARK: - 独立麦克风采集（手动选择的麦克风、替代麦克风、蓝牙输出）
 
+    /// 需在 resolveRecordingInputDevice() 之后调用。
     func setupIndependentMicrophoneCapture(toBus bus: AVAudioNodeBus) throws {
-        try updateInputDevice(changeSystemDefault: false)
-
         guard let targetID = activeInputDeviceID,
             targetID != "default"
         else {
@@ -812,7 +810,7 @@ extension AudioRecorderManager {
 
         captureRecordingStartupInputConfiguration(recordingFormat)
         LogManager.shared.info(
-            "已启用与蓝牙输出解耦的麦克风采集 | 名称: \(device.localizedName), ID: \(targetID)")
+            "已启用独立麦克风采集 | 名称: \(device.localizedName), ID: \(targetID), 跟随系统默认: \(activeInputFollowsSystemDefault)")
     }
 
     func stopIndependentMicrophoneCapture() {
@@ -994,6 +992,9 @@ extension AudioRecorderManager {
                 microphoneAudioBufferReadOffset = 0
             }
         }
+        if framesCopied < frameCount {
+            microphoneUnderrunFrameCount.withLock { $0 += Int64(frameCount - framesCopied) }
+        }
         return noErr
     }
 
@@ -1110,9 +1111,6 @@ extension AudioRecorderManager {
         systemAudioBufferHeadIndex = 0
         systemAudioBufferReadOffset = 0
         systemAudioQueueLock.unlock()
-
-        // 6. 清理设备激活会话（用于 iPhone 连续互通等设备）
-        stopDeviceActivationSession()
 
         LogManager.shared.debug("音频采集资源已清理 | 清空缓冲队列: \(queueCount) 帧")
     }

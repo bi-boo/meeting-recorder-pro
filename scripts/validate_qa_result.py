@@ -63,6 +63,7 @@ def main() -> None:
         "4.1 microphone-basic",
         "4.2 microphone-pause-resume",
         "4.5 microphone-second-pass",
+        "4.6 microphone-explicit-device",
     ]
     if args.expect_mp3:
         expected.append("5.2 output-format-mp3")

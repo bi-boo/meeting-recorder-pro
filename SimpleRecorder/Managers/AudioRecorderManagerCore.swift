@@ -145,14 +145,11 @@ class AudioRecorderManager: NSObject, ObservableObject {
     let systemAudioSampleQueue = DispatchQueue(
         label: "com.meetingrecorderpro.systemAudioSampleQueue", qos: .userInitiated)
 
-    // 【新增】麦克风设备激活相关（用于激活 iPhone 连续互通设备）
-    var deviceActivationSession: AVCaptureSession?
-    var deviceActivationInput: AVCaptureDeviceInput?
-
-    // 蓝牙输出与外接麦克风并用时，AVAudioEngine 会让 Core Audio 创建隐式聚合设备，
-    // 部分组合（例如 AirPods 输出 + USB 麦克风输入）会持续产出静音帧。
-    // 这条独立的 AVCaptureSession 输入链路只负责采集麦克风，再通过 SourceNode
-    // 接入现有混音器，从而不让蓝牙输出参与麦克风设备协商。
+    // 独立的 AVCaptureSession 输入链路直接从指定麦克风采集，再通过 SourceNode 接入混音器。
+    // 两种情况使用它：
+    // 1. 手动选择的麦克风或替代麦克风：AVAudioEngine 只能从系统默认输入取音，
+    //    而应用不修改系统默认输入（macOS 27 上设置默认输入返回成功但不生效）。
+    // 2. 蓝牙输出与外接麦克风并用：AVAudioEngine 的隐式聚合设备在部分组合下持续产出静音帧。
     var microphoneCaptureSession: AVCaptureSession?
     var microphoneCaptureInput: AVCaptureDeviceInput?
     var microphoneCaptureOutput: AVCaptureAudioDataOutput?
@@ -165,6 +162,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
         label: "com.meetingrecorderpro.microphoneSampleQueue", qos: .userInitiated)
     let microphoneCaptureGeneration = OSAllocatedUnfairLock<Int>(initialState: 0)
     let capturedMicrophoneFrameCount = OSAllocatedUnfairLock<Int64>(initialState: 0)
+    // 渲染线程从独立采集队列取不到足够帧时补静音的帧数，用于诊断采集时钟抖动。
+    let microphoneUnderrunFrameCount = OSAllocatedUnfairLock<Int64>(initialState: 0)
 
     var microphoneAudioBufferQueue = [AVAudioPCMBuffer]()
     var microphoneAudioBufferHeadIndex = 0
@@ -236,9 +235,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
     var recordingDeviceName: String?  // 录音开始时使用的设备名称
     var activeInputDeviceID: String?
     var activeInputDeviceName: String?
+    // 本次录音的输入设备是否就是当前系统默认输入；为 false 时设备固定，不随系统默认变化。
+    var activeInputFollowsSystemDefault = true
     var recordingInputSampleRate: Double?
     var recordingInputChannelCount: AVAudioChannelCount?
-    var expectedDefaultInputDeviceID: String?
     var engineConfigurationEvaluationWorkItem: DispatchWorkItem?
     var engineConfigurationEvaluationGeneration = 0
     var engineConfigurationRecoveryAttempts = 0
@@ -579,8 +579,9 @@ class AudioRecorderManager: NSObject, ObservableObject {
         let finalDuration = recordingDuration
         let finalFrames = framesCounter.withLock { $0 }
         let stats = frameDropStatsSnapshot()
+        let microphoneUnderrunFrames = microphoneUnderrunFrameCount.withLock { $0 }
         LogManager.shared.info(
-            "正在结束录音 | 已录制时长: \(String(format: "%.1f", finalDuration))s, 总帧数: \(finalFrames), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate))")
+            "正在结束录音 | 已录制时长: \(String(format: "%.1f", finalDuration))s, 总帧数: \(finalFrames), 丢帧: \(stats.dropped)/\(stats.total) (\(stats.rate)), 独立麦克风补静音帧数: \(microphoneUnderrunFrames)")
         recordingTimer?.invalidate()
         recordingTimer = nil
 
@@ -614,7 +615,6 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     self.recordingInputChannelCount = nil
                     self.activeInputDeviceID = nil
                     self.activeInputDeviceName = nil
-                    self.expectedDefaultInputDeviceID = nil
                     self.engineConfigurationEvaluationWorkItem?.cancel()
                     self.engineConfigurationEvaluationWorkItem = nil
                     self.engineConfigurationEvaluationGeneration += 1
@@ -845,7 +845,6 @@ class AudioRecorderManager: NSObject, ObservableObject {
             recordingInputChannelCount = nil
             activeInputDeviceID = nil
             activeInputDeviceName = nil
-            expectedDefaultInputDeviceID = nil
             resetRecordingStartupStabilityState()
             clearRecordingState()
             releaseSleepPrevention()
@@ -914,7 +913,6 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     self.recordingInputChannelCount = nil
                     self.activeInputDeviceID = nil
                     self.activeInputDeviceName = nil
-                    self.expectedDefaultInputDeviceID = nil
                     self.engineConfigurationEvaluationWorkItem?.cancel()
                     self.engineConfigurationEvaluationWorkItem = nil
                     self.engineConfigurationEvaluationGeneration += 1
