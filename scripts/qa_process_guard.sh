@@ -7,9 +7,8 @@ QA_BUNDLE_ID="com.meetingrecorderpro.app"
 
 qa_process_executable() {
   local pid="$1"
-  /usr/sbin/lsof -a -p "$pid" -d txt -Fn 2>/dev/null \
-    | sed -n 's/^n//p' \
-    | head -n 1
+  # ps 输出原始路径；lsof -F 会把中文路径转义成 \xNN，导致与期望路径比较失败。
+  ps -p "$pid" -o comm= 2>/dev/null | head -n 1
 }
 
 qa_running_pids() {

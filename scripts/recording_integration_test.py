@@ -159,9 +159,30 @@ def defaults_synchronize(domain: str) -> None:
     run(["defaults", "synchronize", domain], check=False)
 
 
+_INACCESSIBLE_PREFERENCE_STORES: set[Path] = set()
+
+
+def preference_store_is_accessible(path: Path) -> bool:
+    # The legacy sandbox container is protected by TCC. The current app is not
+    # sandboxed and only reads ~/Library/Preferences, so a store this process
+    # cannot open is left untouched instead of aborting the whole run.
+    try:
+        if path.exists():
+            with path.open("rb"):
+                pass
+        else:
+            path.parent.exists() and list(path.parent.iterdir())
+        return True
+    except PermissionError:
+        if path not in _INACCESSIBLE_PREFERENCE_STORES:
+            _INACCESSIBLE_PREFERENCE_STORES.add(path)
+            print(f"Skipping protected preference store: {path}", flush=True)
+        return False
+
+
 def preference_plist_paths(domain: str) -> list[Path]:
     home = Path.home()
-    return [
+    candidates = [
         home / "Library" / "Preferences" / f"{domain}.plist",
         home
         / "Library"
@@ -172,6 +193,7 @@ def preference_plist_paths(domain: str) -> list[Path]:
         / "Preferences"
         / f"{domain}.plist",
     ]
+    return [path for path in candidates if preference_store_is_accessible(path)]
 
 
 def read_plist(path: Path) -> dict:

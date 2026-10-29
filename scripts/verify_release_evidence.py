@@ -190,7 +190,7 @@ def main() -> None:
             input_restarts = [
                 name
                 for name in planned_cases
-                if name.startswith("input_switch_restart/")
+                if name.startswith(("input_switch_autorestart/", "input_switch_restart/"))
             ]
             if not input_switches or not input_restarts:
                 errors.append(
